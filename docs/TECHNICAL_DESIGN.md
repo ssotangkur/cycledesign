@@ -500,56 +500,41 @@ workspace/
 
 ---
 
-### 5. Database Schema
+### 5. Database
 
 **Location:** `apps/server/src/database/`
 
-```sql
--- Component usage index
-CREATE TABLE component_usage (
-  id TEXT PRIMARY KEY,
-  component_name TEXT NOT NULL,
-  design_file TEXT NOT NULL,
-  instance_id TEXT NOT NULL,
-  created_at INTEGER DEFAULT (strftime('%s', 'now')),
-  updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-);
+**Requirements:**
 
-CREATE INDEX idx_component_name ON component_usage(component_name);
-CREATE INDEX idx_design_file ON component_usage(design_file);
+- SQLite database for component usage index and audit data
+- Database is a generated artifact (not versioned, stored in `.gitignore`)
+- Rebuilt from source code on app startup or when git HEAD changes
+- Parse time acceptable for MVP; optimization in later phases
 
--- Design system metadata
-CREATE TABLE design_system_versions (
-  id TEXT PRIMARY KEY,
-  git_commit TEXT NOT NULL,
-  created_at INTEGER DEFAULT (strftime('%s', 'now'))
-);
+**Data to Store:**
+
+- Component usage index: maps component names to design files and instance IDs
+- Instance metadata: ID, file path, component type, location in file
+- Design system version tracking (optional, for Phase 6)
+
+**Rebuild Process (pseudo code):**
+
+```
+FOR each design file in workspace/designs/:
+  READ file contents
+  PARSE code to extract component instances
+  FOR each component instance:
+    EXTRACT component name, instance ID, file location
+    STORE in component_usage index
+
+COMMIT all entries in single transaction
 ```
 
-**Rebuild Process:**
-```typescript
-async function rebuildDatabaseIndex() {
-  const designs = await glob('workspace/designs/*.tsx');
-  
-  await db.transaction(async () => {
-    await db.run('DELETE FROM component_usage');
-    
-    for (const file of designs) {
-      const code = await fs.readFile(file, 'utf-8');
-      const { index } = await injectIds(code);
-      
-      for (const [componentName, instances] of Object.entries(index)) {
-        for (const instance of instances) {
-          await db.run(
-            'INSERT INTO component_usage (component_name, design_file, instance_id) VALUES (?, ?, ?)',
-            [componentName, file, instance.instanceId]
-          );
-        }
-      }
-    }
-  });
-}
-```
+**Query Requirements:**
+
+- Get all designs using a specific component (for compatibility validation)
+- Get all instances of a component with their file locations (for audit mode)
+- Get instance metadata by ID (for property editor)
 
 ---
 
