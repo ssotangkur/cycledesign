@@ -14,6 +14,7 @@ export interface SessionState {
     completionTokens: number;
     totalTokens: number;
   } | null;
+  sessionLabelsMap: Record<string, string>;
 }
 
 export interface SessionContextType extends SessionState {
@@ -22,7 +23,6 @@ export interface SessionContextType extends SessionState {
   loadSessions: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
-  renameSession: (id: string, name: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -41,12 +41,17 @@ export function SessionProvider({ children }: SessionProviderProps) {
     isStreaming: false,
     error: null,
     tokenUsage: null,
+    sessionLabelsMap: {},
   });
 
   const loadSessions = useCallback(async () => {
     try {
       const sessions = await api.getSessions();
-      setState((prev) => ({ ...prev, sessions }));
+      const labelsMap: Record<string, string> = {};
+      sessions.forEach((session) => {
+        labelsMap[session.id] = session.firstMessage || session.id.slice(-8);
+      });
+      setState((prev) => ({ ...prev, sessions, sessionLabelsMap: labelsMap }));
     } catch (error) {
       console.error('Failed to load sessions:', error);
     }
@@ -56,12 +61,14 @@ export function SessionProvider({ children }: SessionProviderProps) {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
       const session = await api.createSession(name);
+      const label = session.firstMessage || session.id.slice(-8);
       setState((prev) => ({
         ...prev,
         currentSession: session,
         sessions: [...prev.sessions, session],
         messages: [],
         isLoading: false,
+        sessionLabelsMap: { ...prev.sessionLabelsMap, [session.id]: label },
       }));
       return session;
     } catch (error) {
@@ -112,6 +119,18 @@ export function SessionProvider({ children }: SessionProviderProps) {
     try {
       // Save user message to backend
       await api.addMessage(state.currentSession.id, userMessage);
+
+      // Update session label if this is the first message
+      const isFirstMessage = state.messages.length === 0;
+      if (isFirstMessage) {
+        setState((prev) => ({
+          ...prev,
+          sessionLabelsMap: {
+            ...prev.sessionLabelsMap,
+            [state.currentSession.id]: content,
+          },
+        }));
+      }
 
       // Use functional update to get latest messages
       setState((prev) => {
@@ -177,37 +196,25 @@ export function SessionProvider({ children }: SessionProviderProps) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
       setState((prev) => ({ ...prev, error: errorMessage, isStreaming: false }));
     }
-  }, [state.currentSession]);
+  }, [state.currentSession, state.messages.length]);
 
   const deleteSession = useCallback(async (id: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
       await api.deleteSession(id);
-      setState((prev) => ({
-        ...prev,
-        sessions: prev.sessions.filter((s) => s.id !== id),
-        currentSession: prev.currentSession?.id === id ? null : prev.currentSession,
-        messages: prev.currentSession?.id === id ? [] : prev.messages,
-        isLoading: false,
-      }));
+      setState((prev) => {
+        const { [id]: _, ...remainingLabels } = prev.sessionLabelsMap;
+        return {
+          ...prev,
+          sessions: prev.sessions.filter((s) => s.id !== id),
+          currentSession: prev.currentSession?.id === id ? null : prev.currentSession,
+          messages: prev.currentSession?.id === id ? [] : prev.messages,
+          sessionLabelsMap: remainingLabels,
+          isLoading: false,
+        };
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to delete session';
-      setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
-    }
-  }, []);
-
-  const renameSession = useCallback(async (id: string, name: string) => {
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
-    try {
-      const session = await api.renameSession(id, name);
-      setState((prev) => ({
-        ...prev,
-        sessions: prev.sessions.map((s) => (s.id === id ? session : s)),
-        currentSession: prev.currentSession?.id === id ? session : prev.currentSession,
-        isLoading: false,
-      }));
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to rename session';
       setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
     }
   }, []);
@@ -238,7 +245,6 @@ export function SessionProvider({ children }: SessionProviderProps) {
         loadSessions,
         sendMessage,
         deleteSession,
-        renameSession,
         clearError,
       }}
     >

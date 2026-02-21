@@ -57,3 +57,50 @@ powershell -Command "Get-Content tmp\dev.log -Tail 50"
 ```
 
 Or use `type tmp\dev.log` on Windows cmd.
+
+### Troubleshooting
+
+**If ports are in use:**
+1. Check what's using the port:
+   ```bash
+   netstat -ano | findstr :3000
+   netstat -ano | findstr :3001
+   ```
+2. Find the process:
+   ```bash
+   tasklist | findstr <PID>
+   ```
+3. Only kill specific Node processes related to dev servers (NOT opencode!)
+   ```bash
+   taskkill /F /PID <specific_pid>
+   ```
+
+**If servers crash with EADDRINUSE:**
+- Wait 5 seconds for ports to release, then restart
+- Or use different ports:
+  ```bash
+  $env:PORT=3002; npm run dev --workspace=@cycledesign/server
+  ```
+
+**⚠️ NEVER run `taskkill /F /IM node.exe`** - This kills opencode and all Node processes!
+
+**If frontend won't load:**
+1. Check backend is running: `http://localhost:3001/health`
+2. Check logs: `Get-Content tmp\dev.log -Tail 30`
+3. Look for "Server running on" messages
+
+**If HMR not working:**
+- Check component has default export
+- Restart dev server
+- Clear browser cache
+
+**Check logs before restarting:**
+```bash
+Get-Content tmp\dev.log -Tail 20
+```
+
+Look for:
+- ✅ `Server running on http://localhost:3001` (backend OK)
+- ✅ `Local: http://localhost:3000/` (frontend OK)
+- ❌ `EADDRINUSE` (port conflict)
+- ❌ `Error: listen` (server failed to start)

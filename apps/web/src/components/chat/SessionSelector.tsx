@@ -13,26 +13,17 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
 import { useSession } from '../../hooks/useSession';
 
 function SessionSelector() {
-  const { sessions, currentSession, loadSession, createSession, deleteSession, renameSession } =
+  const { sessions, currentSession, loadSession, createSession, deleteSession, sessionLabelsMap } =
     useSession();
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
-  const [newSessionName, setNewSessionName] = useState('');
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
-  const [sessionToRename, setSessionToRename] = useState<{ id: string; name: string } | null>(
-    null
-  );
 
   const handleCreateSession = async () => {
     try {
-      await createSession(newSessionName || undefined);
-      setCreateDialogOpen(false);
-      setNewSessionName('');
+      await createSession();
     } catch (error) {
       console.error('Failed to create session:', error);
     }
@@ -47,25 +38,6 @@ function SessionSelector() {
     } catch (error) {
       console.error('Failed to delete session:', error);
     }
-  };
-
-  const handleRenameSession = async () => {
-    if (!sessionToRename) return;
-    try {
-      await renameSession(sessionToRename.id, newSessionName);
-      setRenameDialogOpen(false);
-      setSessionToRename(null);
-      setNewSessionName('');
-    } catch (error) {
-      console.error('Failed to rename session:', error);
-    }
-  };
-
-  const openRenameDialog = (e: React.MouseEvent, session: { id: string; name: string }) => {
-    e.stopPropagation();
-    setSessionToRename(session);
-    setNewSessionName(session.name);
-    setRenameDialogOpen(true);
   };
 
   const openDeleteDialog = (e: React.MouseEvent, sessionId: string) => {
@@ -86,53 +58,22 @@ function SessionSelector() {
       >
         {sessions.map((session) => (
           <MenuItem key={session.id} value={session.id}>
-            {session.name}
+            {sessionLabelsMap[session.id] || session.id.slice(-8)}
           </MenuItem>
         ))}
       </TextField>
       <Tooltip title="New Session">
-        <IconButton onClick={() => setCreateDialogOpen(true)} color="primary">
+        <IconButton onClick={handleCreateSession} color="primary">
           <AddIcon />
         </IconButton>
       </Tooltip>
       {currentSession && (
-        <>
-          <Tooltip title="Rename">
-            <IconButton
-              onClick={(e) => openRenameDialog(e, { id: currentSession.id, name: currentSession.name })}
-            >
-              <EditIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete">
-            <IconButton onClick={(e) => openDeleteDialog(e, currentSession.id)} color="error">
-              <DeleteIcon />
-            </IconButton>
-          </Tooltip>
-        </>
+        <Tooltip title="Delete">
+          <IconButton onClick={(e) => openDeleteDialog(e, currentSession.id)} color="error">
+            <DeleteIcon />
+          </IconButton>
+        </Tooltip>
       )}
-
-      {/* Create Dialog */}
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)}>
-        <DialogTitle>Create New Session</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Session Name"
-            fullWidth
-            value={newSessionName}
-            onChange={(e) => setNewSessionName(e.target.value)}
-            placeholder="Optional"
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateSession} variant="contained">
-            Create
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* Delete Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
@@ -148,26 +89,6 @@ function SessionSelector() {
         </DialogActions>
       </Dialog>
 
-      {/* Rename Dialog */}
-      <Dialog open={renameDialogOpen} onClose={() => setRenameDialogOpen(false)}>
-        <DialogTitle>Rename Session</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Session Name"
-            fullWidth
-            value={newSessionName}
-            onChange={(e) => setNewSessionName(e.target.value)}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setRenameDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleRenameSession} variant="contained">
-            Rename
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

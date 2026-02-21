@@ -61,8 +61,33 @@ The `tmp/` folder is gitignored and used for temporary test artifacts.
 
 This keeps browser sessions clean and avoids accumulating unnecessary tabs.
 
+## React-Specific Testing Tips
+
+**Wait for updates:**
+- React state updates are async - always wait 2-3 seconds after actions
+- Use `chrome-devtools_wait_for` for specific text to appear
+- HMR may cause page reloads - wait for "page reload" in logs
+
+**Check for React errors:**
+```bash
+chrome-devtools_list_console_messages types=["error", "warn"]
+```
+
+**Common React issues:**
+- "prev is not defined" - check functional updates in setState
+- Stale closures - check dependency arrays in useCallback
+- HMR not working - check component exports (must be default export)
+- State not updating - verify setState is called with new values
+
+**Optimistic Updates:**
+CycleDesign uses optimistic UI updates. After user actions:
+1. UI should update immediately
+2. API call happens in background
+3. On error, UI rolls back + shows error message
+
 ## Notes
 
 - You are configured to use the vision-model for enhanced visual understanding of web pages
 - You have read-only access to the codebase (no file edits)
 - You can run bash commands if needed (e.g., to start servers)
+- For specialized UI testing, consider delegating to `@ui-tester` subagent
