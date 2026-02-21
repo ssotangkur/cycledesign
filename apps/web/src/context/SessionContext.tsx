@@ -149,69 +149,65 @@ export function SessionProvider({ children }: SessionProviderProps) {
         }));
       }
 
-      // Use functional update to get latest messages
-      setState((prev) => {
-        const messagesToSend = prev.messages.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          timestamp: m.timestamp,
-          toolCalls: m.toolCalls,
-          toolCallId: m.toolCallId,
-        }));
+      // Get messages to send (outside of setState callback)
+      const messagesToSend = state.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp,
+        toolCalls: m.toolCalls,
+        toolCallId: m.toolCallId,
+      }));
 
-        console.log('[sendMessage] Calling completeStream with', messagesToSend.length, 'messages');
-        let assistantContent = '';
-        
-        api.completeStream(
-          messagesToSend,
-          (chunk) => {
-            assistantContent += chunk;
-            setState((prev2) => ({
-              ...prev2,
-              messages: [
-                ...prev2.messages.filter((m) => m.id !== 'streaming'),
-                {
-                  id: 'streaming',
-                  role: 'assistant',
-                  content: assistantContent,
-                  timestamp: Date.now(),
-                },
-              ],
-            }));
-          },
-          (response) => {
-            console.log('[sendMessage] Stream complete, saving assistant message');
-            const assistantMessage: Message = {
-              id: `msg_${Date.now()}`,
-              role: 'assistant',
-              content: response.content,
-              timestamp: Date.now(),
-              toolCalls: response.toolCalls,
-              tokenCount: response.usage?.totalTokens,
-            };
+      console.log('[sendMessage] Calling completeStream with', messagesToSend.length, 'messages');
+      let assistantContent = '';
+      
+      api.completeStream(
+        messagesToSend,
+        (chunk) => {
+          assistantContent += chunk;
+          setState((prev2) => ({
+            ...prev2,
+            messages: [
+              ...prev2.messages.filter((m) => m.id !== 'streaming'),
+              {
+                id: 'streaming',
+                role: 'assistant',
+                content: assistantContent,
+                timestamp: Date.now(),
+              },
+            ],
+          }));
+        },
+        (response) => {
+          console.log('[sendMessage] Stream complete, saving assistant message');
+          const assistantMessage: Message = {
+            id: `msg_${Date.now()}`,
+            role: 'assistant',
+            content: response.content,
+            timestamp: Date.now(),
+            toolCalls: response.toolCalls,
+            tokenCount: response.usage?.totalTokens,
+          };
 
-            setState((prev2) => ({
-              ...prev2,
-              messages: [...prev2.messages.filter((m) => m.id !== 'streaming'), assistantMessage],
-              isStreaming: false,
-              tokenUsage: response.usage || null,
-            }));
+          setState((prev2) => ({
+            ...prev2,
+            messages: [...prev2.messages.filter((m) => m.id !== 'streaming'), assistantMessage],
+            isStreaming: false,
+            tokenUsage: response.usage || null,
+          }));
 
-            api.addMessage(state.currentSession!.id, assistantMessage).catch(console.error);
-          },
-          (error) => {
-            console.error('[sendMessage] Stream error:', error.message);
-            setState((prev2) => ({
-              ...prev2,
-              isStreaming: false,
-              error: error.message,
-            }));
-          }
-        );
-        
-        return prev;
-      });
+          api.addMessage(state.currentSession!.id, assistantMessage).catch(console.error);
+        },
+        (error) => {
+          console.error('[sendMessage] Stream error:', error.message);
+          setState((prev2) => ({
+            ...prev2,
+            isStreaming: false,
+            error: error.message,
+          }));
+        }
+      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
       setState((prev) => ({ ...prev, error: errorMessage, isStreaming: false }));
