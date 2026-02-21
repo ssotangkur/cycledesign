@@ -3,8 +3,20 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { sessionsRouter } from './routes/sessions';
 import { completionRouter } from './routes/completion';
+import https from 'https';
 
 dotenv.config();
+
+// Global fetch override to disable SSL verification for Qwen API
+const originalFetch = global.fetch;
+global.fetch = ((url: any, options: any) => {
+  const parsedUrl = new URL(url as string);
+  if (parsedUrl.hostname.includes('qwen.ai') || parsedUrl.hostname.includes('aliyuncs.com')) {
+    const agent = new https.Agent({ rejectUnauthorized: false });
+    (options as any).agent = agent;
+  }
+  return originalFetch(url, options);
+}) as typeof global.fetch;
 
 const app = express();
 const PORT = process.env.PORT || 3001;

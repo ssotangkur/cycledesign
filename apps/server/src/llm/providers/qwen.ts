@@ -3,7 +3,6 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { QwenAuth } from '../qwen-auth';
 import { requestQueue } from '../request-queue';
 import { RateLimitError, AuthError } from '../errors';
-import { console } from 'inspector';
 
 const qwenAuth = new QwenAuth();
 
@@ -47,21 +46,29 @@ export class QwenProvider {
           const model = await this.getModel();
 
           const customFetch: typeof fetch = async (url, init) => {
-            const headers = new Headers(init?.headers);
-            headers.set('User-Agent', 'CycleDesign/1.0.0');
-            
-            const response = await fetch(url as string, { 
-              ...init, 
-              headers,
-            });
-            
-            if (!response.ok) {
-              const errorText = await response.text();
-              console.error('Qwen API error:', response.status, errorText);
-              throw new Error(`Qwen API error: ${response.status} - ${errorText}`);
+            try {
+              const headers = new Headers(init?.headers);
+              headers.set('User-Agent', 'CycleDesign/1.0.0');
+              
+              console.log('Fetching from Qwen API:', url as string);
+              const response = await fetch(url as string, { 
+                ...init, 
+                headers,
+              });
+              
+              console.log('Qwen API response:', response.status);
+              
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Qwen API error:', response.status, errorText);
+                throw new Error(`Qwen API error: ${response.status} - ${errorText}`);
+              }
+              
+              return response;
+            } catch (error: any) {
+              console.error('Fetch error:', error.message, error.cause);
+              throw error;
             }
-            
-            return response;
           };
 
           if (options?.stream) {

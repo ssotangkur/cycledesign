@@ -220,7 +220,15 @@ export class QwenAuth extends EventEmitter {
     try {
       const credsPath = this.getCredsPath();
       const data = await fs.readFile(credsPath, 'utf-8');
-      return JSON.parse(data) as QwenCredentials;
+      const parsed = JSON.parse(data) as any;
+      // Support both camelCase and snake_case from qwen-code CLI
+      return {
+        accessToken: parsed.access_token || parsed.accessToken,
+        tokenType: parsed.token_type || parsed.tokenType || 'Bearer',
+        refreshToken: parsed.refresh_token || parsed.refreshToken,
+        expiryDate: parsed.expiry_date || parsed.expiryDate,
+        scope: parsed.scope,
+      } as QwenCredentials;
     } catch {
       return null;
     }
@@ -230,7 +238,16 @@ export class QwenAuth extends EventEmitter {
     const credsPath = this.getCredsPath();
     const credsDir = join(homedir(), '.qwen');
     await fs.mkdir(credsDir, { recursive: true });
-    await fs.writeFile(credsPath, JSON.stringify(creds, null, 2), 'utf-8');
+    // Save in snake_case format for compatibility with qwen-code CLI
+    const data = {
+      access_token: creds.accessToken,
+      token_type: creds.tokenType,
+      refresh_token: creds.refreshToken,
+      expiry_date: creds.expiryDate,
+      resource_url: 'portal.qwen.ai',
+      scope: creds.scope,
+    };
+    await fs.writeFile(credsPath, JSON.stringify(data, null, 2), 'utf-8');
   }
 
   private async openBrowser(url: string): Promise<void> {
