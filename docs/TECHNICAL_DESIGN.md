@@ -29,6 +29,14 @@
 │         │              └───────────┘          └─────────┘       │
 │         │                                                    │
 │  ┌──────▼────────────────────────────────────────────────┐   │
+│  │           Preview Server Manager                      │   │
+│  │  - Spawn Vite child process                           │   │
+│  │  - Log streaming (SSE)                                │   │
+│  │  - Start/Stop/Restart control                         │   │
+│  │  - Port management                                    │   │
+│  └───────────────────────────────────────────────────────┘   │
+│         │                                                    │
+│  ┌──────▼────────────────────────────────────────────────┐   │
 │  │              SQLite Database                          │   │
 │  │  - Component usage index                              │   │
 │  │  - Audit data                                         │   │
@@ -92,17 +100,23 @@
 ```
 cycledesign/
 ├── apps/
-│   ├── web/                    # React frontend (single Vite instance)
+│   ├── web/                    # React frontend (tool UI, Vite on 3000)
 │   │   ├── src/
 │   │   │   ├── components/     # UI components for the tool
 │   │   │   ├── modes/          # Design System Mode, Design Mode
 │   │   │   ├── editors/        # Property editor, prompt input
-│   │   │   ├── preview/        # iframe component for design rendering
+│   │   │   ├── preview/        # iframe component, log viewer, server controls
 │   │   │   └── hooks/          # React hooks for state/data
 │   │   ├── index.html          # Main app entry point
-│   │   ├── preview.html        # Preview entry point (loaded in iframe)
-│   │   ├── vite.config.ts      # Vite config with multi-page setup
+│   │   ├── vite.config.ts      # Vite config
 │   │   └── package.json
+│   │
+│   ├── preview/                # Preview Vite instance (backend-managed, port 3002)
+│   │   ├── src/
+│   │   │   └── main.tsx        # Dynamic design loader
+│   │   ├── index.html
+│   │   ├── vite.config.ts
+│   │   └── package.json        # LLM-managed dependencies
 │   │
 │   └── server/                 # Node.js backend
 │       ├── src/
@@ -111,6 +125,9 @@ cycledesign/
 │       │   ├── parser/         # AST parsing, ID injection
 │       │   ├── transformer/    # Component wrapping (writes to /build)
 │       │   ├── database/       # SQLite schema and queries
+│       │   ├── preview/        # Preview server lifecycle management
+│       │   │   ├── preview-manager.ts    # Start/stop/restart Vite
+│       │   │   └── log-streamer.ts       # SSE log streaming
 │       │   └── git/            # Git operations (Phase 3)
 │       └── package.json
 │
@@ -143,7 +160,7 @@ cycledesign/
 │   ├── designs/
 │   │   ├── landing-page.tsx
 │   │   ├── dashboard.tsx
-│   │   └── ...
+│   │   └── current.tsx         # Currently loaded design (symlink/copy)
 │   │
 │   └── rules/
 │       ├── composition.md
@@ -164,42 +181,415 @@ cycledesign/
 
 ---
 
-## Design Rendering Isolation
+### LLM Tool Calling for Code Generation
 
-**Approach: Sandboxed iframe with Vite multi-page app**
+**Location:** `apps/server/src/llm/tools/`
+
+**Decision:** Use Vercel AI SDK tool calling with Zod validation for structured code output
+
+**Why Tool Calling:**
+- ✅ Guaranteed structured output (no parsing markdown blocks)
+- ✅ Zod schema validation before code reaches pipeline
+- ✅ Type-safe in TypeScript
+- ✅ LLM can't forget required fields (filename, code, etc.)
+- ✅ Error handling when LLM returns invalid structure
+
+**Tool Definitions:**
+
+```typescript
+// apps/server/src/llm/tools/create-file.ts
+import { tool } from 'ai';
+import { z } from 'zod';
+
+// File validation schema (reused across all file tools)
+const fileSchema = z.object({
+  filename: z.string()
+    .regex(/^[a-z0-9-]+\.tsx$/, 'Must be kebab-case with .tsx extension'),
+  location: z.enum(['designs']),
+});
+
+export const createFileTool = tool({
+  description: 'Create a new React/TypeScript design file',
+  parameters: z.object({
+    ...fileSchema.shape,
+    code: z.string().describe('Complete TypeScript React code'),
+    description: z.string().describe('Brief description of the design'),
+  }),
+});
+
+// apps/server/src/llm/tools/edit-file.ts
+export const editFileTool = tool({
+  description: 'Modify existing design using patch-based editing',
+  parameters: z.object({
+    ...fileSchema.shape,
+    patch: z.string().describe('Unified diff patch to apply'),
+    description: z.string().describe('Summary of changes'),
+  }),
+});
+
+// apps/server/src/llm/tools/rename-file.ts
+export const renameFileTool = tool({
+  description: 'Rename or move a design file',
+  parameters: z.object({
+    oldPath: z.string()
+      .regex(/^designs\/[a-z0-9-]+\.tsx$/, 'Must be in designs/ directory'),
+    newPath: z.string()
+      .regex(/^designs\/[a-z0-9-]+\.tsx$/, 'Must be in designs/ directory'),
+  }),
+});
+
+// apps/server/src/llm/tools/delete-file.ts
+export const deleteFileTool = tool({
+  description: 'Delete a design file',
+  parameters: z.object({
+    ...fileSchema.shape,
+    confirm: z.boolean().describe('Must be true to confirm deletion'),
+  }),
+});
+
+// apps/server/src/llm/tools/add-dependency.ts
+export const addDependencyTool = tool({
+  description: 'Add npm package to preview environment',
+  parameters: z.object({
+    packageName: z.string(),
+    version: z.string().optional().default('latest'),
+    reason: z.string().describe('Why this package is needed'),
+  }),
+});
+
+// apps/server/src/llm/tools/submit-work.ts
+export const submitWorkTool = tool({
+  description: 'Signal completion of work and trigger validation pipeline',
+  parameters: z.object({
+    summary: z.string().describe('Summary of all changes made'),
+    filesCreated: z.array(z.string()).describe('List of files created'),
+    filesModified: z.array(z.string()).describe('List of files modified'),
+    dependenciesAdded: z.array(z.string()).optional().describe('Packages added'),
+  }),
+});
+
+// apps/server/src/llm/tools/ask-user.ts
+export const askUserTool = tool({
+  description: 'Request clarification or input from user when stuck',
+  parameters: z.object({
+    question: z.string().describe('Question to ask the user'),
+    context: z.string().describe('Why this information is needed'),
+    suggestions: z.array(z.string()).optional().describe('Suggested answers'),
+  }),
+});
+```
+
+**LLM Configuration for Code Generation:**
+
+```typescript
+// apps/server/src/llm/code-generator.ts
+export async function generateCodeFromPrompt(
+  prompt: string,
+  options?: { imageUrl?: string }
+) {
+  const result = await generateText({
+    model: qwenModel,
+    messages: [
+      { role: 'system', content: CODE_GENERATION_SYSTEM_PROMPT },
+      { role: 'user', content: prompt },
+    ],
+    tools: {
+      createFile: createFileTool,
+      editFile: editFileTool,
+      renameFile: renameFileTool,
+      deleteFile: deleteFileTool,
+      addDependency: addDependencyTool,
+      submitWork: submitWorkTool,
+      askUser: askUserTool,
+    },
+    toolChoice: 'auto',  // Let LLM choose which tool to call
+    temperature: 0.1,     // Deterministic output
+    maxTokens: 8192,      // Enough for full files
+    topP: 0.95,
+  });
+  
+  // Process tool calls in a loop until submitWork or askUser
+  return result;
+}
+```
+
+**System Prompt:**
+
+```typescript
+// apps/server/src/llm/prompts/code-generation.ts
+export const CODE_GENERATION_SYSTEM_PROMPT = `
+You are a code generation assistant for CycleDesign.
+
+**Your Task:**
+Generate React/TypeScript code for UI designs based on user prompts.
+
+**Available Tools:**
+- createFile: Create new design files
+- editFile: Modify existing designs (patch-based)
+- renameFile: Rename design files
+- deleteFile: Delete design files
+- addDependency: Add npm packages to preview environment
+- submitWork: Signal completion and trigger validation (REQUIRED after making changes)
+- askUser: Request clarification from user when stuck or need input
+
+**Workflow:**
+1. You can make MULTIPLE tool calls in any order
+2. When you're DONE making changes, you MUST call submitWork
+3. Validation only runs AFTER you call submitWork
+4. If validation fails, fix errors and call submitWork again
+5. If you need user input, call askUser and wait for response
+
+**File Constraints:**
+- All files must be in the "designs" directory
+- All files must have .tsx extension
+- Filenames must be kebab-case (e.g., "landing-page.tsx")
+- You cannot modify files outside designs/ directory
+- You cannot modify config files, source code, or system files
+
+**Output Format:**
+Use the createFile tool to return structured output with:
+- filename: Kebab-case name ending in .tsx (e.g., "landing-page.tsx")
+- location: Always "designs"
+- code: Complete, runnable TypeScript React code
+- description: One-line description of the design
+
+**Code Requirements:**
+1. Export a default React functional component
+2. Use TypeScript with proper types (no 'any')
+3. DO NOT add 'id' props to components (system will inject them)
+4. Use only these packages by default: react, @mui/material, @mui/icons-material
+5. Code must be complete and runnable (no placeholders, no comments like "...")
+6. Use proper indentation (2 spaces)
+7. Import components from '@mui/material' not '@mui/material/Button'
+
+**For Edits:**
+Use the editFile tool with a unified diff patch when:
+- User requests a small change to existing design
+- You want to preserve user modifications outside changed areas
+- The change is localized to specific lines
+
+**If you need additional packages:**
+Call the addDependency tool BEFORE calling submitWork
+
+**If you need user input:**
+Call the askUser tool with:
+- question: Clear question to user
+- context: Why you need this information
+- suggestions: Optional suggested answers
+
+**IMPORTANT:**
+- NEVER call submitWork until you're completely done
+- You can make multiple tool calls before submitWork
+- If validation fails, fix errors and call submitWork again
+- Don't keep trying the same fix - if stuck, call askUser
+
+**Examples:**
+- Good filename: "user-dashboard.tsx", "login-form.tsx"
+- Bad filename: "UserDashboard.tsx", "my design.tsx", "test.txt"
+`;
+```
+
+**Benefits:**
+- Structured output guaranteed by tool schema
+- Validation happens at LLM boundary (before file I/O)
+- Easy to extend with new tools (editFile, renameFile, deleteFile, submitWork, askUser)
+- Tool calls logged for debugging/auditing
+- **Security:** All file tools enforce same constraints (.tsx only, designs/ directory, kebab-case)
+- **Patch-based editing:** editFile uses unified diff for efficient small changes
+- **Multi-turn workflow:** LLM can stage multiple changes before validation
+- **User in the loop:** askUser tool lets LLM request clarification when stuck
+- **Clear completion signal:** submitWork triggers validation only when LLM is done
+
+---
+
+### Preview Server Management
+
+**Location:** `apps/server/src/preview/`
+
+**Requirements:**
+
+- Spawn Vite preview server as child process
+- Capture stdout/stderr for log streaming
+- Graceful shutdown (SIGTERM → SIGKILL timeout)
+- Dynamic port assignment (handle conflicts)
+- Process state tracking (STOPPED, STARTING, RUNNING, ERROR)
+- Auto-restart on crash (configurable)
+
+**Preview Manager API:**
+
+```typescript
+// apps/server/src/preview/preview-manager.ts
+interface PreviewServerState {
+  status: 'STOPPED' | 'STARTING' | 'RUNNING' | 'ERROR';
+  port?: number;
+  pid?: number;
+  uptime?: number;
+  error?: string;
+}
+
+export class PreviewManager {
+  private process: ChildProcess | null = null;
+  private state: PreviewServerState = { status: 'STOPPED' };
+  private logBuffer: LogEntry[] = [];
+
+  async start(options?: { designName?: string }): Promise<PreviewServerState>;
+  async stop(): Promise<void>;
+  async restart(options?: { installDependencies?: boolean }): Promise<PreviewServerState>;
+  getStatus(): PreviewServerState;
+  getLogs(): LogEntry[];
+  onLog(callback: (log: LogEntry) => void): () => void;
+}
+```
+
+**Log Streaming:**
+
+```typescript
+// apps/server/src/preview/log-streamer.ts
+interface LogEntry {
+  type: 'stdout' | 'stderr' | 'ready' | 'exit' | 'error';
+  message: string;
+  timestamp: number;
+  port?: number;  // For 'ready' events
+  code?: number;  // For 'exit' events
+}
+
+export class LogStreamer extends EventEmitter {
+  private buffer: LogEntry[] = [];
+  private readonly MAX_BUFFER_SIZE = 1000;
+
+  // Add log entry and emit to subscribers
+  emitLog(entry: LogEntry): void;
+
+  // Get recent logs for new connections
+  getRecentLogs(count?: number): LogEntry[];
+}
+```
+
+**API Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/preview/start` | Start preview server |
+| `POST` | `/api/preview/stop` | Stop preview server |
+| `GET` | `/api/preview/status` | Get server state |
+| `POST` | `/api/preview/restart` | Restart with options |
+| `GET` | `/api/preview/logs/stream` | Stream logs (SSE) |
+
+**SSE Log Stream Format:**
+
+```
+GET /api/preview/logs/stream
+
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+
+data: {"type":"stdout","message":"VITE v5.0.0 ready in 500ms","timestamp":1234567890}
+
+data: {"type":"ready","port":3002,"timestamp":1234567891}
+
+data: {"type":"stderr","message":"Failed to resolve import...","timestamp":1234567892}
+```
+
+**Process Lifecycle:**
+
+```
+1. User clicks "Start Preview" in UI
+         │
+2. Frontend calls POST /api/preview/start
+         │
+3. Backend spawns Vite child process
+   - cwd: apps/preview/
+   - stdio: ['pipe', 'pipe', 'pipe']
+   - env: { PORT: 3002, ... }
+         │
+4. Capture stdout/stderr → LogStreamer
+         │
+5. Parse Vite ready message → extract port
+         │
+6. Update state → RUNNING
+         │
+7. Frontend polls status / subscribes to logs
+         │
+8. Frontend updates iframe src → http://localhost:3002
+```
+
+**Graceful Shutdown:**
+
+```
+1. User clicks "Stop Preview"
+         │
+2. Frontend calls POST /api/preview/stop
+         │
+3. Backend sends SIGTERM to Vite process
+         │
+4. Wait 5 seconds for graceful shutdown
+         │
+5. If still running → SIGKILL
+         │
+6. Update state → STOPPED
+         │
+7. Frontend clears iframe src
+```
+
+---
+
+### Design Rendering Isolation
+
+**Approach: Sandboxed iframe with backend-managed Vite server**
 
 The LLM-generated design code renders in an isolated iframe to prevent:
 - CSS style leakage between tool UI and user designs
 - JavaScript errors in user code from crashing the tool
 - Conflicts between design system runtime and tool runtime
+- Dependency conflicts (LLM can install any npm package)
 
-**Single Vite Instance - Multi-Page Setup:**
+**Separate Vite Instances:**
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              Vite Dev Server (single instance)              │
+│              Vite Dev Server 1 (Tool UI)                    │
+│              Port: 3000 (always running)                    │
 │                                                             │
-│  ┌─────────────────────────┐  ┌─────────────────────────┐  │
-│  │   Tool Frontend         │  │   Preview (iframe)      │  │
-│  │   /index.html           │  │   /preview.html         │  │
-│  │   (React + MUI)         │  │   (Design rendering)    │  │
-│  │   Port: 3000            │  │   Port: 3000/preview    │  │
-│  └─────────────────────────┘  └─────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │   Tool Frontend (React + MUI)                         │  │
+│  │   - Preview server controls                           │  │
+│  │   - Log viewer                                        │  │
+│  │   - iframe embed                                      │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                               │
+                    Backend manages lifecycle
+                               │
+┌──────────────────────────────▼───────────────────────────────┐
+│              Vite Dev Server 2 (Preview)                     │
+│              Port: 3002 (started/stopped on demand)          │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │   Preview (Design rendering)                          │  │
+│  │   - Loads design from workspace/designs/current.tsx   │  │
+│  │   - LLM-managed dependencies                          │  │
+│  │   - postMessage bridge to parent                      │  │
+│  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Vite Config (multi-page):**
+**Preview Vite Config:**
 
 ```typescript
-// apps/web/vite.config.ts
+// apps/preview/vite.config.ts
 export default defineConfig({
-  build: {
-    rollupOptions: {
-      input: {
-        main: resolve(__dirname, 'index.html'),
-        preview: resolve(__dirname, 'preview.html'),
-      },
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@design': resolve(__dirname, '../../workspace/designs'),
     },
+  },
+  server: {
+    port: 3002,
+    strictPort: false,  // Allow dynamic port assignment
+    cors: true,         // Allow cross-origin from tool UI
   },
 });
 ```
@@ -212,8 +602,8 @@ export default defineConfig({
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │                   iframe (sandboxed)                  │  │
 │  │  ┌─────────────────────────────────────────────────┐  │  │
-│  │  │   preview.html (Vite entry point)               │  │  │
-│  │  │   - Loads transformed design from /build        │  │  │
+│  │  │   Preview Vite (port 3002)                      │  │  │
+│  │  │   - Loads @design/current.tsx                   │  │  │
 │  │  │   - Wrappers (AuditWrapper, SelectionBox)       │  │  │
 │  │  │   - Design system components                    │  │  │
 │  │  │   - postMessage bridge to parent                │  │  │
@@ -233,10 +623,15 @@ export default defineConfig({
 ```html
 <iframe
   sandbox="allow-scripts allow-same-origin"
-  src="http://localhost:3000/preview.html"
+  src="http://localhost:3002"  // Dynamic port from backend
   title="Design Preview"
 />
 ```
+
+**Server Discovery:**
+- Frontend queries `GET /api/preview/status` to get current preview URL
+- Backend returns `{ status: 'RUNNING', port: 3002, url: 'http://localhost:3002' }`
+- Frontend updates iframe src when server starts/restarts
 
 **Communication Bridge:**
 
@@ -250,22 +645,26 @@ export default defineConfig({
 ```
 1. LLM generates design code
         │
-2. Post-LLM pipeline (validate, inject IDs, transform)
+2. Post-LLM pipeline (validate, inject IDs)
         │
-3. Write to /build/designs/*.tsx
+3. Write to workspace/designs/*.tsx
         │
-4. Vite HMR detects file change
+4. Backend copies to workspace/designs/current.tsx
         │
-5. iframe auto-refreshes (or manual trigger)
+5. Preview Vite HMR detects file change
         │
-6. User sees updated design instantly
+6. Preview iframe auto-refreshes
+        │
+7. User sees updated design instantly
 ```
 
 **Benefits:**
+- Complete dependency isolation (LLM can add any npm package)
 - Vite's fast HMR for instant preview updates
-- Single dev server to manage
-- Complete CSS/JS isolation via iframe
-- Shared design system runtime package
+- Complete CSS/JS isolation via iframe + separate server
+- Backend controls lifecycle (start/stop on demand)
+- Resource efficiency (stop preview when not needed)
+- Security boundary (LLM code runs in isolated process)
 
 ---
 

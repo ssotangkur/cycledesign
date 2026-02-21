@@ -281,11 +281,15 @@ None currently.
 - Mode-agnostic sessions (work across all modes)
 
 **Phase 3**: Prompt-to-UI Rendering
-- LLM generates React/TypeScript code from prompts
-- Code rendered in isolated iframe
-- Vite multi-page setup (tool UI + preview iframe)
+- LLM generates React/TypeScript code from prompts using **tool calling** (structured output)
+- Code rendered in isolated iframe (backend-managed Vite server)
+- Backend controls preview server lifecycle (start/stop/restart)
+- Real-time log streaming from preview server to UI
+- Vite multi-instance setup (tool UI + preview on separate ports)
 - Basic validation (TypeScript compilation)
 - ID injection for generated components
+- LLM can add npm dependencies to preview environment
+- Tool calling with Zod schema for reliable code generation
 - No design system enforcement yet (free-form generation)
 
 **Phase 4**: Design System Mode
