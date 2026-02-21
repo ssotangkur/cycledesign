@@ -6,27 +6,31 @@ The `chrome-devtools` subagent is a specialized browser automation agent configu
 
 ## Configuration
 
-Defined in `opencode.jsonc`:
+Defined in `.opencode/agents/chrome-devtools.md`:
 
-```jsonc
-{
-  "agents": {
-    "chrome-devtools": {
-      "model": "qwen-code/vision-model",
-      "description": "Browser automation and testing agent with Chrome DevTools MCP access",
-      "tools": ["chrome-devtools"],
-      "instructions": "..."
-    }
-  }
-}
+```markdown
+---
+description: Browser automation and testing agent with Chrome DevTools MCP access
+mode: subagent
+model: qwen-code/vision-model
+temperature: 0.3
+tools:
+  write: false
+  edit: false
+  bash: true
+---
+
+You are a browser automation specialist with access to Chrome DevTools MCP tools...
 ```
 
 ## Usage
 
-### From opencode CLI
+### From opencode TUI/CLI
 
-```bash
-opencode run "Navigate to http://localhost:3000 and take a screenshot" --agent chrome-devtools
+**@ mention** the agent in your message:
+
+```
+@chrome-devtools Navigate to http://localhost:3000 and take a screenshot
 ```
 
 ### From Task Tool
@@ -40,16 +44,9 @@ task:
   prompt: "Navigate to http://localhost:3000, create a session, send a message, verify response"
 ```
 
-### From Another Agent
+### Automatic Invocation
 
-Agents can delegate browser automation tasks:
-
-```
-Use the chrome-devtools subagent to:
-1. Navigate to the application
-2. Test the login flow
-3. Report any errors found
-```
+Primary agents will automatically invoke this subagent for browser automation tasks based on its description.
 
 ## Capabilities
 
@@ -69,11 +66,12 @@ Use the chrome-devtools subagent to:
 
 ### Test Page Load
 ```
-Navigate to http://localhost:3000 and verify the page loads without errors
+@chrome-devtools Navigate to http://localhost:3000 and verify the page loads without errors
 ```
 
 ### Test User Flow
 ```
+@chrome-devtools 
 1. Navigate to http://localhost:3000
 2. Click "New Session"
 3. Fill "Test" in session name
@@ -86,18 +84,11 @@ Navigate to http://localhost:3000 and verify the page loads without errors
 
 ### Debug Issues
 ```
+@chrome-devtools 
 1. Navigate to http://localhost:3000
 2. Check console for JavaScript errors
 3. Check network tab for failed requests
 4. Report all errors with details
-```
-
-### Visual Regression
-```
-1. Navigate to http://localhost:3000
-2. Take full page screenshot
-3. Compare with baseline
-4. Report visual differences
 ```
 
 ## Best Practices
@@ -119,7 +110,7 @@ The subagent uses `qwen-code/vision-model` which provides:
 ## Troubleshooting
 
 ### Agent Not Found
-Ensure `opencode.jsonc` is in the project root and contains the agent definition.
+Ensure `.opencode/agents/chrome-devtools.md` exists in the project root.
 
 ### MCP Not Connected
 Run `opencode mcp list` to verify chrome-devtools shows as connected.
