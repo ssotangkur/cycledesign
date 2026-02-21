@@ -1,5 +1,16 @@
 # CycleDesign Technical Design
 
+**Related Documents:**
+- `docs/PRD.md` - Product requirements and user flows
+- `docs/Phase3.md` - Phase 3 implementation details, timelines, checklists
+  - Implementation checklist (40+ tasks)
+  - Timeline estimates (10-12.5 days)
+  - Exit criteria (17 items)
+  - API endpoint specifications
+  - Environment variable configurations
+
+---
+
 ## Architecture Overview
 
 ```
@@ -299,12 +310,9 @@ export const addDependencyTool = tool({
 
 // apps/server/src/llm/tools/submit-work.ts
 export const submitWorkTool = tool({
-  description: 'Signal completion of work and trigger validation pipeline',
+  description: 'Signal completion of work and trigger validation pipeline. MUST be called when LLM is done making changes. Arguments are empty - system automatically tracks files created/modified and dependencies added.',
   parameters: z.object({
-    summary: z.string().describe('Summary of all changes made'),
-    filesCreated: z.array(z.string()).describe('List of files created'),
-    filesModified: z.array(z.string()).describe('List of files modified'),
-    dependenciesAdded: z.array(z.string()).optional().describe('Packages added'),
+    // Empty - system tracks changes automatically during tool execution
   }),
 });
 
@@ -339,7 +347,7 @@ export async function generateCodeFromPrompt(
       renameFile: renameFileTool,
       deleteFile: deleteFileTool,
       addDependency: addDependencyTool,
-      submitWork: submitWorkTool,
+      submitWork: submitWorkTool,  // MUST be called when done
       askUser: askUserTool,
     },
     toolChoice: 'auto',  // Let LLM choose which tool to call
@@ -349,6 +357,7 @@ export async function generateCodeFromPrompt(
   });
   
   // Process tool calls in a loop until submitWork or askUser
+  // System automatically tracks: filesCreated, filesModified, dependenciesAdded
   return result;
 }
 ```
@@ -434,8 +443,26 @@ Generate React/TypeScript code for UI designs based on user prompts.
 - renameFile: Rename design files
 - deleteFile: Delete design files
 - addDependency: Add npm packages to preview environment
-- submitWork: Signal completion and trigger validation (REQUIRED after making changes)
+- submitWork: Signal completion and trigger validation (REQUIRED when done)
 - askUser: Request clarification from user when stuck or need input
+
+**CRITICAL: submitWork Tool**
+
+You MUST call the submitWork tool when you are COMPLETELY DONE making changes.
+This is REQUIRED - validation will NOT run until you call submitWork.
+
+- Call submitWork AFTER all createFile, editFile, addDependency calls
+- Call submitWork with EMPTY arguments {} - the system automatically tracks:
+  - Which files you created
+  - Which files you modified  
+  - Which dependencies you added
+- After submitWork, the system will:
+  1. Run validation pipeline (TypeScript, ESLint, Knip)
+  2. If validation passes: start/restart preview server automatically
+  3. If validation fails: return errors for you to fix
+- If validation fails, fix the errors and call submitWork again
+
+NEVER forget to call submitWork - your changes will not be validated or rendered without it!
 
 **Workflow:**
 1. You can make MULTIPLE tool calls in any order
@@ -604,7 +631,33 @@ Call the askUser tool with:
   "type": "error",
   "error": "Rate limit exceeded"
 }
+
+// Status update (Phase 3: Tool calling progress)
+{
+  "type": "status",
+  "messageId": "msg_003",
+  "status": "tool_call_start" | "tool_call_complete" | "tool_call_error" |
+           "validation_start" | "validation_complete" | "validation_error" |
+           "preview_start" | "preview_ready" | "preview_error",
+  "tool"?: string,  // Tool name (for tool_call_* statuses)
+  "details": string,  // User-friendly description
+  "timestamp": number
+}
 ```
+
+**Status Message Types (Phase 3):**
+
+| Status Type | Description | Display in Chat |
+|-------------|-------------|-----------------|
+| `tool_call_start` | A tool is about to execute | Info badge: "Installing package..." |
+| `tool_call_complete` | Tool executed successfully | Success badge: "Package installed" |
+| `tool_call_error` | Tool execution failed | Error badge: "Failed to install package" |
+| `validation_start` | Validation pipeline starting | Info badge: "Validating code..." |
+| `validation_complete` | All validations passed | Success badge: "Validation passed" |
+| `validation_error` | Validation failed | Error badge with details |
+| `preview_start` | Preview server starting | Info badge: "Starting preview..." |
+| `preview_ready` | Preview server ready | Success badge: "Preview ready" |
+| `preview_error` | Preview server failed | Error badge: "Preview failed to start" |
 
 **Connection Lifecycle:**
 ```
