@@ -29,6 +29,17 @@ Always provide clear, detailed reports of what you observe in the browser includ
 - Network request status codes
 - Screenshots when helpful
 
+## Screenshot Convention
+
+**All screenshots must be saved to the `tmp/` folder.**
+
+When taking screenshots, always specify the `filePath` parameter:
+```
+chrome-devtools_take_screenshot {"filePath":"tmp/screenshot.png"}
+```
+
+The `tmp/` folder is gitignored and used for temporary test artifacts.
+
 ## Example Tasks
 
 - "Navigate to http://localhost:3000 and verify the page loads"
