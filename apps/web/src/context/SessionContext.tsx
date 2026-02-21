@@ -149,8 +149,11 @@ export function SessionProvider({ children }: SessionProviderProps) {
         }));
       }
 
-      // Get messages to send (outside of setState callback)
-      const messagesToSend = state.messages.map((m) => ({
+      // Get messages to send (include the new user message)
+      const messagesToSend = [
+        ...state.messages,
+        userMessage,
+      ].map((m) => ({
         id: m.id,
         role: m.role,
         content: m.content,
