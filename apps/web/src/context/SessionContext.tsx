@@ -98,8 +98,13 @@ export function SessionProvider({ children }: SessionProviderProps) {
   }, []);
 
   const sendMessage = useCallback(async (content: string) => {
-    if (!state.currentSession) return;
+    if (!state.currentSession) {
+      console.error('[sendMessage] No current session');
+      return;
+    }
 
+    console.log('[sendMessage] Starting with messages count:', state.messages.length);
+    
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
       role: 'user',
@@ -117,13 +122,18 @@ export function SessionProvider({ children }: SessionProviderProps) {
     }));
 
     try {
+      // Check if this is the first message BEFORE adding it
+      const isFirstMessage = state.messages.length === 0;
+      console.log('[sendMessage] Is first message?', isFirstMessage, 'Current messages:', state.messages.length);
+
       // Save user message to backend
+      console.log('[sendMessage] Saving user message to backend:', state.currentSession.id);
       await api.addMessage(state.currentSession.id, userMessage);
 
       // Update session label if this is the first message
-      const isFirstMessage = state.messages.length === 0;
       if (isFirstMessage) {
         const sessionId = state.currentSession.id;
+        console.log('[sendMessage] Updating session label to:', content);
         setState((prev) => ({
           ...prev,
           sessionLabelsMap: {
@@ -144,6 +154,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
           toolCallId: m.toolCallId,
         }));
 
+        console.log('[sendMessage] Calling completeStream with', messagesToSend.length, 'messages');
         let assistantContent = '';
         
         api.completeStream(
@@ -164,6 +175,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
             }));
           },
           (response) => {
+            console.log('[sendMessage] Stream complete, saving assistant message');
             const assistantMessage: Message = {
               id: `msg_${Date.now()}`,
               role: 'assistant',
@@ -183,6 +195,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
             api.addMessage(state.currentSession!.id, assistantMessage).catch(console.error);
           },
           (error) => {
+            console.error('[sendMessage] Stream error:', error.message);
             setState((prev2) => ({
               ...prev2,
               isStreaming: false,
