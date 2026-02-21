@@ -74,13 +74,6 @@ The chrome-devtools agent has access to:
 - `chrome-devtools_list_network_requests` - Monitor network
 - `chrome-devtools_wait_for` - Wait for content
 
-### Prerequisites
-
-Before using @chrome-devtools, ensure:
-1. Chrome is running with remote debugging: `chrome.exe --remote-debugging-port=9222`
-2. The application server is running (frontend on port 3000, backend on 3001)
-3. Chrome DevTools MCP is connected: `opencode mcp list`
-
 ### Model
 
 The agent uses `qwen-code/vision-model` for enhanced visual understanding of web pages.
@@ -89,12 +82,11 @@ The agent uses `qwen-code/vision-model` for enhanced visual understanding of web
 
 ## Development Workflow
 
-1. **Start servers**: `npm run dev` (runs both frontend and backend)
-2. **Start Chrome**: `chrome.exe --remote-debugging-port=9222`
-3. **Make changes** to code
-4. **Test with @chrome-devtools** to verify UI works
-5. **Fix issues** based on feedback
-6. **Repeat** until verified
+1. **Start servers**: Use `/dev-server` skill
+2. **Make changes** to code
+3. **Test with @chrome-devtools** to verify UI works
+4. **Fix issues** based on feedback
+5. **Repeat** until verified
 
 ---
 

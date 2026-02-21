@@ -48,6 +48,19 @@ The `tmp/` folder is gitignored and used for temporary test artifacts.
 - "Check console for JavaScript errors"
 - "Monitor network requests for failed API calls"
 
+## Tab Management
+
+**Reuse existing tabs when possible:**
+
+1. Before opening a new page, check existing tabs with `chrome-devtools_list_pages`
+2. If a tab is already open on the target URL, select it with `chrome-devtools_select_page` instead of creating a new one
+3. Only create new tabs with `chrome-devtools_new_page` when:
+   - No existing tab has the target URL
+   - You need to test multiple pages simultaneously
+   - The existing tab is in an unusable state
+
+This keeps browser sessions clean and avoids accumulating unnecessary tabs.
+
 ## Notes
 
 - You are configured to use the vision-model for enhanced visual understanding of web pages
