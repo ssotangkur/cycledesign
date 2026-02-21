@@ -51,30 +51,31 @@ completionRouter.post('/', async (req, res): Promise<void> => {
         toolCalls: result.toolCalls,
         usage: result.usage,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       clearTimeout(timeoutId);
       
-      if (error.name === 'AbortError') {
+      if ((error as { name?: string }).name === 'AbortError') {
         res.status(408).json({ error: 'Request timeout' });
         return;
       }
       
-      if (error.name === 'RateLimitError') {
-        res.setHeader('Retry-After', (error.retryAfterMs / 1000).toString());
+      if ((error as { name?: string }).name === 'RateLimitError') {
+        const retryAfter = (error as { retryAfterMs?: number }).retryAfterMs;
+        res.setHeader('Retry-After', (retryAfter ? retryAfter / 1000 : 60).toString());
         res.status(429).json({ error: 'Rate limit exceeded' });
         return;
       }
       
-      if (error.name === 'AuthError') {
+      if ((error as { name?: string }).name === 'AuthError') {
         res.status(401).json({ error: 'Authentication required' });
         return;
       }
       
       throw error;
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Completion error:', error);
-    res.status(500).json({ error: error.message || 'Completion failed' });
+    res.status(500).json({ error: (error as Error).message || 'Completion failed' });
   }
 });
 
@@ -96,7 +97,6 @@ completionRouter.post('/stream', async (req, res): Promise<void> => {
     const timeoutId = setTimeout(() => controller.abort(), 120000);
     
     let fullContent = '';
-    const usage: any = null;
     
     try {
       const result = await qwenProvider.complete(messages as CoreMessage[], {
@@ -118,7 +118,7 @@ completionRouter.post('/stream', async (req, res): Promise<void> => {
       
       clearTimeout(timeoutId);
       
-      res.write(`data: ${JSON.stringify({ type: 'done', usage })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
       res.end();
       
       if (sessionId && fullContent) {
@@ -127,39 +127,38 @@ completionRouter.post('/stream', async (req, res): Promise<void> => {
           role: 'assistant' as const,
           content: fullContent,
           timestamp: Date.now(),
-          tokenCount: usage?.totalTokens,
         };
         await addMessage(sessionId, assistantMessage).catch(console.error);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       clearTimeout(timeoutId);
       
-      if (error.name === 'AbortError') {
+      if ((error as { name?: string }).name === 'AbortError') {
         res.write(`data: ${JSON.stringify({ type: 'error', error: 'Request timeout' })}\n\n`);
         res.end();
         return;
       }
       
-      if (error.name === 'RateLimitError') {
+      if ((error as { name?: string }).name === 'RateLimitError') {
         res.write(`data: ${JSON.stringify({ type: 'error', error: 'Rate limit exceeded' })}\n\n`);
         res.end();
         return;
       }
       
-      if (error.name === 'AuthError') {
+      if ((error as { name?: string }).name === 'AuthError') {
         res.write(`data: ${JSON.stringify({ type: 'error', error: 'Authentication required' })}\n\n`);
         res.end();
         return;
       }
       
       console.error('Stream error:', error);
-      res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: (error as Error).message })}\n\n`);
       res.end();
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Stream setup error:', error);
     if (!res.headersSent) {
-      res.status(500).json({ error: error.message || 'Stream setup failed' });
+      res.status(500).json({ error: (error as Error).message || 'Stream setup failed' });
     }
   }
 });

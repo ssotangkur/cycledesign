@@ -7,10 +7,10 @@ import { RateLimitError, AuthError } from '../errors';
 const qwenAuth = new QwenAuth();
 
 export class QwenProvider {
-  private model: any = null;
-  private modelPromise: Promise<any> | null = null;
+  private model: ReturnType<ReturnType<typeof createOpenAI>> | null = null;
+  private modelPromise: Promise<ReturnType<ReturnType<typeof createOpenAI>>> | null = null;
 
-  private async getModel(): Promise<any> {
+  private async getModel(): Promise<ReturnType<ReturnType<typeof createOpenAI>>> {
     if (this.model) return this.model;
 
     if (this.modelPromise) return this.modelPromise;
@@ -67,16 +67,16 @@ export class QwenProvider {
             };
           }
         });
-      } catch (error: any) {
-        lastError = error;
+      } catch (error: unknown) {
+        lastError = error as Error;
 
-        if (error instanceof AuthError || error.status === 401 || error.message?.includes('401')) {
+        if (error instanceof AuthError || (error as { status?: number }).status === 401 || (error as { message?: string }).message?.includes('401')) {
           await qwenAuth.performDeviceAuthFlow();
           continue;
         }
 
-        if (error instanceof RateLimitError || error.status === 429) {
-          const backoff = error.retryAfterMs || Math.min(1000 * Math.pow(2, attempt), 60000);
+        if (error instanceof RateLimitError || (error as { status?: number }).status === 429) {
+          const backoff = (error as { retryAfterMs?: number }).retryAfterMs ?? Math.min(1000 * Math.pow(2, attempt), 60000);
           await new Promise(resolve => setTimeout(resolve, backoff));
           continue;
         }

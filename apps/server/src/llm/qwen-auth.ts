@@ -105,7 +105,13 @@ export class QwenAuth extends EventEmitter {
     return credentials;
   }
 
-  private async requestDeviceAuthorization(codeChallenge: string): Promise<any> {
+  private async requestDeviceAuthorization(codeChallenge: string): Promise<{
+    device_code: string;
+    user_code: string;
+    verification_uri_complete: string;
+    expires_in: number;
+    interval?: number;
+  }> {
     const params = new URLSearchParams({
       client_id: QWEN_OAUTH_CONFIG.clientId,
       scope: QWEN_OAUTH_CONFIG.scope,
@@ -126,14 +132,27 @@ export class QwenAuth extends EventEmitter {
       throw new Error(`Device auth failed: ${response.status}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    return data as {
+      device_code: string;
+      user_code: string;
+      verification_uri_complete: string;
+      expires_in: number;
+      interval?: number;
+    };
   }
 
   private async pollForToken(
     deviceCode: string,
     codeVerifier: string,
     timeoutMs: number
-  ): Promise<any> {
+  ): Promise<{
+    access_token: string;
+    token_type: string;
+    refresh_token?: string;
+    expires_in: number;
+    scope?: string;
+  }> {
     const startTime = Date.now();
     let interval = 5000;
 
@@ -176,7 +195,14 @@ export class QwenAuth extends EventEmitter {
         throw new Error(`Token poll failed: ${response.status}`);
       }
 
-      return response.json();
+      const data = await response.json();
+      return data as {
+        access_token: string;
+        token_type: string;
+        refresh_token?: string;
+        expires_in: number;
+        scope?: string;
+      };
     }
 
     throw new Error('Device authorization timeout');
@@ -202,11 +228,23 @@ export class QwenAuth extends EventEmitter {
       throw new Error(`Token refresh failed: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as {
+      access_token: string;
+      token_type?: string;
+      refresh_token?: string;
+      expires_in: number;
+      scope?: string;
+    };
     return this.tokenResponseToCredentials(data);
   }
 
-  private tokenResponseToCredentials(tokenResponse: any): QwenCredentials {
+  private tokenResponseToCredentials(tokenResponse: {
+    access_token: string;
+    token_type?: string;
+    refresh_token?: string;
+    expires_in: number;
+    scope?: string;
+  }): QwenCredentials {
     return {
       accessToken: tokenResponse.access_token,
       tokenType: tokenResponse.token_type || 'Bearer',
@@ -220,11 +258,11 @@ export class QwenAuth extends EventEmitter {
     try {
       const credsPath = this.getCredsPath();
       const data = await fs.readFile(credsPath, 'utf-8');
-      const parsed = JSON.parse(data) as any;
+      const parsed = JSON.parse(data) as Record<string, unknown>;
       // Support both camelCase and snake_case from qwen-code CLI
       return {
-        accessToken: parsed.access_token || parsed.accessToken,
-        tokenType: parsed.token_type || parsed.tokenType || 'Bearer',
+        accessToken: (parsed.access_token || parsed.accessToken) as string,
+        tokenType: ((parsed.token_type || parsed.tokenType) as string) || 'Bearer',
         refreshToken: parsed.refresh_token || parsed.refreshToken,
         expiryDate: parsed.expiry_date || parsed.expiryDate,
         scope: parsed.scope,

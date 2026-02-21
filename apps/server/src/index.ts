@@ -4,16 +4,17 @@ import dotenv from 'dotenv';
 import { sessionsRouter } from './routes/sessions';
 import { completionRouter } from './routes/completion';
 import https from 'https';
+import { WebSocketHandler } from './ws';
 
 dotenv.config();
 
 // Global fetch override to disable SSL verification for Qwen API
 const originalFetch = global.fetch;
-global.fetch = ((url: any, options: any) => {
-  const parsedUrl = new URL(url as string);
+global.fetch = ((url: string | URL, options: RequestInit) => {
+  const parsedUrl = new URL(url);
   if (parsedUrl.hostname.includes('qwen.ai') || parsedUrl.hostname.includes('aliyuncs.com')) {
     const agent = new https.Agent({ rejectUnauthorized: false });
-    (options as any).agent = agent;
+    (options as RequestInit & { agent?: https.Agent }).agent = agent;
   }
   return originalFetch(url, options);
 }) as typeof global.fetch;
@@ -21,6 +22,13 @@ global.fetch = ((url: any, options: any) => {
 const app = express();
 const PORT = process.env.PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+const server = app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+});
+
+new WebSocketHandler(server);
 
 app.use(cors({
   origin: FRONTEND_URL,
@@ -67,10 +75,5 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/complete', completionRouter);
-
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-});
 
 export default app;

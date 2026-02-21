@@ -1,23 +1,24 @@
 {
-  "name": "cycledesign",
-  "version": "1.0.0",
-  "private": true,
-  "workspaces": [
-    "apps/*"
-  ],
-  "scripts": {
-    "dev": "concurrently \"npm run dev --workspace=@cycledesign/server\" \"npm run dev --workspace=@cycledesign/web\"",
-    "dev:server": "npm run dev --workspace=@cycledesign/server",
-    "dev:web": "npm run dev --workspace=@cycledesign/web",
-    "build": "npm run build --workspaces",
-    "lint": "npm run lint --workspaces",
-    "lint:fix": "npm run lint:fix --workspaces --if-present",
-    "knip": "knip",
-    "validate": "npm run lint && npm run knip",
-    "test": "npm run test --workspaces"
-  },
-  "devDependencies": {
-    "concurrently": "^9.2.1",
-    "knip": "^5.85.0"
-  }
+    "name":  "cycledesign",
+    "version":  "1.0.0",
+    "private":  true,
+    "workspaces":  [
+                       "apps/*"
+                   ],
+    "scripts":  {
+                    "dev":  "concurrently \"npm run dev --workspace=@cycledesign/server\" \"npm run dev --workspace=@cycledesign/web\"",
+                    "dev:server":  "npm run dev --workspace=@cycledesign/server",
+                    "dev:web":  "npm run dev --workspace=@cycledesign/web",
+                    "build":  "npm run build --workspaces",
+                    "lint":  "npm run lint --workspaces",
+                    "lint:fix":  "npm run lint:fix --workspaces --if-present",
+                    "knip":  "knip",
+                    "typecheck":  "npx tsc --noEmit --project apps/server/tsconfig.json && npx tsc --noEmit --project apps/web/tsconfig.json",
+                    "validate":  "npm run lint && npm run typecheck && npm run knip",
+                    "test":  "npm run test --workspaces"
+                },
+    "devDependencies":  {
+                            "concurrently":  "^9.2.1",
+                            "knip":  "^5.85.0"
+                        }
 }

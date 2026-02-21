@@ -168,9 +168,9 @@ export const api = {
             }
           }
         }
-      } catch (error: any) {
-        if (error.name === 'AbortError') return;
-        onError(error);
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        onError(error instanceof Error ? error : new Error('Unknown error'));
       }
     };
 
