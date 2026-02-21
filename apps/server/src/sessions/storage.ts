@@ -14,6 +14,7 @@ export interface SessionMeta {
   model: string;
   messageCount: number;
   totalTokens: number;
+  firstMessage: string | null;
 }
 
 export function generateSessionId(): string {
@@ -44,6 +45,7 @@ export async function createSession(name?: string): Promise<SessionMeta> {
     model: 'coder-model',
     messageCount: 0,
     totalTokens: 0,
+    firstMessage: null,
   };
   
   await fs.writeFile(join(sessionDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
@@ -52,12 +54,40 @@ export async function createSession(name?: string): Promise<SessionMeta> {
   return meta;
 }
 
+async function getFirstUserMessage(sessionId: string): Promise<string | null> {
+  try {
+    const sessionDir = join(SESSIONS_DIR, sessionId);
+    const messagesPath = join(sessionDir, 'messages.jsonl');
+    const data = await fs.readFile(messagesPath, 'utf-8');
+    
+    if (!data.trim()) {
+      return null;
+    }
+    
+    const lines = data.trim().split('\n');
+    for (const line of lines) {
+      const message = JSON.parse(line) as StoredMessage;
+      if (message.role === 'user' && message.content) {
+        return message.content;
+      }
+    }
+    
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getSession(id: string): Promise<SessionMeta | null> {
   try {
     const sessionDir = join(SESSIONS_DIR, id);
     const metaPath = join(sessionDir, 'meta.json');
     const data = await fs.readFile(metaPath, 'utf-8');
-    return JSON.parse(data) as SessionMeta;
+    const meta = JSON.parse(data) as SessionMeta;
+    
+    meta.firstMessage = await getFirstUserMessage(id);
+    
+    return meta;
   } catch {
     return null;
   }

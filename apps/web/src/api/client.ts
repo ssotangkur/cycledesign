@@ -19,13 +19,11 @@ export interface Message {
 
 export interface Session {
   id: string;
-  name: string;
   createdAt: string;
   updatedAt: string;
-  provider: string;
-  model: string;
   messageCount: number;
   totalTokens: number;
+  firstMessage: string | null;
 }
 
 export interface CompletionResponse {

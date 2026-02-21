@@ -123,11 +123,12 @@ export function SessionProvider({ children }: SessionProviderProps) {
       // Update session label if this is the first message
       const isFirstMessage = state.messages.length === 0;
       if (isFirstMessage) {
+        const sessionId = state.currentSession.id;
         setState((prev) => ({
           ...prev,
           sessionLabelsMap: {
             ...prev.sessionLabelsMap,
-            [state.currentSession.id]: content,
+            [sessionId]: content,
           },
         }));
       }

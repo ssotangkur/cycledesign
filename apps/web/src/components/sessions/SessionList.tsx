@@ -1,7 +1,6 @@
 import { List, ListItem, ListItemText, ListItemSecondaryAction, IconButton, Box, Typography, Tooltip } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { Session } from '../../api/client';
-import { computeSessionLabel } from './utils';
 
 interface SessionListProps {
   sessions: Session[];

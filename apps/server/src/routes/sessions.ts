@@ -8,7 +8,6 @@ import {
   addMessage,
   deleteMessage,
   generateMessageId,
-  updateSessionMeta,
 } from '../sessions/storage';
 
 export const sessionsRouter = Router();
@@ -103,19 +102,5 @@ sessionsRouter.delete('/:id/messages/:msgId', async (req, res): Promise<void> =>
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: 'Failed to delete message' });
-  }
-});
-
-sessionsRouter.patch('/:id', async (req, res): Promise<void> => {
-  try {
-    const { name } = req.body;
-    if (!name) {
-      res.status(400).json({ error: 'Missing required field: name' });
-      return;
-    }
-    await updateSessionMeta(req.params.id, { name });
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: 'Failed to update session' });
   }
 });
