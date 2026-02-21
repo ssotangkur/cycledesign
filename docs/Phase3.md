@@ -2,7 +2,7 @@
 
 ## Overview
 
-Phase 3 builds on Phase 1 (LLM Provider Integration) and Phase 2 (Session Persistence) to enable LLM-generated React/TypeScript code rendering. This phase introduces:
+Phase 3 builds on Phase 1 (LLM Provider Integration) and Phase 2a (WebSocket-Based Real-Time Messaging) to enable LLM-generated React/TypeScript code rendering. This phase introduces:
 - LLM generates React/TypeScript code from prompts
 - Code rendered in isolated iframe with **backend-managed Vite instance**
 - Backend starts/stops preview Vite server on demand
@@ -11,6 +11,8 @@ Phase 3 builds on Phase 1 (LLM Provider Integration) and Phase 2 (Session Persis
 - Basic validation (TypeScript compilation)
 - ID injection for generated components
 - No design system enforcement yet (free-form generation)
+- **Code generation prompts sent via WebSocket** (not REST)
+- **Generated designs saved to session messages** (Phase 2a persistence)
 
 **Success Criteria:**
 - User can submit text prompts describing UI designs
@@ -55,7 +57,8 @@ cycledesign/
 
 **Port Configuration:**
 - Tool UI: `http://localhost:3000` (always running)
-- Preview: `http://localhost:3001` (started/stopped by backend)
+- Backend + WebSocket: `http://localhost:3001` / `ws://localhost:3001/ws`
+- Preview: `http://localhost:3002` (started/stopped by backend, dynamic)
 
 **Rationale:**
 - ✅ Complete dependency isolation (LLM can add any npm package)
@@ -143,9 +146,14 @@ data: {"type":"ready","port":3002,"timestamp":1234567892}
 ```
 
 **Server Discovery:**
-- Frontend queries `/api/preview/status` to get current preview URL
+- Frontend queries `GET /api/preview/status` to get current preview URL
 - Backend returns `{ status: 'RUNNING', port: 3002, url: 'http://localhost:3002' }`
 - Frontend updates iframe src when server starts/restarts
+
+**WebSocket Integration:**
+- Code generation prompts sent via WebSocket (Phase 2a protocol)
+- Generated designs saved to session messages automatically
+- Use `useMessageListState` hook for sending generation requests
 
 **Security Considerations:**
 - `allow-scripts`: Required for React to run
@@ -187,9 +195,52 @@ workspace/
 
 ---
 
-### 4. Code Generation Flow
+### 4. Code Generation Flow (WebSocket-Based)
 
-**Decision:** LLM generates complete TSX file with imports using **tool calling** for structured output
+**Decision:** LLM generates complete TSX file with imports using **tool calling** for structured output, triggered via WebSocket
+
+**WebSocket Integration:**
+- User sends code generation prompt via WebSocket (Phase 2a protocol)
+- Message includes client-generated ID for optimistic updates
+- Server acknowledges immediately, then processes generation
+- Generated design saved to session messages automatically
+
+**Message Flow:**
+```typescript
+// Client → Server (via WebSocket)
+{
+  "type": "message",
+  "id": "msg_client_1234567890",
+  "content": "Create a landing page with animations",
+  "timestamp": 1705312210000
+}
+
+// Server → Client (immediate acknowledgment)
+{
+  "type": "ack",
+  "messageId": "msg_client_1234567890",
+  "serverId": "msg_003",
+  "timestamp": 1705312211000
+}
+
+// Server processes generation (tool calling happens server-side)
+// ... LLM generates code ...
+// ... Validation pipeline runs ...
+// ... Design saved to session ...
+
+// Server → Client (streaming response)
+{
+  "type": "content",
+  "content": "Creating landing page with animations..."
+}
+
+// Server → Client (done)
+{
+  "type": "done",
+  "messageId": "msg_003",
+  "timestamp": 1705312220000
+}
+```
 
 **Tool Calling Architecture:**
 ```typescript
@@ -220,7 +271,7 @@ export const generateCodeTool = tool({
 
 **Example Tool Call:**
 ```typescript
-// LLM response
+// LLM response (server-side, after receiving WebSocket message)
 {
   "toolCalls": [{
     "id": "call_abc123",
@@ -272,6 +323,34 @@ const result = await generateText({
 - LLM can add packages to `apps/preview/package.json`
 - Backend runs `npm install` in preview directory before rendering
 - Validation includes checking imports match installed packages
+
+**Frontend Integration:**
+```typescript
+// Use Phase 2a's useMessageListState hook
+function CodeGenerationInput() {
+  const { sendMessage, isConnected } = useMessageListState(sessionId);
+  const [prompt, setPrompt] = useState('');
+  
+  const handleSubmit = () => {
+    sendMessage(prompt);  // Sends via WebSocket
+    setPrompt('');
+  };
+  
+  return (
+    <Box>
+      <TextField 
+        value={prompt}
+        onChange={e => setPrompt(e.target.value)}
+        disabled={!isConnected}
+        placeholder="Describe the UI you want to create..."
+      />
+      <Button onClick={handleSubmit} disabled={!prompt.trim() || !isConnected}>
+        Generate
+      </Button>
+    </Box>
+  );
+}
+```
 
 ---
 
@@ -377,11 +456,11 @@ export function injectIds(code: string, existingIds: Set<string>): {
 
 ### 7. Preview Communication Bridge
 
-**Decision:** postMessage API for cross-origin communication (3000 ↔ 3001)
+**Decision:** postMessage API for cross-origin communication (3000 ↔ 3002)
 
 **Message Types:**
 ```typescript
-// Parent (tool UI, port 3000) → Iframe (preview, port 3001)
+// Parent (tool UI, port 3000) → Iframe (preview, port 3002)
 interface ParentMessage {
   type: 'SET_MODE';
   payload: { mode: 'select' | 'preview' | 'audit' };
@@ -393,7 +472,7 @@ interface ParentMessage {
   payload: { instanceId: string; props: Record<string, any> };
 };
 
-// Iframe (preview, port 3001) → Parent (tool UI, port 3000)
+// Iframe (preview, port 3002) → Parent (tool UI, port 3000)
 interface IframeMessage {
   type: 'MODE_READY';
   payload: { mode: string };
@@ -414,11 +493,11 @@ const iframeRef = useRef<HTMLIFrameElement>(null);
 function sendMessageToIframe(message: ParentMessage) {
   iframeRef.current?.contentWindow?.postMessage(
     message,
-    'http://localhost:3001'  // Preview origin
+    'http://localhost:3002'  // Preview origin (dynamic)
   );
 }
 
-// Iframe (preview, port 3001)
+// Iframe (preview, port 3002)
 window.addEventListener('message', (event) => {
   if (event.origin !== 'http://localhost:3000') return;  // Tool origin
   
@@ -440,38 +519,9 @@ window.addEventListener('message', (event) => {
 - Only localhost origins allowed in development
 - Production would require HTTPS + strict origin checking
 
-**Implementation:**
-```typescript
-// Parent (tool UI)
-const iframeRef = useRef<HTMLIFrameElement>(null);
-
-function sendMessageToIframe(message: ParentMessage) {
-  iframeRef.current?.contentWindow?.postMessage(
-    message,
-    'http://localhost:3000'
-  );
-}
-
-// Iframe (preview)
-window.addEventListener('message', (event) => {
-  if (event.origin !== 'http://localhost:3000') return;
-  
-  const message: ParentMessage = event.data;
-  
-  switch (message.type) {
-    case 'SET_MODE':
-      setMode(message.payload.mode);
-      break;
-    case 'HIGHLIGHT_COMPONENT':
-      highlightComponent(message.payload.instanceId);
-      break;
-  }
-});
-```
-
 ---
 
-### 9. Preview Vite Entry Point
+### 8. Preview Vite Entry Point
 
 **Decision:** Preview loads design dynamically via import alias
 
@@ -572,12 +622,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Buffer recent logs for new connections
   - [ ] **Validate:** Stream logs to UI in real-time
 
-- [ ] **1.4** Create code generation endpoint
-  - [ ] `POST /api/generate` - Generate code from prompt
-  - [ ] Accept text prompt and optional image URL
-  - [ ] Return generated code with metadata
-  - [ ] Stream response with SSE for long generations
-  - [ ] **Validate:** Use Chrome DevTools MCP to test endpoint
+- [ ] **1.4** Integrate code generation with WebSocket
+  - [ ] Handle code generation prompts via WebSocket messages
+  - [ ] Trigger LLM tool calling on message receive
+  - [ ] Stream generation progress via WebSocket `content` messages
+  - [ ] Save generated designs to session messages
+  - [ ] **Validate:** Test with Phase 2a WebSocket client
 
 - [ ] **1.5** Implement validation pipeline
   - [ ] Create `src/validation/typescript.ts` (tsc runner)
@@ -739,6 +789,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 ```json
 {
   "dependencies": {
+    "ws": "^8.x",                    // From Phase 2a
+    "@types/ws": "^8.x",             // From Phase 2a
     "@typescript-eslint/parser": "^6.13.0",
     "@typescript-eslint/typescript-estree": "^6.13.0",
     "typescript": "^5.3.0",
@@ -751,6 +803,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 ```
 
 **Key Packages:**
+- `ws`, `@types/ws` - WebSocket server (Phase 2a requirement)
 - `@typescript-eslint/parser` - Parse TSX for AST manipulation
 - `typescript` - Type checking generated code
 - `eslint` - Linting with custom rules
@@ -809,9 +862,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 LLM_PROVIDER=qwen
 PORT=3001
 
+# Phase 2a (WebSocket)
+WS_PORT=3001
+
 # Phase 3 additions
 WORKSPACE_DIR=./workspace
-PREVIEW_PORT=3001
+PREVIEW_PORT=3002
 ```
 
 ### Tool UI (`apps/web/.env`)
@@ -819,8 +875,11 @@ PREVIEW_PORT=3001
 # Existing Phase 1 vars
 VITE_API_URL=http://localhost:3001
 
+# Phase 2a (WebSocket)
+VITE_WS_URL=ws://localhost:3001/ws
+
 # Phase 3 additions
-VITE_PREVIEW_URL=http://localhost:3001
+VITE_PREVIEW_URL=http://localhost:3002
 ```
 
 ### Preview (`apps/preview/.env`)
@@ -1433,65 +1492,65 @@ data: {"type":"ready","port":3002,"timestamp":1234567892}
 data: {"type":"exit","code":0,"timestamp":1234567893}
 ```
 
-### Design Generation
+### Code Generation (WebSocket)
 
-**POST /api/generate**
+Code generation is triggered via WebSocket messages (Phase 2a protocol), not REST endpoints.
 
-Uses tool calling for structured output.
-
+**Client → Server:**
 ```typescript
-// Request
+// User sends generation prompt via WebSocket
+ws.send(JSON.stringify({
+  type: 'message',
+  id: 'msg_client_1234567890',
+  content: 'Create a landing page with hero and features',
+  timestamp: Date.now()
+}));
+```
+
+**Server → Client:**
+```typescript
+// Immediate acknowledgment
 {
-  prompt: string;
-  designName?: string;  // Optional suggestion (LLM can override)
-  imageUrl?: string;    // Optional image prompt
+  "type": "ack",
+  "messageId": "msg_client_1234567890",
+  "serverId": "msg_003",
+  "timestamp": Date.now()
 }
 
-// Response
+// Streaming progress updates
 {
-  success: boolean;
-  filename: string;
-  location: string;
-  code: string;
-  codeWithIds: string;      // After ID injection
-  validationErrors?: Array<{
-    type: 'typescript' | 'eslint' | 'knip';
-    message: string;
-    line?: number;
-    column?: number;
-  }>;
-  idInjection?: {
-    added: number;
-    duplicates: number;
-  };
-  dependenciesInstalled?: Array<{
-    name: string;
-    version: string;
-  }>;
+  "type": "content",
+  "content": "Generating landing page..."
+}
+
+// Generation complete
+{
+  "type": "done",
+  "messageId": "msg_003",
+  "timestamp": Date.now()
 }
 ```
 
-**LLM Tool Call (internal):**
-```typescript
-{
-  "name": "createFile",
-  "arguments": {
-    "filename": "landing-page.tsx",
-    "location": "designs",
-    "code": "import React from 'react';...",
-    "description": "SaaS landing page"
-  }
-}
-```
+**Server-Side Process:**
+1. WebSocket message received
+2. Immediate acknowledgment sent (Phase 2a protocol)
+3. LLM tool calling triggered (`createFile` tool)
+4. Backend validates filename constraints (kebab-case, .tsx, designs/)
+5. Check dependencies (call `addDependency` if needed)
+6. Validate code (TypeScript, ESLint, Knip)
+7. Inject IDs
+8. Write to filesystem
+9. Save to session messages
+10. Send `done` message to client
 
-**Process:**
-1. LLM receives prompt and calls `createFile` tool
-2. Backend validates filename constraints (kebab-case, .tsx, designs/)
-3. Check dependencies (call `addDependency` if needed)
-4. Validate code (TypeScript, ESLint, Knip)
-5. Inject IDs
-6. Write to filesystem
-7. Return structured response
+**Frontend Usage:**
+```typescript
+// Use Phase 2a's useMessageListState hook
+const { sendMessage } = useMessageListState(sessionId);
+
+// Send generation prompt
+sendMessage('Create a landing page with hero section and features');
+```
 
 ### Design Management
 
@@ -1561,7 +1620,7 @@ Phase 3 is complete when:
 - [ ] Real-time log streaming works (SSE)
 - [ ] UI displays preview server controls (start/stop)
 - [ ] UI displays real-time preview logs
-- [ ] User can submit text prompts describing UI designs
+- [ ] User can submit text prompts describing UI designs **via WebSocket**
 - [ ] LLM generates valid React/TypeScript code
 - [ ] Generated code passes TypeScript compilation
 - [ ] Component IDs are auto-injected
@@ -1569,8 +1628,36 @@ Phase 3 is complete when:
 - [ ] Mode switching works (Select / Preview)
 - [ ] Component selection highlights instances
 - [ ] Error states handled gracefully with suggestions
+- [ ] **Generated designs saved to session messages**
+- [ ] **WebSocket integration with Phase 2a working**
 - [ ] Documentation complete
 - [ ] Code reviewed and merged to main
+
+---
+
+## Integration with Phase 2a (WebSocket)
+
+Phase 3 relies on Phase 2a's WebSocket infrastructure for messaging:
+
+**WebSocket Message Types Used:**
+- `message` - Send code generation prompts
+- `ack` - Server acknowledgment (immediate)
+- `content` - Stream generation progress
+- `done` - Generation complete
+- `error` - Generation/validation errors
+
+**State Management:**
+- Use `useMessageListState` hook from Phase 2a
+- Optimistic updates for generation prompts
+- Server reconciliation via acknowledgment
+- Generated designs automatically saved to session
+
+**Benefits:**
+- ✅ Real-time generation progress streaming
+- ✅ Automatic session persistence
+- ✅ No duplicate API calls
+- ✅ Consistent with chat messaging
+- ✅ Lower latency than REST
 
 ---
 
