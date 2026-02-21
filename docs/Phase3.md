@@ -1,5 +1,21 @@
 # Phase 3: Prompt-to-UI Rendering
 
+**This document extends `docs/TECHNICAL_DESIGN.md` with Phase 3 implementation details.**
+
+**Relationship to TECHNICAL_DESIGN.md:**
+- `TECHNICAL_DESIGN.md` - High-level architecture, canonical tool definitions, system prompts
+- `Phase3.md` - Implementation details, timelines, checklists, Phase 3-specific flows
+
+**Cross-References:**
+- LLM Tool Definitions → See `TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation"
+- System Prompt → See `TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation"
+- WebSocket Protocol → See `TECHNICAL_DESIGN.md` section "WebSocket Server (Phase 2a)"
+- Component Transformer → See `TECHNICAL_DESIGN.md` section "Component Transformer"
+- Database Schema → See `TECHNICAL_DESIGN.md` section "Database"
+- MCP Server → See `TECHNICAL_DESIGN.md` section "MCP Server"
+
+---
+
 ## Overview
 
 Phase 3 builds on Phase 1 (LLM Provider Integration) and Phase 2a (WebSocket-Based Real-Time Messaging) to enable LLM-generated React/TypeScript code rendering. This phase introduces:
@@ -165,6 +181,174 @@ data: {"type":"ready","port":3002,"timestamp":1234567892}
 
 ---
 
+### 2.5. UI Layout Architecture
+
+**Decision:** Full-width header with two-pane split layout (left: chat/sessions, right: preview) with resizable divider
+
+**Layout Structure:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Full-Width Header Bar                    │
+│                    CycleDesign Logo + Nav                   │
+├──────────────────────────────────┬──────────────────────────┤
+│                                  │                          │
+│         Left Pane                │      Right Pane          │
+│      (Chat + Sessions)           │    (Preview iframe)      │
+│      (resizable width)           │    (flex remaining)      │
+│                                  │                          │
+│  ┌──────────────────────────┐   │  ┌────────────────────┐  │
+│  │    Session Selector      │   │  │                    │  │
+│  ├──────────────────────────┤   │  │                    │  │
+│  │                          │   │  │                    │  │
+│  │     Message List         │   │  │   Preview iframe   │  │
+│  │                          │   │  │   (port 3002)      │  │
+│  │                          │   │  │                    │  │
+│  ├──────────────────────────┤   │  │                    │  │
+│  │     Prompt Input         │   │  │                    │  │
+│  ├──────────────────────────┤   │  └────────────────────┘  │
+│  │    Status Bar            │   │                          │
+│  │  (connection status)     │   │                          │
+│  └──────────────────────────┘   │                          │
+│                                  │                          │
+└──────────────────────────────────┴──────────────────────────┘
+          ↕ draggable divider ↕
+```
+
+**Layout Specifications:**
+
+| Section | Width | Height | Description |
+|---------|-------|--------|-------------|
+| **Header** | 100% | auto | Auto height based on content, full width, contains logo and navigation |
+| **Left Pane** | 30-70% (user resizable) | 100% - header height | Contains session selector, messages, prompt input, and status bar |
+| **Right Pane** | Remaining (flex) | 100% - header height | Contains preview iframe (backend-managed Vite) |
+| **Divider** | 8px | 100% - header height | Draggable resize handle between panes |
+| **Status Bar** | 100% of left pane | auto | Shows WebSocket connection status, fixed at bottom of left pane |
+
+**Divider Behavior:**
+- User can drag divider left/right to resize panes
+- Left pane has minimum width based on content (session selector, message list, prompt input)
+- Left pane has maximum width (e.g., 70% to keep preview visible)
+- Divider has visual indicator (vertical line with hover state)
+- Drag operation uses smooth resizing (no layout shift)
+- Optional: Persist divider position in localStorage
+
+**Layout Component Structure:**
+```tsx
+// apps/web/src/layouts/MainLayout.tsx
+function MainLayout() {
+  const [leftPaneWidth, setLeftPaneWidth] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  const handleDividerDrag = (newWidth: number) => {
+    const containerWidth = containerRef.current?.clientWidth ?? 0;
+    const minPercentage = 0.3;  // 30% minimum
+    const maxPercentage = 0.7;  // 70% maximum
+    const newPercentage = newWidth / containerWidth;
+    
+    if (newPercentage >= minPercentage && newPercentage <= maxPercentage) {
+      setLeftPaneWidth(newWidth);
+    }
+  };
+  
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      {/* Full-Width Header (auto height) */}
+      <AppBar position="static" sx={{ width: '100%' }}>
+        <Toolbar>
+          <Typography variant="h6">CycleDesign</Typography>
+          {/* Navigation items */}
+        </Toolbar>
+      </AppBar>
+      
+      {/* Two-Pane Split Layout with Resizable Divider */}
+      <Box 
+        ref={containerRef}
+        sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}
+      >
+        {/* Left Pane: Chat + Sessions */}
+        <Box
+          sx={{
+            width: leftPaneWidth ?? '40%',
+            minWidth: '350px',  // Based on content requirements
+            maxWidth: '70%',
+            borderRight: '1px solid divider',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <SessionSelector />
+          <MessageList />
+          <PromptInput />
+          <ConnectionStatus isConnected={isConnected} />
+        </Box>
+        
+        {/* Resizable Divider */}
+        <Box
+          sx={{
+            width: '8px',
+            cursor: 'col-resize',
+            backgroundColor: 'divider',
+            '&:hover': {
+              backgroundColor: 'primary.main',
+            },
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = leftPaneWidth ?? containerRef.current?.clientWidth! * 0.4;
+            
+            const handleMouseMove = (moveEvent: MouseEvent) => {
+              const newWidth = startWidth + (moveEvent.clientX - startX);
+              handleDividerDrag(newWidth);
+            };
+            
+            const handleMouseUp = () => {
+              document.removeEventListener('mousemove', handleMouseMove);
+              document.removeEventListener('mouseup', handleMouseUp);
+            };
+            
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+          }}
+        />
+        
+        {/* Right Pane: Preview iframe */}
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <PreviewFrame />
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+```
+
+**Preview iframe Behavior:**
+- Fills entire right pane (100% width/height of pane)
+- No border, seamless integration
+- Auto-scrolls to show full design
+- Loading skeleton while preview server starts
+- Error overlay if preview server fails
+
+**Rationale:**
+- ✅ Clear visual separation between chat and preview
+- ✅ Side-by-side workflow (chat with LLM while viewing results)
+- ✅ User can adjust pane widths based on task (more chat space vs more preview space)
+- ✅ Maximize preview real estate when needed
+- ✅ Persistent chat context visible during preview interaction
+- ✅ No layout shift when preview starts/stops
+- ✅ Header adapts to content (better for future additions)
+- ⚠️ Requires careful handling of divider drag boundaries
+
+---
+
 ### 3. Design Code Storage
 
 **Decision:** Store generated code in `workspace/designs/` directory
@@ -224,14 +408,72 @@ workspace/
 }
 
 // Server processes generation (tool calling happens server-side)
-// ... LLM generates code ...
-// ... Validation pipeline runs ...
-// ... Design saved to session ...
+// Server sends status updates for each tool call
 
-// Server → Client (streaming response)
+// Server → Client (tool call status: starting)
+{
+  "type": "status",
+  "messageId": "msg_003",
+  "status": "tool_call_start",
+  "tool": "addDependency",
+  "details": "Installing framer-motion package..."
+}
+
+// Server → Client (tool call status: complete)
+{
+  "type": "status",
+  "messageId": "msg_003",
+  "status": "tool_call_complete",
+  "tool": "addDependency",
+  "details": "Package installed successfully"
+}
+
+// Server → Client (next tool call)
+{
+  "type": "status",
+  "messageId": "msg_003",
+  "status": "tool_call_start",
+  "tool": "createFile",
+  "details": "Generating landing-page.tsx..."
+}
+
+// Server → Client (tool call complete)
+{
+  "type": "status",
+  "messageId": "msg_003",
+  "status": "tool_call_complete",
+  "tool": "createFile",
+  "details": "File created successfully"
+}
+
+// Server → Client (validation starting)
+{
+  "type": "status",
+  "messageId": "msg_003",
+  "status": "validation_start",
+  "details": "Running TypeScript compilation..."
+}
+
+// Server → Client (validation complete)
+{
+  "type": "status",
+  "messageId": "msg_003",
+  "status": "validation_complete",
+  "details": "All validations passed"
+}
+
+// Server → Client (preview starting)
+{
+  "type": "status",
+  "messageId": "msg_003",
+  "status": "preview_start",
+  "details": "Starting preview server..."
+}
+
+// Server → Client (streaming content response)
 {
   "type": "content",
-  "content": "Creating landing page with animations..."
+  "content": "Created landing page with hero section and animations!"
 }
 
 // Server → Client (done)
@@ -242,25 +484,41 @@ workspace/
 }
 ```
 
-**Tool Calling Architecture:**
-```typescript
-// apps/server/src/llm/tools/generate-code.ts
-import { tool } from 'ai';
-import { z } from 'zod';
+**Status Message Types:**
 
-export const generateCodeTool = tool({
-  description: 'Generate React/TypeScript code for a design',
-  parameters: z.object({
-    filename: z.string()
-      .regex(/^[a-z0-9-]+\.tsx$/)
-      .describe('Kebab-case filename, e.g., "landing-page.tsx"'),
-    location: z.enum(['designs'])
-      .describe('File location in workspace'),
-    code: z.string().describe('Complete TypeScript React code'),
-    description: z.string().describe('Brief description of the design'),
-  }),
-});
-```
+| Status Type | Description | Display in Chat |
+|-------------|-------------|-----------------|
+| `tool_call_start` | A tool is about to execute | Info badge: "Installing package..." |
+| `tool_call_complete` | Tool executed successfully | Success badge: "Package installed" |
+| `tool_call_error` | Tool execution failed | Error badge: "Failed to install package" |
+| `validation_start` | Validation pipeline starting | Info badge: "Validating code..." |
+| `validation_complete` | All validations passed | Success badge: "Validation passed" |
+| `validation_error` | Validation failed | Error badge with details |
+| `preview_start` | Preview server starting | Info badge: "Starting preview..." |
+| `preview_ready` | Preview server ready | Success badge: "Preview ready" |
+| `preview_error` | Preview server failed | Error badge: "Preview failed to start" |
+
+**Tool Calling Architecture:**
+
+The LLM uses **7 separate tools** (defined in `apps/server/src/llm/tools/`):
+
+1. **createFile** - Create new design files
+2. **editFile** - Modify existing designs (patch-based)
+3. **renameFile** - Rename design files
+4. **deleteFile** - Delete design files
+5. **addDependency** - Add npm packages to preview environment
+6. **submitWork** - Signal completion and trigger validation (REQUIRED when done)
+7. **askUser** - Request clarification from user
+
+**Why Separate Tools (not single generateCode tool):**
+- ✅ Modular workflow (LLM can make multiple changes before validation)
+- ✅ Patch-based editing (editFile uses unified diff for efficiency)
+- ✅ Clear separation of concerns (create vs edit vs delete)
+- ✅ Better error handling (each tool has specific validation)
+- ✅ Multi-turn conversations (LLM can fix errors incrementally)
+- ✅ User in the loop (askUser for clarification, submitWork for completion)
+
+**Tool Definitions:** See `docs/TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation" for complete tool schemas.
 
 **LLM Instructions:**
 - Export default React functional component
@@ -268,61 +526,7 @@ export const generateCodeTool = tool({
 - Use TypeScript with proper types
 - May add dependencies to `apps/preview/package.json` if needed
 - Use tool calling to return structured output (not markdown blocks)
-
-**Example Tool Call:**
-```typescript
-// LLM response (server-side, after receiving WebSocket message)
-{
-  "toolCalls": [{
-    "id": "call_abc123",
-    "type": "function",
-    "function": {
-      "name": "generateCode",
-      "arguments": {
-        "filename": "landing-page.tsx",
-        "location": "designs",
-        "code": "import React from 'react';\n...",
-        "description": "A landing page with hero and features"
-      }
-    }
-  }]
-}
-```
-
-**Example Output (code argument):**
-```tsx
-import React from 'react';
-import { Button, Typography, Box } from '@mui/material';
-
-export default function LandingPage() {
-  return (
-    <Box sx={{ p: 4, textAlign: 'center' }}>
-      <Typography variant="h1">Welcome</Typography>
-      <Button variant="contained" color="primary">
-        Get Started
-      </Button>
-    </Box>
-  );
-}
-```
-
-**LLM Settings for Code Generation:**
-```typescript
-const result = await generateText({
-  model: qwenModel,
-  messages: [...],
-  tools: { generateCode: generateCodeTool },
-  toolChoice: 'required',  // Force tool use
-  temperature: 0.1,         // Deterministic output
-  maxTokens: 8192,          // Enough for full files
-  topP: 0.95,
-});
-```
-
-**Dependency Management:**
-- LLM can add packages to `apps/preview/package.json`
-- Backend runs `npm install` in preview directory before rendering
-- Validation includes checking imports match installed packages
+- **MUST call submitWork when completely done** (triggers validation + preview start)
 
 **Frontend Integration:**
 ```typescript
@@ -354,15 +558,394 @@ function CodeGenerationInput() {
 
 ---
 
+### 4.1. Server-Side Tool Calling with Status Broadcasting
+
+**Decision:** Broadcast tool execution status to clients via WebSocket in real-time
+
+**Implementation:**
+```typescript
+// apps/server/src/websocket/status-broadcaster.ts
+import { WebSocket } from 'ws';
+
+interface StatusMessage {
+  type: 'status';
+  messageId: string;  // Original message ID that triggered generation
+  status: 
+    | 'tool_call_start'
+    | 'tool_call_complete'
+    | 'tool_call_error'
+    | 'validation_start'
+    | 'validation_complete'
+    | 'validation_error'
+    | 'preview_start'
+    | 'preview_ready'
+    | 'preview_error';
+  tool?: string;  // Tool name (for tool_call_* statuses)
+  details: string;  // User-friendly description
+  timestamp: number;
+}
+
+export class StatusBroadcaster {
+  private clients: Set<WebSocket>;
+  
+  constructor() {
+    this.clients = new Set();
+  }
+  
+  addClient(ws: WebSocket) {
+    this.clients.add(ws);
+  }
+  
+  removeClient(ws: WebSocket) {
+    this.clients.delete(ws);
+  }
+  
+  broadcastStatus(status: StatusMessage) {
+    const message = JSON.stringify(status);
+    this.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+  
+  sendToolCallStart(messageId: string, tool: string, details: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'tool_call_start',
+      tool,
+      details,
+      timestamp: Date.now(),
+    });
+  }
+  
+  sendToolCallComplete(messageId: string, tool: string, details: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'tool_call_complete',
+      tool,
+      details,
+      timestamp: Date.now(),
+    });
+  }
+  
+  sendToolCallError(messageId: string, tool: string, error: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'tool_call_error',
+      tool,
+      details: error,
+      timestamp: Date.now(),
+    });
+  }
+  
+  sendValidationStart(messageId: string, stage: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'validation_start',
+      details: `Running ${stage}...`,
+      timestamp: Date.now(),
+    });
+  }
+  
+  sendValidationComplete(messageId: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'validation_complete',
+      details: 'All validations passed',
+      timestamp: Date.now(),
+    });
+  }
+  
+  sendPreviewStart(messageId: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'preview_start',
+      details: 'Starting preview server...',
+      timestamp: Date.now(),
+    });
+  }
+  
+  sendPreviewReady(messageId: string, port: number) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'preview_ready',
+      details: `Preview ready at http://localhost:${port}`,
+      timestamp: Date.now(),
+    });
+  }
+}
+
+// Global instance
+export const statusBroadcaster = new StatusBroadcaster();
+```
+
+**Tool Calling Integration:**
+```typescript
+// apps/server/src/llm/tool-executor.ts
+import { statusBroadcaster } from '../websocket/status-broadcaster';
+
+export async function executeToolCalls(
+  toolCalls: ToolCall[],
+  messageId: string
+) {
+  for (const toolCall of toolCalls) {
+    const toolName = toolCall.function.name;
+    
+    // Broadcast start
+    statusBroadcaster.sendToolCallStart(
+      messageId,
+      toolName,
+      getToolStartMessage(toolName, toolCall.function.arguments)
+    );
+    
+    try {
+      // Execute tool
+      const result = await executeTool(toolCall);
+      
+      // Broadcast success
+      statusBroadcaster.sendToolCallComplete(
+        messageId,
+        toolName,
+        getToolCompleteMessage(toolName, result)
+      );
+    } catch (error) {
+      // Broadcast error
+      statusBroadcaster.sendToolCallError(
+        messageId,
+        toolName,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+      throw error;
+    }
+  }
+}
+
+function getToolStartMessage(tool: string, args: any): string {
+  switch (tool) {
+    case 'addDependency':
+      return `Installing ${args.packageName}...`;
+    case 'createFile':
+      return `Creating ${args.filename}...`;
+    case 'editFile':
+      return `Editing ${args.filename}...`;
+    default:
+      return `Executing ${tool}...`;
+  }
+}
+
+function getToolCompleteMessage(tool: string, result: any): string {
+  switch (tool) {
+    case 'addDependency':
+      return `Package installed successfully`;
+    case 'createFile':
+      return `File created: ${result.filename}`;
+    case 'editFile':
+      return `File updated: ${result.filename}`;
+    default:
+      return `${tool} completed`;
+  }
+}
+```
+
+**Validation Pipeline Integration:**
+```typescript
+// apps/server/src/validation/pipeline.ts
+import { statusBroadcaster } from '../websocket/status-broadcaster';
+
+export async function validateDesign(
+  code: string,
+  messageId: string
+): Promise<ValidationResult> {
+  // Stage 1: Dependency Check
+  statusBroadcaster.sendValidationStart(messageId, 'dependency check');
+  await checkDependencies(code);
+  
+  // Stage 2: TypeScript Compilation
+  statusBroadcaster.sendValidationStart(messageId, 'TypeScript compilation');
+  const tsResult = await compileTypeScript(code);
+  if (!tsResult.success) {
+    throw new Error(`TypeScript error: ${tsResult.error}`);
+  }
+  
+  // Stage 3: ESLint
+  statusBroadcaster.sendValidationStart(messageId, 'ESLint check');
+  const eslintResult = await runESLint(code);
+  if (!eslintResult.success) {
+    throw new Error(`ESLint error: ${eslintResult.error}`);
+  }
+  
+  // Stage 4: ID Injection
+  statusBroadcaster.sendValidationStart(messageId, 'ID injection');
+  const injectedCode = injectIds(code);
+  
+  // All validations passed
+  statusBroadcaster.sendValidationComplete(messageId);
+  
+  return {
+    success: true,
+    code: injectedCode,
+  };
+}
+```
+
+**Preview Server Integration:**
+```typescript
+// apps/server/src/preview/preview-manager.ts
+import { statusBroadcaster } from '../websocket/status-broadcaster';
+
+export class PreviewManager {
+  async start(messageId?: string) {
+    if (messageId) {
+      statusBroadcaster.sendPreviewStart(messageId);
+    }
+    
+    // Spawn Vite process...
+    const port = await this.spawnVite();
+    
+    if (messageId) {
+      statusBroadcaster.sendPreviewReady(messageId, port);
+    }
+    
+    return { port, status: 'RUNNING' };
+  }
+}
+```
+
+**WebSocket Handler Integration:**
+```typescript
+// apps/server/src/websocket/handler.ts
+import { statusBroadcaster } from './status-broadcaster';
+
+export function handleWebSocketConnection(ws: WebSocket) {
+  // Add client to status broadcaster
+  statusBroadcaster.addClient(ws);
+  
+  ws.on('message', async (data) => {
+    const message = JSON.parse(data.toString());
+    
+    if (message.type === 'message') {
+      // Process generation request
+      await handleGenerationRequest(message);
+    }
+  });
+  
+  ws.on('close', () => {
+    statusBroadcaster.removeClient(ws);
+  });
+}
+```
+
+**Frontend Status Message Component:**
+```typescript
+// apps/web/src/components/chat/StatusMessage.tsx
+import { Box, Chip, Typography, Collapse } from '@mui/material';
+import { useState } from 'react';
+
+interface StatusMessageProps {
+  status: 'tool_call_start' | 'tool_call_complete' | 'tool_call_error' |
+          'validation_start' | 'validation_complete' | 'validation_error' |
+          'preview_start' | 'preview_ready' | 'preview_error';
+  tool?: string;
+  details: string;
+}
+
+export function StatusMessage({ status, tool, details }: StatusMessageProps) {
+  const [expanded, setExpanded] = useState(false);
+  
+  const getColor = () => {
+    if (status.includes('_start')) return 'info';
+    if (status.includes('_complete') || status.includes('_ready')) return 'success';
+    if (status.includes('_error')) return 'error';
+    return 'default';
+  };
+  
+  const getIcon = () => {
+    if (status.includes('_start')) return <CircularProgress size={16} />;
+    if (status.includes('_complete') || status.includes('_ready')) return <CheckCircleIcon />;
+    if (status.includes('_error')) return <ErrorIcon />;
+    return null;
+  };
+  
+  return (
+    <Box 
+      sx={{ 
+        py: 0.5, 
+        px: 1, 
+        bgcolor: 'action.hover',
+        borderRadius: 1,
+        my: 0.5,
+      }}
+      onClick={() => setExpanded(!expanded)}
+    >
+      <Chip
+        icon={getIcon()}
+        label={tool ? `${tool}: ${details}` : details}
+        color={getColor() as any}
+        size="small"
+        variant="outlined"
+      />
+      <Collapse in={expanded}>
+        <Typography variant="caption" color="text.secondary">
+          {status} at {new Date().toLocaleTimeString()}
+        </Typography>
+      </Collapse>
+    </Box>
+  );
+}
+```
+
+**Message List Integration:**
+```typescript
+// apps/web/src/components/chat/MessageList.tsx
+import { StatusMessage } from './StatusMessage';
+
+function MessageList({ messages }) {
+  return (
+    <Box>
+      {messages.map(msg => {
+        if (msg.type === 'status') {
+          return (
+            <StatusMessage
+              key={msg.id}
+              status={msg.status}
+              tool={msg.tool}
+              details={msg.details}
+            />
+          );
+        }
+        
+        return (
+          <MessageItem
+            key={msg.id}
+            message={msg}
+          />
+        );
+      })}
+    </Box>
+  );
+}
+```
+
+---
+
 ### 5. Validation Pipeline
 
-**Decision:** Four-stage validation before rendering
+**Decision:** Five-stage validation before rendering
 
 **Stages:**
 1. **Dependency Check** - Verify imported packages are installed
 2. **TypeScript Compilation** - Verify code compiles
 3. **ESLint Validation** - Check for common errors
-4. **ID Injection** - Add system-managed IDs to components
+4. **Knip Check** - Detect unused imports/exports
+5. **ID Injection** - Add system-managed IDs to components
 
 **Validation Flow:**
 ```
@@ -375,6 +958,8 @@ Install missing dependencies (apps/preview/package.json)
 TypeScript compile (tsc)
       ↓
 ESLint check (eslint)
+      ↓
+Knip check (unused imports/exports)
       ↓
 ID injection (parser)
       ↓
@@ -451,6 +1036,116 @@ export function injectIds(code: string, existingIds: Set<string>): {
 - Pattern: `id_<design>_<counter>` (e.g., `id_landing_0`, `id_landing_1`)
 - UUIDs for uniqueness when needed
 - Persisted in source file for user/LLM reference
+
+---
+
+### 6.1. Component Transformer Pipeline
+
+**Decision:** Wrap component instances with helper HOCs for audit/selection functionality
+
+**Location:** `apps/server/src/transformer/`
+
+**Process:**
+After ID injection, code is transformed to wrap each component instance:
+
+```typescript
+// Input (from LLM, after ID injection)
+<Box id="id_landing_0">
+  <Typography id="id_landing_1">Welcome</Typography>
+  <Button id="id_landing_2">Get Started</Button>
+</Box>
+
+// Output (in build folder, wrapped)
+<AuditWrapper id="id_landing_0" componentName="Box">
+  <SelectionBox>
+    <Box>
+      <AuditWrapper id="id_landing_1" componentName="Typography">
+        <SelectionBox>
+          <Typography>Welcome</Typography>
+        </SelectionBox>
+      </AuditWrapper>
+      <AuditWrapper id="id_landing_2" componentName="Button">
+        <SelectionBox>
+          <Button>Get Started</Button>
+        </SelectionBox>
+      </AuditWrapper>
+    </Box>
+  </SelectionBox>
+</AuditWrapper>
+```
+
+**Wrapper Components:**
+- `AuditWrapper` - Handles audit mode highlighting, tracks component usage
+- `SelectionBox` - Shows selection bounding box, handles click events
+- Both from `@cycledesign/runtime` package
+
+**Build Folder Structure:**
+```
+build/
+└── designs/
+    ├── landing-page.tsx      # Transformed code with wrappers
+    └── *.tsx
+```
+
+**See `docs/TECHNICAL_DESIGN.md` section "Component Transformer"** for complete implementation details.
+
+---
+
+### 6.2. Database Schema
+
+**Purpose:** Index component usage for audit mode and selection tracking
+
+**Location:** `.cycledesign/index.db` (SQLite, gitignored)
+
+**Schema:**
+```sql
+-- Component usage index
+CREATE TABLE component_usage (
+  id INTEGER PRIMARY KEY,
+  component_name TEXT NOT NULL,     -- e.g., "Button"
+  design_file TEXT NOT NULL,         -- e.g., "landing-page.tsx"
+  instance_id TEXT NOT NULL,         -- e.g., "id_landing_2"
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Component metadata
+CREATE TABLE components (
+  name TEXT PRIMARY KEY,
+  source_file TEXT NOT NULL,         -- e.g., "design-system/components/Button.tsx"
+  prop_schema JSON,                  -- TypeScript prop types as JSON
+  variants JSON,                     -- Available variants
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+```
+
+**Database Operations:**
+- **Rebuilt on startup** from source code (not versioned)
+- **Updated during ID injection** when new instances detected
+- **Queried by audit mode** to show component usage across designs
+
+**See `docs/TECHNICAL_DESIGN.md` section "Database"** for complete schema details.
+
+---
+
+### 6.3. MCP Server Integration
+
+**Purpose:** Expose design system to LLM for introspection during code generation
+
+**Location:** `apps/server/src/mcp/`
+
+**MCP Tools Available to LLM:**
+- `list_components` - Return all available components with summaries
+- `get_component(name)` - Return full component definition (props, variants)
+- `get_tokens(type)` - Return design tokens by category
+- `check_composition_rules(parent, child)` - Validate component nesting
+- `search_components(query)` - Find components by semantic purpose
+
+**Phase 3 Usage:**
+In Phase 3 (free-form generation), MCP tools are **not yet enforced**. LLM can use any React components. MCP integration becomes critical in Phase 4 (Design System Mode).
+
+**See `docs/TECHNICAL_DESIGN.md` section "MCP Server"** for complete tool definitions.
 
 ---
 
@@ -625,9 +1320,22 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 - [ ] **1.4** Integrate code generation with WebSocket
   - [ ] Handle code generation prompts via WebSocket messages
   - [ ] Trigger LLM tool calling on message receive
+  - [ ] **Send status messages via WebSocket during tool execution**
   - [ ] Stream generation progress via WebSocket `content` messages
   - [ ] Save generated designs to session messages
   - [ ] **Validate:** Test with Phase 2a WebSocket client
+
+- [ ] **1.4.1** Implement WebSocket status messaging for tool calls
+  - [ ] Create `src/websocket/status-broadcaster.ts` for sending status updates
+  - [ ] Define status message types (tool_call_*, validation_*, preview_*)
+  - [ ] Hook into tool calling pipeline to emit status events
+  - [ ] Send `tool_call_start` before each tool executes
+  - [ ] Send `tool_call_complete` after each tool succeeds
+  - [ ] Send `tool_call_error` if tool fails
+  - [ ] Send validation status messages during validation pipeline
+  - [ ] Send preview server status messages during start/restart
+  - [ ] Include user-friendly details in each status message
+  - [ ] **Validate:** Status messages appear in chat in real-time
 
 - [ ] **1.5** Implement validation pipeline
   - [ ] Create `src/validation/typescript.ts` (tsc runner)
@@ -683,7 +1391,17 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 ### Frontend Setup
 
-- [ ] **2.3** Create preview server control UI
+- [ ] **2.3** Implement two-pane layout architecture
+  - [ ] Update `MainLayout.tsx` with full-width header (auto height)
+  - [ ] Create resizable split pane component (left: 30-70%, right: flex)
+  - [ ] Implement draggable divider with visual feedback
+  - [ ] Add min/max width constraints for left pane (based on content)
+  - [ ] Ensure left pane contains: SessionSelector, MessageList, PromptInput, ConnectionStatus
+  - [ ] Ensure right pane contains: PreviewFrame component
+  - [ ] Add localStorage persistence for divider position (optional)
+  - [ ] **Validate:** Divider drags smoothly, respects boundaries
+
+- [ ] **2.4** Create preview server control UI
   - [ ] `PreviewServerStatus` component (start/stop buttons)
   - [ ] Display current server state (STOPPED/STARTING/RUNNING/ERROR)
   - [ ] Show current preview port
@@ -691,7 +1409,16 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Confirm before stopping active preview
   - [ ] **Validate:** Control preview server from UI
 
-- [ ] **2.4** Create log viewer component
+- [ ] **2.5** Implement tool call status messaging
+  - [ ] Create `StatusMessage` component for displaying tool call progress
+  - [ ] Support all status types (tool_call_*, validation_*, preview_*)
+  - [ ] Display status messages inline in message list
+  - [ ] Use info/success/error color coding based on status
+  - [ ] Auto-expand/collapse status details
+  - [ ] Show spinner during in-progress operations
+  - [ ] **Validate:** Status messages display in real-time during generation
+
+- [ ] **2.6** Create log viewer component
   - [ ] `PreviewLogViewer` component with scrollable log display
   - [ ] Color-code log levels (info, warn, error)
   - [ ] Auto-scroll to latest log
@@ -700,7 +1427,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Filter by log type
   - [ ] **Validate:** Logs stream in real-time from backend
 
-- [ ] **2.5** Create preview iframe component
+- [ ] **2.7** Create preview iframe component
   - [ ] `PreviewFrame` component pointing to dynamic preview URL
   - [ ] Handle iframe load events
   - [ ] Error boundary for iframe crashes
@@ -708,7 +1435,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Update src on server restart
   - [ ] **Validate:** Use Chrome DevTools MCP to verify iframe renders
 
-- [ ] **2.6** Implement communication bridge
+- [ ] **2.8** Implement communication bridge
   - [ ] `useIframeBridge` custom hook
   - [ ] Send commands to iframe (SET_MODE, HIGHLIGHT)
   - [ ] Receive events from iframe (COMPONENT_SELECTED)
@@ -716,14 +1443,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Message queue for pre-ready messages
   - [ ] **Validate:** Test bidirectional communication
 
-- [ ] **2.7** Build prompt input UI
+- [ ] **2.9** Build prompt input UI
   - [ ] `PromptInput` component with text field
   - [ ] Image upload support (drag & drop)
   - [ ] Character count and limits
   - [ ] Submit button with loading state
   - [ ] **Validate:** Test prompt submission flow
 
-- [ ] **2.8** Create design generation UI
+- [ ] **2.10** Create design generation UI
   - [ ] `DesignGenerator` component
   - [ ] Display generation progress
   - [ ] Show validation errors with suggestions
@@ -731,7 +1458,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] View raw code option (for debugging)
   - [ ] **Validate:** Test full generation flow
 
-- [ ] **2.9** Implement mode switching
+- [ ] **2.11** Implement mode switching
   - [ ] Mode toggle (Select / Preview / Audit)
   - [ ] Visual indicator of current mode
   - [ ] Send mode changes to iframe (dynamic port)
@@ -890,233 +1617,23 @@ VITE_TOOL_URL=http://localhost:3000
 
 ---
 
----
-
 ## LLM Tool Definitions
 
-### createFile Tool
+**See `docs/TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation" (lines 215-508)** for complete tool definitions including:
 
-**Purpose:** Create new design file from a text prompt
+- `createFile` - Create new design files
+- `editFile` - Modify existing designs (patch-based)
+- `renameFile` - Rename design files
+- `deleteFile` - Delete design files
+- `addDependency` - Add npm packages to preview environment
+- `submitWork` - Signal completion and trigger validation (REQUIRED when done)
+- `askUser` - Request clarification from user
 
-**Parameters:**
-```typescript
-{
-  filename: z.string()
-    .regex(/^[a-z0-9-]+\.tsx$/, 'Must be kebab-case with .tsx extension'),
-  location: z.enum(['designs']),
-  code: z.string(),
-  description: z.string(),
-}
-```
-
-**Example Call:**
-```typescript
-{
-  "name": "createFile",
-  "arguments": {
-    "filename": "landing-page.tsx",
-    "location": "designs",
-    "code": "import React from 'react';...",
-    "description": "SaaS landing page with hero and features"
-  }
-}
-```
-
----
-
-### editFile Tool
-
-**Purpose:** Modify existing design using patch-based editing
-
-**Parameters:**
-```typescript
-{
-  filename: z.string()
-    .regex(/^[a-z0-9-]+\.tsx$/, 'Must be kebab-case with .tsx extension'),
-  location: z.enum(['designs']),
-  patch: z.string().describe('Unified diff patch to apply'),
-  description: z.string().describe('Summary of changes'),
-}
-```
-
-**Usage:**
-```typescript
-// User: "Make the button blue"
-// LLM returns unified diff patch (not full file rewrite)
-{
-  "name": "editFile",
-  "arguments": {
-    "filename": "landing-page.tsx",
-    "location": "designs",
-    "patch": "--- a/designs/landing-page.tsx\n+++ b/designs/landing-page.tsx\n@@ -5,7 +5,7 @@\n-      <Button variant=\"contained\" color=\"primary\">\n+      <Button variant=\"contained\" sx={{ bgcolor: 'blue' }}>",
-    "description": "Changed button color to blue"
-  }
-}
-```
-
-**Benefits of patch-based editing:**
-- Smaller token usage (only changed lines)
-- Faster execution
-- Preserves user edits outside changed areas
-- Git-diff friendly
-
----
-
-### renameFile Tool
-
-**Purpose:** Rename or move design file
-
-**Parameters:**
-```typescript
-{
-  oldPath: z.string()
-    .regex(/^designs\/[a-z0-9-]+\.tsx$/, 'Must be in designs/ directory'),
-  newPath: z.string()
-    .regex(/^designs\/[a-z0-9-]+\.tsx$/, 'Must be in designs/ directory'),
-}
-```
-
-**Usage:**
-```typescript
-{
-  "name": "renameFile",
-  "arguments": {
-    "oldPath": "designs/landing-page.tsx",
-    "newPath": "designs/homepage.tsx"
-  }
-}
-```
-
----
-
-### deleteFile Tool
-
-**Purpose:** Delete design file
-
-**Parameters:**
-```typescript
-{
-  filename: z.string()
-    .regex(/^[a-z0-9-]+\.tsx$/, 'Must be kebab-case with .tsx extension'),
-  location: z.enum(['designs']),
-  confirm: z.boolean().describe('Must be true to confirm deletion'),
-}
-```
-
-**Usage:**
-```typescript
-{
-  "name": "deleteFile",
-  "arguments": {
-    "filename": "landing-page.tsx",
-    "location": "designs",
-    "confirm": true
-  }
-}
-```
-
----
-
-### addDependency Tool
-
-**Purpose:** Add npm package to preview environment
-
-**Parameters:**
-```typescript
-{
-  packageName: z.string(),
-  version: z.string().optional().default('latest'),
-  reason: z.string().describe('Why this package is needed'),
-}
-```
-
-**Usage:**
-```typescript
-// LLM generates code importing 'framer-motion'
-// LLM calls addDependency tool before or after createFile
-// Backend runs npm install in apps/preview/
-{
-  "name": "addDependency",
-  "arguments": {
-    "packageName": "framer-motion",
-    "version": "^11.0.0",
-    "reason": "Needed for animations in the design"
-  }
-}
-```
-
----
-
-### submitWork Tool
-
-**Purpose:** Signal completion of work and trigger validation pipeline
-
-**Parameters:**
-```typescript
-{
-  summary: z.string().describe('Summary of all changes made'),
-  filesCreated: z.array(z.string()).describe('List of files created'),
-  filesModified: z.array(z.string()).describe('List of files modified'),
-  dependenciesAdded: z.array(z.string()).optional().describe('Packages added'),
-}
-```
-
-**Usage:**
-```typescript
-// LLM makes multiple tool calls, then signals completion:
-{
-  "name": "submitWork",
-  "arguments": {
-    "summary": "Created landing page with hero and features section",
-    "filesCreated": ["landing-page.tsx"],
-    "filesModified": [],
-    "dependenciesAdded": ["framer-motion"]
-  }
-}
-```
-
-**Workflow:**
-1. LLM makes multiple tool calls (createFile, addDependency, etc.)
-2. LLM calls `submitWork` to signal completion
-3. **Only then** does backend run validation pipeline
-4. If validation passes → success response
-5. If validation fails → error returned to LLM for fixes
-6. LLM fixes issues and calls `submitWork` again
-
----
-
-### askUser Tool
-
-**Purpose:** Request clarification or input from user when LLM is stuck
-
-**Parameters:**
-```typescript
-{
-  question: z.string().describe('Question to ask the user'),
-  context: z.string().describe('Why this information is needed'),
-  suggestions: z.array(z.string()).optional().describe('Suggested answers'),
-}
-```
-
-**Usage:**
-```typescript
-// LLM needs clarification
-{
-  "name": "askUser",
-  "arguments": {
-    "question": "What color scheme should I use?",
-    "context": "The design requires a primary color but none was specified",
-    "suggestions": ["Blue (default)", "Green", "Purple", "Orange"]
-  }
-}
-```
-
-**Flow:**
-1. LLM calls `askUser` tool
-2. Backend displays question in UI
-3. User provides answer
-4. Backend sends answer back to LLM
-5. LLM continues with user's input
+**Key Points:**
+- All tools enforce file constraints (.tsx only, designs/ directory, kebab-case filenames)
+- `submitWork` MUST be called when LLM is completely done (triggers validation + preview start)
+- `submitWork` takes empty arguments `{}` - system automatically tracks changes
+- See "Multi-Turn Tool Calling Workflow" below for complete flow example
 
 ---
 
@@ -1141,10 +1658,13 @@ User: "Create a landing page with animations"
 │      code: "..."}       │
 │                         │
 │  3. submitWork          │
-│     {summary: "..."}    │
+│     {}  ← EMPTY!        │
+│         System tracks:  │
+│         - filesCreated  │
+│         - dependencies  │
 └─────────────────────────┘
          │
-         │ Triggers validation
+         │ Triggers validation + preview start
          ▼
 ```
 
@@ -1201,8 +1721,9 @@ Backend → LLM:
 │      patch: "@@ -42..."}│
 │                         │
 │  2. submitWork          │
-│     {summary: "Fixed    │
-│      TypeScript error"} │
+│     {}  ← EMPTY again!  │
+│         (triggers       │
+│          validation)    │
 └─────────────────────────┘
          │
          │ Triggers validation again
@@ -1352,78 +1873,16 @@ LLM continues with dashboard design
 
 ### Code Generation System Prompt
 
-```typescript
-export const CODE_GENERATION_SYSTEM_PROMPT = `
-You are a code generation assistant for CycleDesign.
+**See `docs/TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation"** for the complete `CODE_GENERATION_SYSTEM_PROMPT` including:
 
-**Your Task:**
-Generate React/TypeScript code for UI designs based on user prompts.
-
-**Available Tools:**
-- createFile: Create new design files
-- editFile: Modify existing designs (patch-based)
-- renameFile: Rename design files
-- deleteFile: Delete design files
-- addDependency: Add npm packages to preview environment
-- submitWork: Signal completion and trigger validation (REQUIRED after making changes)
-- askUser: Request clarification from user when stuck or need input
-
-**Workflow:**
-1. You can make MULTIPLE tool calls in any order
-2. When you're DONE making changes, you MUST call submitWork
-3. Validation only runs AFTER you call submitWork
-4. If validation fails, fix errors and call submitWork again
-5. If you need user input, call askUser and wait for response
-
-**File Constraints:**
-- All files must be in the "designs" directory
-- All files must have .tsx extension
-- Filenames must be kebab-case (e.g., "landing-page.tsx")
-- You cannot modify files outside designs/ directory
-- You cannot modify config files, source code, or system files
-
-**Output Format:**
-Use the createFile tool to return structured output with:
-- filename: Kebab-case name ending in .tsx (e.g., "landing-page.tsx")
-- location: Always "designs"
-- code: Complete, runnable TypeScript React code
-- description: One-line description of the design
-
-**Code Requirements:**
-1. Export a default React functional component
-2. Use TypeScript with proper types (no 'any')
-3. DO NOT add 'id' props to components (system will inject them)
-4. Use only these packages by default: react, @mui/material, @mui/icons-material
-5. Code must be complete and runnable (no placeholders, no comments like "...")
-6. Use proper indentation (2 spaces)
-7. Import components from '@mui/material' not '@mui/material/Button'
-
-**For Edits:**
-Use the editFile tool with a unified diff patch when:
-- User requests a small change to existing design
-- You want to preserve user modifications outside changed areas
-- The change is localized to specific lines
-
-**If you need additional packages:**
-Call the addDependency tool BEFORE calling submitWork
-
-**If you need user input:**
-Call the askUser tool with:
-- question: Clear question to user
-- context: Why you need this information
-- suggestions: Optional suggested answers
-
-**IMPORTANT:**
-- NEVER call submitWork until you're completely done
-- You can make multiple tool calls before submitWork
-- If validation fails, fix errors and call submitWork again
-- Don't keep trying the same fix - if stuck, call askUser
-
-**Examples:**
-- Good filename: "user-dashboard.tsx", "login-form.tsx"
-- Bad filename: "UserDashboard.tsx", "my design.tsx", "test.txt"
-`;
-```
+- Tool availability and usage instructions
+- **CRITICAL: submitWork requirements** (must call when done, empty arguments)
+- File constraints (.tsx only, designs/ directory, kebab-case)
+- Code requirements (TypeScript, no id props, complete runnable code)
+- Patch-based editing guidelines
+- Dependency management instructions
+- askUser usage guidelines
+- Good/bad filename examples
 
 ---
 
