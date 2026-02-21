@@ -9,6 +9,13 @@ On Windows, running `npm run dev` blocks the terminal. Use this skill to start i
 
 ### Step 1: Check if ports are already in use
 
+**Git Bash:**
+```bash
+netstat -anop | grep :3000
+netstat -anop | grep :3001
+```
+
+**PowerShell/cmd:**
 ```bash
 netstat -ano | findstr :3000
 netstat -ano | findstr :3001
@@ -16,6 +23,13 @@ netstat -ano | findstr :3001
 
 If processes are found, kill them:
 
+**Git Bash:**
+```bash
+kill -f <pid1>
+kill -f <pid2>
+```
+
+**PowerShell/cmd:**
 ```bash
 taskkill /F /PID <pid1>
 taskkill /F /PID <pid2>
@@ -23,8 +37,12 @@ taskkill /F /PID <pid2>
 
 ### Step 2: Start the dev server in the background
 
-Use cmd to properly redirect output:
+**Git Bash:**
+```bash
+npm run dev > tmp/dev.log 2>&1 &
+```
 
+**PowerShell/cmd:**
 ```bash
 cmd /c "start /B npm run dev > tmp\dev.log 2>&1"
 ```
@@ -33,6 +51,12 @@ cmd /c "start /B npm run dev > tmp\dev.log 2>&1"
 
 Wait a few seconds and check the logs:
 
+**Git Bash:**
+```bash
+sleep 3 && tail -50 tmp/dev.log
+```
+
+**PowerShell:**
 ```bash
 powershell -Command "Start-Sleep -Seconds 3; Get-Content tmp\dev.log"
 ```
@@ -52,11 +76,20 @@ Use this skill when:
 
 To check server status at any time:
 
+**Git Bash:**
+```bash
+tail -50 tmp/dev.log
+```
+
+**PowerShell:**
 ```bash
 powershell -Command "Get-Content tmp\dev.log -Tail 50"
 ```
 
-Or use `type tmp\dev.log` on Windows cmd.
+**cmd:**
+```bash
+type tmp\dev.log
+```
 
 ### Troubleshooting
 
@@ -78,15 +111,44 @@ Or use `type tmp\dev.log` on Windows cmd.
 **If servers crash with EADDRINUSE:**
 - Wait 5 seconds for ports to release, then restart
 - Or use different ports:
-  ```bash
-  $env:PORT=3002; npm run dev --workspace=@cycledesign/server
-  ```
+
+**Git Bash:**
+```bash
+export PORT=3002 && npm run dev --workspace=@cycledesign/server
+```
+
+**PowerShell:**
+```bash
+$env:PORT=3002; npm run dev --workspace=@cycledesign/server
+```
 
 **⚠️ NEVER run `taskkill /F /IM node.exe`** - This kills opencode and all Node processes!
 
 **If frontend won't load:**
-1. Check backend is running: `http://localhost:3001/health`
-2. Check logs: `Get-Content tmp\dev.log -Tail 30`
+1. Check backend is running:
+
+**Git Bash:**
+```bash
+curl http://localhost:3001/health
+```
+
+**PowerShell:**
+```bash
+Invoke-RestMethod -Uri "http://localhost:3001/health"
+```
+
+2. Check logs:
+
+**Git Bash:**
+```bash
+tail -30 tmp/dev.log
+```
+
+**PowerShell:**
+```bash
+Get-Content tmp\dev.log -Tail 30
+```
+
 3. Look for "Server running on" messages
 
 **If HMR not working:**
@@ -95,6 +157,13 @@ Or use `type tmp\dev.log` on Windows cmd.
 - Clear browser cache
 
 **Check logs before restarting:**
+
+**Git Bash:**
+```bash
+tail -20 tmp/dev.log
+```
+
+**PowerShell:**
 ```bash
 Get-Content tmp\dev.log -Tail 20
 ```

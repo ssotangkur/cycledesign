@@ -70,6 +70,20 @@ Start-Process "http://localhost:3000"
 ```
 
 ### Automated Verification
+
+**Git Bash:**
+```bash
+# Check backend health
+curl http://localhost:3001/health
+
+# List sessions via API
+curl http://localhost:3001/api/sessions
+
+# Check logs
+tail -20 tmp/dev.log
+```
+
+**PowerShell:**
 ```bash
 # Check backend health
 Invoke-RestMethod -Uri "http://localhost:3001/health"
