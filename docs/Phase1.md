@@ -1034,6 +1034,7 @@ export function useSession() {
   - [ ] CORS configuration for frontend
   - [ ] Health check endpoint (`GET /health`)
   - [ ] Rate limiter middleware (for API endpoints, not LLM calls)
+  - [ ] **Validate:** Use Chrome DevTools MCP to verify `/health` endpoint returns 200
 
 - [ ] **1.3** Implement Qwen OAuth authentication (RFC 8628 Device Flow)
   - [ ] Create `src/llm/qwen-auth.ts` (OAuth Device Flow + PKCE)
@@ -1089,6 +1090,7 @@ export function useSession() {
   - [ ] `POST /api/sessions/:id/messages` - Add message
   - [ ] `DELETE /api/sessions/:id` - Delete session
   - [ ] `DELETE /api/sessions/:id/messages/:msgId` - Delete specific message
+  - [ ] **Validate:** Test all endpoints with Chrome DevTools MCP network inspection
 
 - [ ] **1.8** Implement LLM completion endpoint
   - [ ] `POST /api/complete` - Send prompt, get LLM response (non-streaming)
@@ -1098,6 +1100,7 @@ export function useSession() {
   - [ ] Add request timeout and abort handling
   - [ ] Return usage metadata (token counts, cache stats if available)
   - [ ] Return rate limit headers (X-RateLimit-Remaining, X-Retry-After)
+  - [ ] **Validate:** Use Chrome DevTools MCP to monitor SSE stream and verify response delivery
 
 - [ ] **1.9** Add environment configuration
   - [ ] Create `.env.example` with required variables
@@ -1119,6 +1122,7 @@ export function useSession() {
   - [ ] Create MUI theme with custom colors/typography
   - [ ] Add ThemeProvider to app root
   - [ ] Configure CSS baseline
+  - [ ] **Validate:** Use Chrome DevTools MCP screenshot to verify theme renders correctly
 
 - [ ] **2.3** Create app structure
   - [ ] Set up React Router with routes
@@ -1146,6 +1150,8 @@ export function useSession() {
   - [ ] Auto-scroll to latest message
   - [ ] Error handling with toast notifications
   - [ ] Show token usage after completion (optional)
+  - [ ] **Validate:** Use Chrome DevTools MCP to simulate user input and verify end-to-end flow
+  - [ ] **Validate:** Check console for errors with `chrome_console` after sending prompts
 
 - [ ] **2.7** Add session management UI
   - [ ] Session list view
@@ -1162,6 +1168,7 @@ export function useSession() {
   - [ ] Add concurrent dev script (runs frontend + backend)
   - [ ] Configure proxy in Vite for API calls
   - [ ] Add `.env` files for both apps
+  - [ ] **Validate:** Use Chrome DevTools MCP to verify both frontend and backend are running
 
 - [ ] **3.2** Test LLM integration
   - [ ] Verify Qwen authentication flow
@@ -1171,17 +1178,20 @@ export function useSession() {
   - [ ] Test basic prompt/response flow
   - [ ] Test session persistence
   - [ ] Test session restoration
+  - [ ] **Validate:** Use Chrome DevTools MCP to automate full conversation flow and capture screenshots
 
 - [ ] **3.3** Test error scenarios
   - [ ] Network failure handling
   - [ ] LLM API error handling
   - [ ] Session storage failure handling
   - [ ] Invalid input validation
+  - [ ] **Validate:** Use Chrome DevTools MCP `chrome_network` to verify error responses and status codes
 
 - [ ] **3.4** Performance testing
   - [ ] Measure message load time
   - [ ] Test with large conversation history
   - [ ] Verify no memory leaks in long sessions
+  - [ ] **Validate:** Use Chrome DevTools MCP `chrome_evaluate` to measure performance metrics
 
 ---
 
@@ -1192,19 +1202,26 @@ export function useSession() {
   - [ ] Environment setup guide
   - [ ] Running development server
   - [ ] Basic usage guide
-
-- [ ] **4.2** Create Qwen API setup guide
-  - [ ] Link to DashScope console (https://dashscope.console.aliyun.com/)
-  - [ ] API key generation instructions
-  - [ ] Rate limit and quota information
-  - [ ] Troubleshooting tips
-
-- [ ] **4.3** Add API documentation
-  - [ ] Document all endpoints
-  - [ ] Include request/response examples
-  - [ ] Error code reference
+  - [ ] OAuth authorization flow explanation
+  - [ ] **Validate:** Use Chrome DevTools MCP to capture screenshots for documentation
 
 ---
+
+### Chrome DevTools MCP Validation
+
+**Setup (one-time):**
+- [ ] Start Chrome with remote debugging: `chrome.exe --remote-debugging-port=9222`
+- [ ] Verify MCP connection: `opencode mcp list` shows chrome-devtools ✓
+
+**Validation Workflow:**
+- [ ] Navigate to `http://localhost:3000` with `chrome_navigate`
+- [ ] Take baseline screenshot with `chrome_screenshot`
+- [ ] Test chat flow: `chrome_fill` input, `chrome_click` send button
+- [ ] Monitor network requests with `chrome_network` for API calls
+- [ ] Check console errors with `chrome_console`
+- [ ] Execute JS validation with `chrome_evaluate`
+- [ ] Capture final state screenshot for documentation
+
 
 ## Dependencies
 
