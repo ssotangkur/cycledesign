@@ -123,36 +123,60 @@ export const api = {
     onComplete: (response: CompletionResponse) => void,
     onError: (error: Error) => void
   ): Promise<() => void> => {
-    const eventSource = new EventSource(
-      `${API_BASE_URL}/api/complete/stream?messages=${encodeURIComponent(JSON.stringify(messages))}`
-    );
-
+    const controller = new AbortController();
     let content = '';
-    let toolCalls: CompletionResponse['toolCalls'];
-    let usage: CompletionResponse['usage'];
 
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      
-      if (data.type === 'chunk') {
-        content += data.content;
-        onChunk(data.content);
-      } else if (data.type === 'complete') {
-        toolCalls = data.toolCalls;
-        usage = data.usage;
-        onComplete({ content, toolCalls, usage });
-        eventSource.close();
-      } else if (data.type === 'error') {
-        onError(new Error(data.error));
-        eventSource.close();
+    const fetchAndStream = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/complete/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`API Error: ${response.status} - ${errorText}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'content') {
+                content += data.content;
+                onChunk(data.content);
+              } else if (data.type === 'done') {
+                onComplete({ content, usage: data.usage });
+              } else if (data.type === 'error') {
+                throw new Error(data.error);
+              }
+            }
+          }
+        }
+      } catch (error: any) {
+        if (error.name === 'AbortError') return;
+        onError(error);
       }
     };
 
-    eventSource.onerror = () => {
-      onError(new Error('Connection lost'));
-      eventSource.close();
-    };
+    fetchAndStream();
 
-    return () => eventSource.close();
+    return () => controller.abort();
   },
 };
