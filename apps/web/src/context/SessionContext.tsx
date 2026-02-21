@@ -103,6 +103,12 @@ export function SessionProvider({ children }: SessionProviderProps) {
       return;
     }
 
+    // Prevent concurrent sends
+    if (state.isStreaming) {
+      console.warn('[sendMessage] Already streaming, ignoring duplicate call');
+      return;
+    }
+
     console.log('[sendMessage] Starting with messages count:', state.messages.length);
     
     const userMessage: Message = {

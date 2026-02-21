@@ -168,7 +168,7 @@ export const api = {
             }
           }
         }
-      } catch (error: unknown) {
+      } catch (error: any) {
         if (error.name === 'AbortError') return;
         onError(error);
       }
