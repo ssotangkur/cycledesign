@@ -542,210 +542,6 @@ export class QwenProvider {
 - Daily: 1000 requests/day (resets at 0:00 Beijing Time)
 - Free tier (no credit card required)
 
-**Implementation:**
-```typescript
-// apps/server/src/llm/rate-limiter.ts
-import { TokenBucket } from './token-bucket';
-
-interface RateLimitConfig {
-  requestsPerMinute: number;
-  tokensPerMinute: number;
-  retryBaseDelay: number;      // ms, e.g., 1000
-  retryMaxDelay: number;       // ms, e.g., 30000
-  jitterFactor: number;        // 0-1, e.g., 0.5 for ±50% jitter
-}
-
-export class RateLimiter {
-  private bucket: TokenBucket;
-  private config: RateLimitConfig;
-  private recentErrors: Map<string, number> = new Map(); // provider -> error count
-
-  constructor(config: RateLimitConfig) {
-    this.config = config;
-    this.bucket = new TokenBucket(config.tokensPerMinute);
-  }
-
-  async acquire(provider: string, tokens: number): Promise<void> {
-    const canProceed = await this.bucket.consume(tokens);
-    
-    if (!canProceed) {
-      const waitTime = this.calculateBackoff(provider);
-      throw new RateLimitError(`Rate limit exceeded. Retry in ${waitTime}ms`, waitTime);
-    }
-  }
-
-  private calculateBackoff(provider: string): number {
-    const errorCount = this.recentErrors.get(provider) || 0;
-    const baseDelay = this.config.retryBaseDelay * Math.pow(2, errorCount);
-    const cappedDelay = Math.min(baseDelay, this.config.retryMaxDelay);
-    
-    // Add jitter: delay ± (jitterFactor * delay)
-    const jitterRange = cappedDelay * this.config.jitterFactor;
-    const jitter = (Math.random() * 2 - 1) * jitterRange;
-    
-    return Math.max(0, cappedDelay + jitter);
-  }
-
-  recordSuccess(provider: string): void {
-    this.recentErrors.set(provider, Math.max(0, (this.recentErrors.get(provider) || 0) - 1));
-  }
-
-  recordError(provider: string): void {
-    this.recentErrors.set(provider, (this.recentErrors.get(provider) || 0) + 1);
-  }
-}
-
-// apps/server/src/llm/token-bucket.ts
-export class TokenBucket {
-  private tokens: number;
-  private maxTokens: number;
-  private refillRate: number; // tokens per ms
-  private lastRefill: number;
-
-  constructor(tokensPerMinute: number) {
-    this.maxTokens = tokensPerMinute;
-    this.tokens = tokensPerMinute;
-    this.refillRate = tokensPerMinute / 60000;
-    this.lastRefill = Date.now();
-  }
-
-  private refill(): void {
-    const now = Date.now();
-    const elapsed = now - this.lastRefill;
-    this.tokens = Math.min(this.maxTokens, this.tokens + (elapsed * this.refillRate));
-    this.lastRefill = now;
-  }
-
-  async consume(tokens: number): Promise<boolean> {
-    this.refill();
-    
-    if (this.tokens >= tokens) {
-      this.tokens -= tokens;
-      return true;
-    }
-    
-    return false;
-  }
-
-  getTimeUntilAvailable(tokens: number): number {
-    this.refill();
-    if (this.tokens >= tokens) return 0;
-    
-    const needed = tokens - this.tokens;
-    return Math.ceil(needed / this.refillRate);
-  }
-}
-
-// apps/server/src/llm/errors.ts
-export class RateLimitError extends Error {
-  constructor(message: string, public retryAfterMs: number) {
-    super(message);
-    this.name = 'RateLimitError';
-  }
-}
-```
-
-**Provider Integration with Rate Limiting:**
-```typescript
-// apps/server/src/llm/providers/qwen.ts
-import { generateText, streamText } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
-import { RateLimiter } from '../rate-limiter';
-import { RateLimitError } from '../errors';
-
-const rateLimiter = new RateLimiter({
-  requestsPerMinute: 60,
-  tokensPerMinute: 100000,
-  retryBaseDelay: 1000,
-  retryMaxDelay: 30000,
-  jitterFactor: 0.5,
-});
-
-export class QwenProvider {
-  private model: ReturnType<ReturnType<typeof createOpenAI>>;
-
-  constructor() {
-    const openai = createOpenAI({
-      apiKey: process.env.QWEN_API_KEY,
-      baseURL: process.env.QWEN_PROXY_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    });
-    this.model = openai('qwen-plus');
-  }
-
-  async complete(messages: CoreMessage[], options?: { stream?: boolean; maxRetries?: number }) {
-    const maxRetries = options?.maxRetries ?? 3;
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        // Estimate tokens (rough: 4 chars ≈ 1 token)
-        const estimatedTokens = messages.reduce(
-          (sum, m) => sum + (m.content?.length || 0) / 4,
-          0
-        );
-
-        // Acquire rate limit tokens
-        await rateLimiter.acquire('qwen', Math.ceil(estimatedTokens));
-
-        if (options?.stream) {
-          const result = await streamText({
-            model: this.model,
-            messages,
-            temperature: 0.7,
-            maxTokens: 2048,
-          });
-          rateLimiter.recordSuccess('qwen');
-          return { stream: result.textStream };
-        } else {
-          const result = await generateText({
-            model: this.model,
-            messages,
-            temperature: 0.7,
-            maxTokens: 2048,
-          });
-          rateLimiter.recordSuccess('qwen');
-          return {
-            content: result.text,
-            toolCalls: result.toolCalls,
-            usage: result.usage,
-          };
-        }
-      } catch (error) {
-        lastError = error as Error;
-
-        if (error instanceof RateLimitError) {
-          // Wait for retry-after time, then retry
-          await new Promise(resolve => setTimeout(resolve, error.retryAfterMs));
-          rateLimiter.recordError('qwen');
-          continue;
-        }
-
-        // For other errors (network, API, etc.), use exponential backoff
-        if (attempt < maxRetries) {
-          const backoff = Math.min(1000 * Math.pow(2, attempt), 10000);
-          const jitter = backoff * 0.5 * (Math.random() * 2 - 1);
-          await new Promise(resolve => setTimeout(resolve, backoff + jitter));
-          rateLimiter.recordError('qwen');
-          continue;
-        }
-
-        throw error;
-      }
-    }
-
-    throw lastError || new Error('Max retries exceeded');
-  }
-}
-```
-
-**Benefits:**
-- ✅ No external proxy needed
-- ✅ Token bucket algorithm for smooth rate limiting
-- ✅ Exponential backoff with jitter (prevents thundering herd)
-- ✅ Per-provider error tracking
-- ✅ Configurable limits per provider
-- ✅ Works with any OpenAI-compatible endpoint
-
 ---
 
 ### 2. LLM Provider Architecture
@@ -760,27 +556,36 @@ export class QwenProvider {
 - ✅ Caching middleware (experimental, ready for future optimization)
 - ✅ Lightweight and actively maintained
 
-**Provider Setup:**
+**Provider Setup (Simplified Example):**
 ```typescript
 // apps/server/src/llm/providers/qwen.ts
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText, streamText } from 'ai';
+import { QwenAuth } from '../qwen-auth';
+
+const qwenAuth = new QwenAuth();
 
 export class QwenProvider {
-  private model: ReturnType<ReturnType<typeof createOpenAI>>;
+  private model: ReturnType<ReturnType<typeof createOpenAI>> | null = null;
 
-  constructor() {
+  private async getModel() {
+    if (this.model) return this.model;
+    
+    const token = await qwenAuth.getToken();
     const openai = createOpenAI({
-      apiKey: process.env.QWEN_API_KEY,
-      baseURL: process.env.QWEN_PROXY_URL || 'http://localhost:8080',
+      apiKey: token,
+      baseURL: 'https://portal.qwen.ai/v1',
     });
-    this.model = openai('qwen-plus');
+    this.model = openai('coder-model');
+    return this.model;
   }
 
   async complete(messages: CoreMessage[], options?: { stream?: boolean }) {
+    const model = await this.getModel();
+    
     if (options?.stream) {
       const result = await streamText({
-        model: this.model,
+        model,
         messages,
         temperature: 0.7,
         maxTokens: 2048,
@@ -788,7 +593,7 @@ export class QwenProvider {
       return { stream: result.textStream };
     } else {
       const result = await generateText({
-        model: this.model,
+        model,
         messages,
         temperature: 0.7,
         maxTokens: 2048,
@@ -802,6 +607,13 @@ export class QwenProvider {
   }
 }
 ```
+
+**Note:** This is a simplified example. The actual implementation in `src/llm/providers/qwen.ts` includes:
+- Request queue with jitter for rate limiting
+- 429 auto-retry with Retry-After header handling
+- 401 error recovery with token refresh
+- Qwen-specific headers (User-Agent, X-DashScope-*)
+- Full retry logic with exponential backoff
 
 **Message Format (OpenAI Standard):**
 ```typescript
@@ -1075,14 +887,14 @@ export function useSession() {
   - [ ] Handle 401 (auth error) and 429 (rate limit) responses
   - [ ] Write integration tests for provider
 
-- [ ] **1.6** Implement session storage
+- [ ] **1.7** Implement session storage
   - [ ] Create `.cycledesign/sessions/` directory structure
   - [ ] Implement session metadata management (`meta.json`)
   - [ ] Implement JSONL message storage (`messages.jsonl`)
   - [ ] Add session ID generation utility
   - [ ] Add session cleanup utility (delete old sessions)
 
-- [ ] **1.7** Create session API endpoints
+- [ ] **1.8** Create session API endpoints
   - [ ] `GET /api/sessions` - List all sessions
   - [ ] `POST /api/sessions` - Create new session
   - [ ] `GET /api/sessions/:id` - Get session details
@@ -1092,7 +904,7 @@ export function useSession() {
   - [ ] `DELETE /api/sessions/:id/messages/:msgId` - Delete specific message
   - [ ] **Validate:** Test all endpoints with Chrome DevTools MCP network inspection
 
-- [ ] **1.8** Implement LLM completion endpoint
+- [ ] **1.9** Implement LLM completion endpoint
   - [ ] `POST /api/complete` - Send prompt, get LLM response (non-streaming)
   - [ ] `POST /api/complete/stream` - Send prompt, stream LLM response (SSE)
   - [ ] Integrate with session storage (auto-save messages including tool calls)
@@ -1102,7 +914,7 @@ export function useSession() {
   - [ ] Return rate limit headers (X-RateLimit-Remaining, X-Retry-After)
   - [ ] **Validate:** Use Chrome DevTools MCP to monitor SSE stream and verify response delivery
 
-- [ ] **1.9** Add environment configuration
+- [ ] **1.10** Add environment configuration
   - [ ] Create `.env.example` with required variables
   - [ ] Load env vars with `dotenv`
   - [ ] Validate required env vars on startup
