@@ -46,7 +46,7 @@ function ChatPage() {
         </Box>
       )}
       <MessageList messages={messages} isLoading={isLoading} isStreaming={isStreaming} />
-      <PromptInput onSend={handleSend} disabled={isStreaming || !messages.length} />
+      <PromptInput onSend={handleSend} disabled={isStreaming} />
     </ChatContainer>
   );
 }

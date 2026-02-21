@@ -100,6 +100,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
       timestamp: Date.now(),
     };
 
+    // Optimistically add user message to state
     setState((prev) => ({
       ...prev,
       messages: [...prev.messages, userMessage],
@@ -109,28 +110,30 @@ export function SessionProvider({ children }: SessionProviderProps) {
     }));
 
     try {
+      // Save user message to backend
       await api.addMessage(state.currentSession.id, userMessage);
 
-      const messagesToSend = [...state.messages, userMessage].map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp,
-        toolCalls: m.toolCalls,
-        toolCallId: m.toolCallId,
-      }));
+      // Use functional update to get latest messages
+      setState((prev) => {
+        const messagesToSend = prev.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+          toolCalls: m.toolCalls,
+          toolCallId: m.toolCallId,
+        }));
 
-      let assistantContent = '';
-      
-      await new Promise<void>((resolve, reject) => {
+        let assistantContent = '';
+        
         api.completeStream(
           messagesToSend,
           (chunk) => {
             assistantContent += chunk;
-            setState((prev) => ({
-              ...prev,
+            setState((prev2) => ({
+              ...prev2,
               messages: [
-                ...prev.messages.filter((m) => m.id !== 'streaming'),
+                ...prev2.messages.filter((m) => m.id !== 'streaming'),
                 {
                   id: 'streaming',
                   role: 'assistant',
@@ -150,35 +153,31 @@ export function SessionProvider({ children }: SessionProviderProps) {
               tokenCount: response.usage?.totalTokens,
             };
 
-            setState((prev) => ({
-              ...prev,
-              messages: [...prev.messages.filter((m) => m.id !== 'streaming'), assistantMessage],
+            setState((prev2) => ({
+              ...prev2,
+              messages: [...prev2.messages.filter((m) => m.id !== 'streaming'), assistantMessage],
               isStreaming: false,
               tokenUsage: response.usage || null,
             }));
 
             api.addMessage(state.currentSession!.id, assistantMessage).catch(console.error);
-            resolve();
           },
           (error) => {
-            setState((prev) => ({
-              ...prev,
+            setState((prev2) => ({
+              ...prev2,
               isStreaming: false,
               error: error.message,
             }));
-            reject(error);
           }
         );
+        
+        return prev;
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
-      setState((prev) => ({
-        ...prev,
-        isStreaming: false,
-        error: errorMessage,
-      }));
+      setState((prev) => ({ ...prev, error: errorMessage, isStreaming: false }));
     }
-  }, [state.currentSession, state.messages]);
+  }, [state.currentSession]);
 
   const deleteSession = useCallback(async (id: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
