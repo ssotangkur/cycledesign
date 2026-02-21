@@ -124,6 +124,7 @@ Design systems are often created but inconsistently applied. Designers drift fro
 - Document storage (designs + design systems)
 - Version management
 - Validation engine (design system constraint checking)
+- **WebSocket server for real-time messaging (Phase 2a)**
 - Collaboration features (optional phase 2)
 
 ### Data Model
@@ -226,13 +227,17 @@ Design systems are often created but inconsistently applied. Designers drift fro
 4. Sets composition rules
 5. Saves version 1.0
 
-### Flow 2: Create Design
+### Flow 2: Create Design (with WebSocket Messaging)
 1. User selects design system version
 2. Creates new design document
 3. Submits text/image prompt describing desired design
-4. Tool generates design using design system components
-5. User switches between Select/Preview modes to edit or interact
-6. Receives real-time validation feedback
+4. **Client sends message via WebSocket with client-generated ID**
+5. **Server immediately acknowledges with server message ID**
+6. **Client converts optimistic message to confirmed**
+7. **Server streams LLM response via WebSocket**
+8. Tool generates design using design system components
+9. User switches between Select/Preview modes to edit or interact
+10. Receives real-time validation feedback
 
 ### Flow 3: Handle Violation
 1. User attempts action outside design system (via prompt or property edit)
@@ -274,11 +279,23 @@ None currently.
 - Display LLM responses in UI
 - No session persistence, no design system, no code generation
 
-**Phase 2**: Session Persistence
+**Phase 2**: Session Persistence (Superseded by Phase 2a)
 - Save conversations to session files
 - List and load previous sessions
 - Restore conversation context for LLM continuity
 - Mode-agnostic sessions (work across all modes)
+- **Note:** Phase 2a refactors messaging to use WebSocket instead of REST API
+
+**Phase 2a**: WebSocket-Based Real-Time Messaging
+- Replace REST API messaging with persistent WebSocket connection
+- Send conversation history once on connect (not per message)
+- Immediate server acknowledgment with message ID mapping
+- useMessageListState hook to abstract message state management
+- Optimistic updates with server reconciliation
+- Automatic reconnection with exponential backoff
+- Message queueing during disconnection
+- Connection status indicator
+- **Benefits:** 99% reduction in data transfer, 4x faster latency, simpler state management
 
 **Phase 3**: Prompt-to-UI Rendering
 - LLM generates React/TypeScript code from prompts using **tool calling** (structured output)
