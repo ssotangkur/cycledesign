@@ -1,0 +1,19 @@
+{
+  "name": "cycledesign",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=@cycledesign/server\" \"npm run dev --workspace=@cycledesign/web\"",
+    "dev:server": "npm run dev --workspace=@cycledesign/server",
+    "dev:web": "npm run dev --workspace=@cycledesign/web",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
