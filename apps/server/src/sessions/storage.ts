@@ -178,13 +178,3 @@ export async function deleteMessage(sessionId: string, messageId: string): Promi
     return false;
   }
 }
-
-export async function updateSessionMeta(sessionId: string, updates: Partial<SessionMeta>): Promise<void> {
-  const sessionDir = join(SESSIONS_DIR, sessionId);
-  const meta = await getSession(sessionId);
-  
-  if (meta) {
-    const updated = { ...meta, ...updates, updatedAt: new Date().toISOString() };
-    await fs.writeFile(join(sessionDir, 'meta.json'), JSON.stringify(updated, null, 2), 'utf-8');
-  }
-}

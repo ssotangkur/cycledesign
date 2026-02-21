@@ -217,13 +217,14 @@ export function SessionProvider({ children }: SessionProviderProps) {
     try {
       await api.deleteSession(id);
       setState((prev) => {
-        const { [id]: _, ...remainingLabels } = prev.sessionLabelsMap;
+        const newLabelsMap = { ...prev.sessionLabelsMap };
+        delete newLabelsMap[id];
         return {
           ...prev,
           sessions: prev.sessions.filter((s) => s.id !== id),
           currentSession: prev.currentSession?.id === id ? null : prev.currentSession,
           messages: prev.currentSession?.id === id ? [] : prev.messages,
-          sessionLabelsMap: remainingLabels,
+          sessionLabelsMap: newLabelsMap,
           isLoading: false,
         };
       });

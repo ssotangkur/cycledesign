@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { Box, Alert, Chip } from '@mui/material';
 import ChatContainer from '../components/chat/ChatContainer';
 import SessionSelector from '../components/chat/SessionSelector';
@@ -9,9 +10,10 @@ function ChatPage() {
   const { messages, isLoading, isStreaming, error, sendMessage, tokenUsage, clearError } =
     useSession();
 
-  const handleSend = async (content: string) => {
+  const handleSend = useCallback(async (content: string) => {
+    console.log('[ChatPage] handleSend called with:', content);
     await sendMessage(content);
-  };
+  }, [sendMessage]);
 
   return (
     <ChatContainer>

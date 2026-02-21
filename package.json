@@ -11,9 +11,13 @@
     "dev:web": "npm run dev --workspace=@cycledesign/web",
     "build": "npm run build --workspaces",
     "lint": "npm run lint --workspaces",
+    "lint:fix": "npm run lint:fix --workspaces --if-present",
+    "knip": "knip",
+    "validate": "npm run lint && npm run knip",
     "test": "npm run test --workspaces"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "knip": "^5.85.0"
   }
 }

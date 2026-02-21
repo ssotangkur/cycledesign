@@ -4,9 +4,10 @@
 
 1. **Start servers**: Use `/dev-server` skill
 2. **Make changes** to code
-3. **Test with @chrome-devtools** or `@ui-tester` to verify UI works
-4. **Fix issues** based on feedback
-5. **Repeat** until verified
+3. **Run validations**: Execute `npm run validate` to run ESLint and Knip
+4. **Test with @chrome-devtools** or `@ui-tester` to verify UI works
+5. **Fix issues** based on feedback
+6. **Repeat** until verified
 
 ---
 

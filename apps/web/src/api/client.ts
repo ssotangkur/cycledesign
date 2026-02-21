@@ -144,6 +144,7 @@ export const api = {
         const decoder = new TextDecoder();
         let buffer = '';
 
+        // eslint-disable-next-line no-constant-condition
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -167,7 +168,7 @@ export const api = {
             }
           }
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error.name === 'AbortError') return;
         onError(error);
       }
