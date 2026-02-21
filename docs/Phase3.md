@@ -1,4 +1,4 @@
-﻿# Phase 3: Prompt-to-UI Rendering
+# Phase 3: Prompt-to-UI Rendering
 
 **This document extends `docs/TECHNICAL_DESIGN.md` with Phase 3 implementation details.**
 
@@ -7,12 +7,12 @@
 - `Phase3.md` - Implementation details, timelines, checklists, Phase 3-specific flows
 
 **Cross-References:**
-- LLM Tool Definitions â†’ See `TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation"
-- System Prompt â†’ See `TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation"
-- WebSocket Protocol â†’ See `TECHNICAL_DESIGN.md` section "WebSocket Server (Phase 2a)"
-- Component Transformer â†’ See `TECHNICAL_DESIGN.md` section "Component Transformer"
-- Database Schema â†’ See `TECHNICAL_DESIGN.md` section "Database"
-- MCP Server â†’ See `TECHNICAL_DESIGN.md` section "MCP Server"
+- LLM Tool Definitions → See `TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation"
+- System Prompt → See `TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation"
+- WebSocket Protocol → See `TECHNICAL_DESIGN.md` section "WebSocket Server (Phase 2a)"
+- Component Transformer → See `TECHNICAL_DESIGN.md` section "Component Transformer"
+- Database Schema → See `TECHNICAL_DESIGN.md` section "Database"
+- MCP Server → See `TECHNICAL_DESIGN.md` section "MCP Server"
 
 ---
 
@@ -51,24 +51,24 @@ Phase 3 builds on Phase 1 (LLM Provider Integration) and Phase 2a (WebSocket-Bas
 **Structure:**
 ```
 cycledesign/
-â”œâ”€â”€ apps/
-â”‚   â”œâ”€â”€ web/                    # Tool UI (Vite instance 1)
-â”‚   â”‚   â”œâ”€â”€ index.html
-â”‚   â”‚   â”œâ”€â”€ vite.config.ts
-â”‚   â”‚   â”œâ”€â”€ package.json        # Tool dependencies (MUI, etc.)
-â”‚   â”‚   â””â”€â”€ src/
-â”‚   â”‚       â””â”€â”€ main.tsx
-â”‚   â”‚
-â”‚   â””â”€â”€ preview/                # Preview (Vite instance 2, backend-managed)
-â”‚       â”œâ”€â”€ index.html
-â”‚       â”œâ”€â”€ vite.config.ts
-â”‚       â”œâ”€â”€ package.json        # LLM-managed dependencies
-â”‚       â””â”€â”€ src/
-â”‚           â””â”€â”€ main.tsx
-â”‚
-â””â”€â”€ workspace/
-    â””â”€â”€ designs/                # LLM-generated design code
-        â””â”€â”€ *.tsx
+├── apps/
+│   ├── web/                    # Tool UI (Vite instance 1)
+│   │   ├── index.html
+│   │   ├── vite.config.ts
+│   │   ├── package.json        # Tool dependencies (MUI, etc.)
+│   │   └── src/
+│   │       └── main.tsx
+│   │
+│   └── preview/                # Preview (Vite instance 2, backend-managed)
+│       ├── index.html
+│       ├── vite.config.ts
+│       ├── package.json        # LLM-managed dependencies
+│       └── src/
+│           └── main.tsx
+│
+└── workspace/
+    └── designs/                # LLM-generated design code
+        └── *.tsx
 ```
 
 **Port Configuration:**
@@ -77,13 +77,13 @@ cycledesign/
 - Preview: `http://localhost:3002` (started/stopped by backend, dynamic)
 
 **Rationale:**
-- âœ… Complete dependency isolation (LLM can add any npm package)
-- âœ… CSS/JS isolation (no style leakage)
-- âœ… Independent HMR (preview updates don't affect tool UI)
-- âœ… Security boundary (LLM code runs in separate context)
-- âœ… Different React versions possible (if needed)
-- âœ… Backend controls preview lifecycle (start/stop on demand)
-- âš ï¸ Two dev servers to manage (minor complexity tradeoff)
+- ✅ Complete dependency isolation (LLM can add any npm package)
+- ✅ CSS/JS isolation (no style leakage)
+- ✅ Independent HMR (preview updates don't affect tool UI)
+- ✅ Security boundary (LLM code runs in separate context)
+- ✅ Different React versions possible (if needed)
+- ✅ Backend controls preview lifecycle (start/stop on demand)
+- ⚠️ Two dev servers to manage (minor complexity tradeoff)
 
 ---
 
@@ -93,17 +93,17 @@ cycledesign/
 
 **Architecture:**
 ```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”      â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”      â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚   Tool UI       â”‚      â”‚   Backend       â”‚      â”‚  Preview Vite   â”‚
-â”‚   (port 3000)   â”‚â—„â”€â”€â”€â”€â–ºâ”‚   (port 3001)   â”‚â—„â”€â”€â”€â”€â–ºâ”‚  (port 3002)    â”‚
-â”‚                 â”‚      â”‚                 â”‚      â”‚                 â”‚
-â”‚ - iframe embed  â”‚      â”‚ - spawn Vite    â”‚      â”‚ - serves design â”‚
-â”‚ - log display   â”‚      â”‚ - log streaming â”‚      â”‚ - HMR           â”‚
-â”‚ - start/stop UI â”‚      â”‚ - API endpoints â”‚      â”‚ - React render  â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜      â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜      â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-         â”‚                        â”‚                        â”‚
-         â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                          postMessage (3000 â†” 3002)
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   Tool UI       │      │   Backend       │      │  Preview Vite   │
+│   (port 3000)   │◄────►│   (port 3001)   │◄────►│  (port 3002)    │
+│                 │      │                 │      │                 │
+│ - iframe embed  │      │ - spawn Vite    │      │ - serves design │
+│ - log display   │      │ - log streaming │      │ - HMR           │
+│ - start/stop UI │      │ - API endpoints │      │ - React render  │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
+         │                        │                        │
+         └────────────────────────┴────────────────────────┘
+                          postMessage (3000 ↔ 3002)
 ```
 
 **Server States:**
@@ -141,11 +141,11 @@ data: {"type":"ready","port":3002,"timestamp":1234567892}
 - Port conflict detection and resolution
 
 **Rationale:**
-- âœ… Centralized control (backend manages all services)
-- âœ… Real-time visibility (logs streamed to UI)
-- âœ… Resource efficiency (stop when not needed)
-- âœ… MCP-ready (future: expose as MCP tools)
-- âœ… Error recovery (auto-restart, status monitoring)
+- ✅ Centralized control (backend manages all services)
+- ✅ Real-time visibility (logs streamed to UI)
+- ✅ Resource efficiency (stop when not needed)
+- ✅ MCP-ready (future: expose as MCP tools)
+- ✅ Error recovery (auto-restart, status monitoring)
 
 ### 3. iframe Sandboxing
 
@@ -187,31 +187,31 @@ data: {"type":"ready","port":3002,"timestamp":1234567892}
 
 **Layout Structure:**
 ```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚                    Full-Width Header Bar                    â”‚
-â”‚                    CycleDesign Logo + Nav                   â”‚
-â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
-â”‚                                  â”‚                          â”‚
-â”‚         Left Pane                â”‚      Right Pane          â”‚
-â”‚      (Chat + Sessions)           â”‚    (Preview iframe)      â”‚
-â”‚      (resizable width)           â”‚    (flex remaining)      â”‚
-â”‚                                  â”‚                          â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚
-â”‚  â”‚    Session Selector      â”‚   â”‚  â”‚                    â”‚  â”‚
-â”‚  â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤   â”‚  â”‚                    â”‚  â”‚
-â”‚  â”‚                          â”‚   â”‚  â”‚                    â”‚  â”‚
-â”‚  â”‚     Message List         â”‚   â”‚  â”‚   Preview iframe   â”‚  â”‚
-â”‚  â”‚                          â”‚   â”‚  â”‚   (port 3002)      â”‚  â”‚
-â”‚  â”‚                          â”‚   â”‚  â”‚                    â”‚  â”‚
-â”‚  â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤   â”‚  â”‚                    â”‚  â”‚
-â”‚  â”‚     Prompt Input         â”‚   â”‚  â”‚                    â”‚  â”‚
-â”‚  â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤   â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚
-â”‚  â”‚    Status Bar            â”‚   â”‚                          â”‚
-â”‚  â”‚  (connection status)     â”‚   â”‚                          â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚                          â”‚
-â”‚                                  â”‚                          â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-          â†• draggable divider â†•
+┌─────────────────────────────────────────────────────────────┐
+│                    Full-Width Header Bar                    │
+│                    CycleDesign Logo + Nav                   │
+├──────────────────────────────────┬──────────────────────────┤
+│                                  │                          │
+│         Left Pane                │      Right Pane          │
+│      (Chat + Sessions)           │    (Preview iframe)      │
+│      (resizable width)           │    (flex remaining)      │
+│                                  │                          │
+│  ┌──────────────────────────┐   │  ┌────────────────────┐  │
+│  │    Session Selector      │   │  │                    │  │
+│  ├──────────────────────────┤   │  │                    │  │
+│  │                          │   │  │                    │  │
+│  │     Message List         │   │  │   Preview iframe   │  │
+│  │                          │   │  │   (port 3002)      │  │
+│  │                          │   │  │                    │  │
+│  ├──────────────────────────┤   │  │                    │  │
+│  │     Prompt Input         │   │  │                    │  │
+│  ├──────────────────────────┤   │  └────────────────────┘  │
+│  │    Status Bar            │   │                          │
+│  │  (connection status)     │   │                          │
+│  └──────────────────────────┘   │                          │
+│                                  │                          │
+└──────────────────────────────────┴──────────────────────────┘
+          ↕ draggable divider ↕
 ```
 
 **Layout Specifications:**
@@ -338,14 +338,14 @@ function MainLayout() {
 - Error overlay if preview server fails
 
 **Rationale:**
-- âœ… Clear visual separation between chat and preview
-- âœ… Side-by-side workflow (chat with LLM while viewing results)
-- âœ… User can adjust pane widths based on task (more chat space vs more preview space)
-- âœ… Maximize preview real estate when needed
-- âœ… Persistent chat context visible during preview interaction
-- âœ… No layout shift when preview starts/stops
-- âœ… Header adapts to content (better for future additions)
-- âš ï¸ Requires careful handling of divider drag boundaries
+- ✅ Clear visual separation between chat and preview
+- ✅ Side-by-side workflow (chat with LLM while viewing results)
+- ✅ User can adjust pane widths based on task (more chat space vs more preview space)
+- ✅ Maximize preview real estate when needed
+- ✅ Persistent chat context visible during preview interaction
+- ✅ No layout shift when preview starts/stops
+- ✅ Header adapts to content (better for future additions)
+- ⚠️ Requires careful handling of divider drag boundaries
 
 ---
 
@@ -356,14 +356,14 @@ function MainLayout() {
 **File Structure:**
 ```
 workspace/
-â””â”€â”€ designs/
-    â”œâ”€â”€ landing-page.tsx
-    â”œâ”€â”€ dashboard.tsx
-    â””â”€â”€ *.tsx
+└── designs/
+    ├── landing-page.tsx
+    ├── dashboard.tsx
+    └── *.tsx
 ```
 
 **File Naming:**
-- User-provided name slugified (e.g., "Landing Page" â†’ `landing-page.tsx`)
+- User-provided name slugified (e.g., "Landing Page" → `landing-page.tsx`)
 - Auto-generated UUID if no name provided
 - Overwrite on regeneration (with confirmation)
 
@@ -391,7 +391,7 @@ workspace/
 
 **Message Flow:**
 ```typescript
-// Client â†’ Server (via WebSocket)
+// Client → Server (via WebSocket)
 {
   "type": "message",
   "id": "msg_client_1234567890",
@@ -399,7 +399,7 @@ workspace/
   "timestamp": 1705312210000
 }
 
-// Server â†’ Client (immediate acknowledgment)
+// Server → Client (immediate acknowledgment)
 {
   "type": "ack",
   "messageId": "msg_client_1234567890",
@@ -410,7 +410,7 @@ workspace/
 // Server processes generation (tool calling happens server-side)
 // Server sends status updates for each tool call
 
-// Server â†’ Client (tool call status: starting)
+// Server → Client (tool call status: starting)
 {
   "type": "status",
   "messageId": "msg_003",
@@ -419,7 +419,7 @@ workspace/
   "details": "Installing framer-motion package..."
 }
 
-// Server â†’ Client (tool call status: complete)
+// Server → Client (tool call status: complete)
 {
   "type": "status",
   "messageId": "msg_003",
@@ -428,7 +428,7 @@ workspace/
   "details": "Package installed successfully"
 }
 
-// Server â†’ Client (next tool call)
+// Server → Client (next tool call)
 {
   "type": "status",
   "messageId": "msg_003",
@@ -437,7 +437,7 @@ workspace/
   "details": "Generating landing-page.tsx..."
 }
 
-// Server â†’ Client (tool call complete)
+// Server → Client (tool call complete)
 {
   "type": "status",
   "messageId": "msg_003",
@@ -446,7 +446,7 @@ workspace/
   "details": "File created successfully"
 }
 
-// Server â†’ Client (validation starting)
+// Server → Client (validation starting)
 {
   "type": "status",
   "messageId": "msg_003",
@@ -454,7 +454,7 @@ workspace/
   "details": "Running TypeScript compilation..."
 }
 
-// Server â†’ Client (validation complete)
+// Server → Client (validation complete)
 {
   "type": "status",
   "messageId": "msg_003",
@@ -462,7 +462,7 @@ workspace/
   "details": "All validations passed"
 }
 
-// Server â†’ Client (preview starting)
+// Server → Client (preview starting)
 {
   "type": "status",
   "messageId": "msg_003",
@@ -470,13 +470,13 @@ workspace/
   "details": "Starting preview server..."
 }
 
-// Server â†’ Client (streaming content response)
+// Server → Client (streaming content response)
 {
   "type": "content",
   "content": "Created landing page with hero section and animations!"
 }
 
-// Server â†’ Client (done)
+// Server → Client (done)
 {
   "type": "done",
   "messageId": "msg_003",
@@ -511,14 +511,14 @@ The LLM uses **7 separate tools** (defined in `apps/server/src/llm/tools/`):
 7. **askUser** - Request clarification from user
 
 **Why Separate Tools (not single generateCode tool):**
-- âœ… Modular workflow (LLM can make multiple changes before validation)
-- âœ… Patch-based editing (editFile uses unified diff for efficiency)
-- âœ… Clear separation of concerns (create vs edit vs delete)
-- âœ… Better error handling (each tool has specific validation)
-- âœ… Multi-turn conversations (LLM can fix errors incrementally)
-- âœ… User in the loop (askUser for clarification, submitWork for completion)
+- ✅ Modular workflow (LLM can make multiple changes before validation)
+- ✅ Patch-based editing (editFile uses unified diff for efficiency)
+- ✅ Clear separation of concerns (create vs edit vs delete)
+- ✅ Better error handling (each tool has specific validation)
+- ✅ Multi-turn conversations (LLM can fix errors incrementally)
+- ✅ User in the loop (askUser for clarification, submitWork for completion)
 
-**Tool Definitions:** See `docs/TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation" for complete tool schemas.
+**Tool Definitions:** See `TECHNICAL_DESIGN.md` section "LLM Tool Calling for Code Generation" for complete tool schemas.
 
 **LLM Instructions:**
 - Export default React functional component
@@ -950,23 +950,23 @@ function MessageList({ messages }) {
 **Validation Flow:**
 ```
 LLM generates code
-      â†“
+      ↓
 Check imports vs installed packages
-      â†“
+      ↓
 Install missing dependencies (apps/preview/package.json)
-      â†“
+      ↓
 TypeScript compile (tsc)
-      â†“
+      ↓
 ESLint check (eslint)
-      â†“
+      ↓
 Knip check (unused imports/exports)
-      â†“
+      ↓
 ID injection (parser)
-      â†“
+      ↓
 Write to workspace/designs/
-      â†“
+      ↓
 Preview Vite HMR picks up change
-      â†“
+      ↓
 Render in preview iframe
 ```
 
@@ -1082,12 +1082,12 @@ After ID injection, code is transformed to wrap each component instance:
 **Build Folder Structure:**
 ```
 build/
-â””â”€â”€ designs/
-    â”œâ”€â”€ landing-page.tsx      # Transformed code with wrappers
-    â””â”€â”€ *.tsx
+└── designs/
+    ├── landing-page.tsx      # Transformed code with wrappers
+    └── *.tsx
 ```
 
-**See `docs/TECHNICAL_DESIGN.md` section "Component Transformer"** for complete implementation details.
+**See `TECHNICAL_DESIGN.md` section "Component Transformer"** for complete implementation details.
 
 ---
 
@@ -1125,7 +1125,7 @@ CREATE TABLE components (
 - **Updated during ID injection** when new instances detected
 - **Queried by audit mode** to show component usage across designs
 
-**See `docs/TECHNICAL_DESIGN.md` section "Database"** for complete schema details.
+**See `TECHNICAL_DESIGN.md` section "Database"** for complete schema details.
 
 ---
 
@@ -1145,17 +1145,17 @@ CREATE TABLE components (
 **Phase 3 Usage:**
 In Phase 3 (free-form generation), MCP tools are **not yet enforced**. LLM can use any React components. MCP integration becomes critical in Phase 4 (Design System Mode).
 
-**See `docs/TECHNICAL_DESIGN.md` section "MCP Server"** for complete tool definitions.
+**See `TECHNICAL_DESIGN.md` section "MCP Server"** for complete tool definitions.
 
 ---
 
 ### 7. Preview Communication Bridge
 
-**Decision:** postMessage API for cross-origin communication (3000 â†” 3002)
+**Decision:** postMessage API for cross-origin communication (3000 ↔ 3002)
 
 **Message Types:**
 ```typescript
-// Parent (tool UI, port 3000) â†’ Iframe (preview, port 3002)
+// Parent (tool UI, port 3000) → Iframe (preview, port 3002)
 interface ParentMessage {
   type: 'SET_MODE';
   payload: { mode: 'select' | 'preview' | 'audit' };
@@ -1167,7 +1167,7 @@ interface ParentMessage {
   payload: { instanceId: string; props: Record<string, any> };
 };
 
-// Iframe (preview, port 3002) â†’ Parent (tool UI, port 3000)
+// Iframe (preview, port 3002) → Parent (tool UI, port 3000)
 interface IframeMessage {
   type: 'MODE_READY';
   payload: { mode: string };
@@ -1223,11 +1223,11 @@ window.addEventListener('message', (event) => {
 **Preview Structure:**
 ```
 apps/preview/
-â”œâ”€â”€ index.html
-â”œâ”€â”€ vite.config.ts
-â”œâ”€â”€ package.json        # Base dependencies (react, react-dom)
-â””â”€â”€ src/
-    â””â”€â”€ main.tsx        # Dynamic design loader
+├── index.html
+├── vite.config.ts
+├── package.json        # Base dependencies (react, react-dom)
+└── src/
+    └── main.tsx        # Dynamic design loader
 ```
 
 **Vite Config (apps/preview/vite.config.ts):**
@@ -1293,16 +1293,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 | # | Type | Task | Dependencies | Done Criteria |
 |---|------|------|--------------|---------------|
-| **1** | 🔨 | **Create pps/preview/ directory structure**<br>- package.json (react, react-dom, @cycledesign/runtime)<br>- index.html<br>- ite.config.ts (@design alias, port 3002, cors)<br>- src/main.tsx (dynamic design loader) | None | Preview directory exists with all config files |
-| **2** | ✅ | **Validate preview Vite config**<br>- Run 
-pm install in pps/preview/<br>- Run 
-pm run dev manually<br>- Verify Vite starts on port 3002 | Task 1 | Vite dev server starts without errors |
-| **3** | 🔨 | **Implement PreviewManager class** (pps/server/src/preview/preview-manager.ts)<br>- start() - spawn Vite child process<br>- stop() - graceful shutdown<br>- getStatus() - return state<br>- 
-estart() - stop + start<br>- State: STOPPED, STARTING, RUNNING, ERROR | None | PreviewManager compiles, methods defined |
+| **1** | 🔨 | **Create `apps/preview/` directory structure**<br>- `package.json` (react, react-dom, @cycledesign/runtime)<br>- `index.html`<br>- `vite.config.ts` (@design alias, port 3002, cors)<br>- `src/main.tsx` (dynamic design loader) | None | Preview directory exists with all config files |
+| **2** | ✅ | **Validate preview Vite config**<br>- Run `npm install` in `apps/preview/`<br>- Run `npm run dev` manually<br>- Verify Vite starts on port 3002 | Task 1 | Vite dev server starts without errors |
+| **3** | 🔨 | **Implement `PreviewManager` class** (`apps/server/src/preview/preview-manager.ts`)<br>- `start()` - spawn Vite child process<br>- `stop()` - graceful shutdown<br>- `getStatus()` - return state<br>- `restart()` - stop + start<br>- State: STOPPED, STARTING, RUNNING, ERROR | None | PreviewManager compiles, methods defined |
 | **4** | ✅ | **Test PreviewManager start/stop**<br>- Write unit test: start → status=RUNNING → stop → status=STOPPED<br>- Verify port detection from Vite output<br>- Verify graceful shutdown (SIGTERM → SIGKILL after 5s) | Task 3 | Unit tests pass |
-| **5** | 🔨 | **Create preview API endpoints** (pps/server/src/routes/preview.ts)<br>- POST /api/preview/start<br>- POST /api/preview/stop<br>- GET /api/preview/status<br>- POST /api/preview/restart | Task 3 | Endpoints registered, return correct responses |
+| **5** | 🔨 | **Create preview API endpoints** (`apps/server/src/routes/preview.ts`)<br>- `POST /api/preview/start`<br>- `POST /api/preview/stop`<br>- `GET /api/preview/status`<br>- `POST /api/preview/restart` | Task 3 | Endpoints registered, return correct responses |
 | **6** | ✅ | **Test preview API endpoints**<br>- Use Chrome DevTools MCP to call each endpoint<br>- Verify state transitions<br>- Verify error handling (e.g., stop when already stopped) | Task 5 | All endpoints work via MCP testing |
-| **7** | 🔨 | **Implement LogStreamer class** (pps/server/src/preview/log-streamer.ts)<br>- Capture stdout/stderr<br>- Buffer last 1000 logs<br>- Emit events to subscribers<br>- GET /api/preview/logs/stream SSE endpoint | Task 3 | LogStreamer compiles, SSE endpoint registered |
+| **7** | 🔨 | **Implement `LogStreamer` class** (`apps/server/src/preview/log-streamer.ts`)<br>- Capture stdout/stderr<br>- Buffer last 1000 logs<br>- Emit events to subscribers<br>- `GET /api/preview/logs/stream` SSE endpoint | Task 3 | LogStreamer compiles, SSE endpoint registered |
 | **8** | ✅ | **Test log streaming**<br>- Start preview server<br>- Connect to SSE endpoint<br>- Verify logs stream in real-time<br>- Verify buffer works for late connections | Task 7 | Logs stream correctly via SSE |
 
 ---
@@ -1311,17 +1308,16 @@ estart() - stop + start<br>- State: STOPPED, STARTING, RUNNING, ERROR | None | P
 
 | # | Type | Task | Dependencies | Done Criteria |
 |---|------|------|--------------|---------------|
-| **9** | 🔨 | **Create TypeScript validation runner** (pps/server/src/validation/typescript.ts)<br>- Run 	sc on generated code<br>- Return success/failure with line/column errors | None | TypeScript runner compiles and executes |
+| **9** | 🔨 | **Create TypeScript validation runner** (`apps/server/src/validation/typescript.ts`)<br>- Run `tsc` on generated code<br>- Return success/failure with line/column errors | None | TypeScript runner compiles and executes |
 | **10** | ✅ | **Test TypeScript validation**<br>- Test with valid TSX code → success<br>- Test with type errors → failure with details<br>- Test with syntax errors → failure with details | Task 9 | Validation returns correct results |
-| **11** | 🔨 | **Create ESLint validation runner** (pps/server/src/validation/eslint.ts)<br>- Run eslint on generated code<br>- Return success/failure with rule violations | Task 9 | ESLint runner compiles and executes |
+| **11** | 🔨 | **Create ESLint validation runner** (`apps/server/src/validation/eslint.ts`)<br>- Run eslint on generated code<br>- Return success/failure with rule violations | Task 9 | ESLint runner compiles and executes |
 | **12** | ✅ | **Test ESLint validation**<br>- Test with clean code → success<br>- Test with lint errors → failure with details | Task 11 | ESLint returns correct results |
-| **13** | 🔨 | **Create Knip validation runner** (pps/server/src/validation/knip.ts)<br>- Run knip to detect unused imports/exports<br>- Return success/failure with unused items | Task 9 | Knip runner compiles and executes |
+| **13** | 🔨 | **Create Knip validation runner** (`apps/server/src/validation/knip.ts`)<br>- Run knip to detect unused imports/exports<br>- Return success/failure with unused items | Task 9 | Knip runner compiles and executes |
 | **14** | ✅ | **Test Knip validation**<br>- Test with clean imports → success<br>- Test with unused imports → failure with details | Task 13 | Knip returns correct results |
-| **15** | 🔨 | **Implement ID injector** (pps/server/src/parser/id-injector.ts)<br>- Parse TSX with AST<br>- Generate unique IDs for JSX elements<br>- Preserve existing IDs<br>- Write back to source file | None | ID injector compiles |
+| **15** | 🔨 | **Implement ID injector** (`apps/server/src/parser/id-injector.ts`)<br>- Parse TSX with AST<br>- Generate unique IDs for JSX elements<br>- Preserve existing IDs<br>- Write back to source file | None | ID injector compiles |
 | **16** | ✅ | **Test ID injection**<br>- Input: TSX without IDs<br>- Output: TSX with IDs on all elements<br>- Verify IDs are unique<br>- Verify existing IDs preserved | Task 15 | IDs injected correctly |
-| **17** | 🔨 | **Create dependency manager** (pps/server/src/preview/dependency-manager.ts)<br>- Parse imports from code<br>- Check against installed packages<br>- Add missing to pps/preview/package.json<br>- Run 
-pm install | None | Dependency manager compiles |
-| **18** | ✅ | **Test dependency management**<br>- Code imports ramer-motion (not installed)<br>- Verify package added and installed<br>- Verify error on invalid package name | Task 17 | Dependencies managed correctly |
+| **17** | 🔨 | **Create dependency manager** (`apps/server/src/preview/dependency-manager.ts`)<br>- Parse imports from code<br>- Check against installed packages<br>- Add missing to `apps/preview/package.json`<br>- Run `npm install` | None | Dependency manager compiles |
+| **18** | ✅ | **Test dependency management**<br>- Code imports `framer-motion` (not installed)<br>- Verify package added and installed<br>- Verify error on invalid package name | Task 17 | Dependencies managed correctly |
 
 ---
 
@@ -1329,11 +1325,11 @@ pm install | None | Dependency manager compiles |
 
 | # | Type | Task | Dependencies | Done Criteria |
 |---|------|------|--------------|---------------|
-| **19** | 🔨 | **Implement StatusBroadcaster** (pps/server/src/websocket/status-broadcaster.ts)<br>- Track connected WebSocket clients<br>- Broadcast status messages<br>- Methods: sendToolCallStart/Complete/Error, sendValidation*, sendPreview* | None | StatusBroadcaster compiles |
+| **19** | 🔨 | **Implement `StatusBroadcaster`** (`apps/server/src/websocket/status-broadcaster.ts`)<br>- Track connected WebSocket clients<br>- Broadcast status messages<br>- Methods: `sendToolCallStart/Complete/Error`, `sendValidation*`, `sendPreview*` | None | StatusBroadcaster compiles |
 | **20** | ✅ | **Test status broadcasting**<br>- Connect mock WebSocket client<br>- Broadcast each status type<br>- Verify client receives all messages | Task 19 | Status messages broadcast correctly |
-| **21** | 🔨 | **Create LLM tool definitions** (pps/server/src/llm/tools/)<br>- createFile.ts (Zod schema)<br>- editFile.ts (patch-based)<br>- ddDependency.ts<br>- submitWork.ts (empty args)<br>- skUser.ts | None | All 7 tools defined with Zod schemas |
+| **21** | 🔨 | **Create LLM tool definitions** (`apps/server/src/llm/tools/`)<br>- `createFile.ts` (Zod schema)<br>- `editFile.ts` (patch-based)<br>- `addDependency.ts`<br>- `submitWork.ts` (empty args)<br>- `askUser.ts` | None | All 7 tools defined with Zod schemas |
 | **22** | ✅ | **Test tool schemas**<br>- Validate each tool with valid params → success<br>- Validate with invalid params → rejection<br>- Verify file constraints (kebab-case, .tsx, designs/) | Task 21 | All schemas validate correctly |
-| **23** | 🔨 | **Integrate tool calling with WebSocket** (pps/server/src/ws/handler.ts)<br>- Handle message type for code generation<br>- Trigger LLM tool calling<br>- Broadcast status during execution<br>- Save generated designs to session | Task 19, 21 | WebSocket handler processes generation requests |
+| **23** | 🔨 | **Integrate tool calling with WebSocket** (`apps/server/src/ws/handler.ts`)<br>- Handle `message` type for code generation<br>- Trigger LLM tool calling<br>- Broadcast status during execution<br>- Save generated designs to session | Task 19, 21 | WebSocket handler processes generation requests |
 | **24** | ✅ | **Test WebSocket code generation flow**<br>- Send generation prompt via WebSocket<br>- Verify ack received<br>- Verify status messages streamed<br>- Verify design saved to session | Task 23 | Full WebSocket flow works |
 
 ---
@@ -1342,15 +1338,15 @@ pm install | None | Dependency manager compiles |
 
 | # | Type | Task | Dependencies | Done Criteria |
 |---|------|------|--------------|---------------|
-| **25** | 🔨 | **Create two-pane layout** (pps/web/src/layouts/MainLayout.tsx)<br>- Full-width header (auto height)<br>- Resizable split pane (left 30-70%, right flex)<br>- Draggable divider with visual feedback<br>- Left: SessionSelector, MessageList, PromptInput, ConnectionStatus<br>- Right: PreviewFrame placeholder | None | Layout renders, divider drags |
+| **25** | 🔨 | **Create two-pane layout** (`apps/web/src/layouts/MainLayout.tsx`)<br>- Full-width header (auto height)<br>- Resizable split pane (left 30-70%, right flex)<br>- Draggable divider with visual feedback<br>- Left: SessionSelector, MessageList, PromptInput, ConnectionStatus<br>- Right: PreviewFrame placeholder | None | Layout renders, divider drags |
 | **26** | ✅ | **Test layout with Chrome DevTools MCP**<br>- Verify divider drags smoothly<br>- Verify min/max width constraints<br>- Verify pane resizing doesn't cause layout shift | Task 25 | Layout works correctly |
-| **27** | 🔨 | **Create preview server controls** (pps/web/src/preview/PreviewServerStatus.tsx)<br>- Start/Stop buttons<br>- Display current state<br>- Show current port<br>- Auto-start on first generation | Task 5 | Controls render, buttons work |
+| **27** | 🔨 | **Create preview server controls** (`apps/web/src/preview/PreviewServerStatus.tsx`)<br>- Start/Stop buttons<br>- Display current state<br>- Show current port<br>- Auto-start on first generation | Task 5 | Controls render, buttons work |
 | **28** | ✅ | **Test server controls**<br>- Click start → server starts → status=RUNNING<br>- Click stop → server stops → status=STOPPED<br>- Verify port displayed correctly | Task 27 | Controls work end-to-end |
-| **29** | 🔨 | **Create log viewer** (pps/web/src/preview/PreviewLogViewer.tsx)<br>- Scrollable log display<br>- Color-code log levels<br>- Auto-scroll to latest<br>- Pause/resume, clear, filter | Task 7 | Log viewer renders, scrolls |
+| **29** | 🔨 | **Create log viewer** (`apps/web/src/preview/PreviewLogViewer.tsx`)<br>- Scrollable log display<br>- Color-code log levels<br>- Auto-scroll to latest<br>- Pause/resume, clear, filter | Task 7 | Log viewer renders, scrolls |
 | **30** | ✅ | **Test log viewer**<br>- Start preview server<br>- Verify logs stream in real-time<br>- Verify auto-scroll works<br>- Verify pause/resume works | Task 29 | Logs display correctly |
-| **31** | 🔨 | **Create preview iframe** (pps/web/src/preview/PreviewFrame.tsx)<br>- Point to dynamic preview URL<br>- Handle load events<br>- Error boundary<br>- Loading skeleton | Task 5 | Iframe renders, loads preview |
+| **31** | 🔨 | **Create preview iframe** (`apps/web/src/preview/PreviewFrame.tsx`)<br>- Point to dynamic preview URL<br>- Handle load events<br>- Error boundary<br>- Loading skeleton | Task 5 | Iframe renders, loads preview |
 | **32** | ✅ | **Test preview iframe**<br>- Start preview server<br>- Verify iframe loads preview URL<br>- Verify loading state during start<br>- Verify error state on failure | Task 31 | Iframe works correctly |
-| **33** | 🔨 | **Create status message component** (pps/web/src/components/chat/StatusMessage.tsx)<br>- Display tool call progress<br>- Support all status types<br>- Color coding (info/success/error)<br>- Expandable details | Task 19 | StatusMessage renders |
+| **33** | 🔨 | **Create status message component** (`apps/web/src/components/chat/StatusMessage.tsx`)<br>- Display tool call progress<br>- Support all status types<br>- Color coding (info/success/error)<br>- Expandable details | Task 19 | StatusMessage renders |
 | **34** | ✅ | **Test status messages in chat**<br>- Trigger code generation<br>- Verify status messages appear inline<br>- Verify color coding correct<br>- Verify expand/collapse works | Task 33 | Status messages display correctly |
 
 ---
@@ -1359,9 +1355,9 @@ pm install | None | Dependency manager compiles |
 
 | # | Type | Task | Dependencies | Done Criteria |
 |---|------|------|--------------|---------------|
-| **35** | 🔨 | **Create runtime package** (packages/design-system-runtime/)<br>- package.json<br>- src/index.ts exports<br>- Add to preview package.json as dependency | None | Package exists, exports defined |
+| **35** | 🔨 | **Create runtime package** (`packages/design-system-runtime/`)<br>- `package.json`<br>- `src/index.ts` exports<br>- Add to preview `package.json` as dependency | None | Package exists, exports defined |
 | **36** | ✅ | **Validate runtime package**<br>- Import in preview<br>- Verify no import errors<br>- Verify package resolves correctly | Task 35 | Package imports without errors |
-| **37** | 🔨 | **Create wrapper components**<br>- AuditWrapper (audit mode highlighting)<br>- SelectionBox (selection bounding box)<br>- Style with MUI sx prop | Task 35 | Wrappers compile |
+| **37** | 🔨 | **Create wrapper components**<br>- `AuditWrapper` (audit mode highlighting)<br>- `SelectionBox` (selection bounding box)<br>- Style with MUI `sx` prop | Task 35 | Wrappers compile |
 | **38** | ✅ | **Test wrapper components**<br>- Render in preview with sample design<br>- Verify AuditWrapper applies highlight styles<br>- Verify SelectionBox shows bounding box | Task 37 | Wrappers render correctly |
 
 ---
@@ -1370,16 +1366,15 @@ pm install | None | Dependency manager compiles |
 
 | # | Type | Task | Dependencies | Done Criteria |
 |---|------|------|--------------|---------------|
-| **39** | 🔨 | **Implement postMessage bridge** (pps/web/src/hooks/useIframeBridge.ts)<br>- Send: SET_MODE, HIGHLIGHT_COMPONENT<br>- Receive: COMPONENT_SELECTED, MODE_READY<br>- Origin validation | Task 31 | Bridge hook compiles |
+| **39** | 🔨 | **Implement postMessage bridge** (`apps/web/src/hooks/useIframeBridge.ts`)<br>- Send: SET_MODE, HIGHLIGHT_COMPONENT<br>- Receive: COMPONENT_SELECTED, MODE_READY<br>- Origin validation | Task 31 | Bridge hook compiles |
 | **40** | ✅ | **Test postMessage bridge**<br>- Send mode change to iframe<br>- Verify iframe receives message<br>- Simulate iframe event<br>- Verify parent receives event | Task 39 | Bridge works bidirectionally |
 | **41** | 🔨 | **Implement mode switching UI**<br>- Toggle: Select / Preview / Audit<br>- Visual indicator of current mode<br>- Send mode changes via bridge | Task 33, 39 | Mode toggle renders |
 | **42** | ✅ | **Test mode switching**<br>- Toggle between modes<br>- Verify visual indicator updates<br>- Verify iframe receives mode change | Task 41 | Mode switching works |
 | **43** | 🔨 | **Implement full generation flow**<br>- Wire prompt input to WebSocket<br>- Handle optimistic updates<br>- Display status messages<br>- Auto-start preview on success | Task 23, 33 | Generation flow wired |
-| **44** | ✅ | **Test full generation flow**<br>- Submit prompt: " Create landing page\<br>- Verify ack received<br>- Verify status messages displayed<br>- Verify preview starts automatically<br>- Verify design renders in iframe | Task 43 | Full flow works end-to-end |
+| **44** | ✅ | **Test full generation flow**<br>- Submit prompt: "Create landing page"<br>- Verify ack received<br>- Verify status messages displayed<br>- Verify preview starts automatically<br>- Verify design renders in iframe | Task 43 | Full flow works end-to-end |
 | **45** | 🔨 | **Implement error handling**<br>- Display validation errors<br>- Show retry button<br>- Handle preview server failures<br>- Handle WebSocket disconnection | Task 43 | Error states handled |
 | **46** | ✅ | **Test error scenarios**<br>- Submit invalid prompt → verify error displayed<br>- Stop preview server → verify error state<br>- Disconnect WebSocket → verify reconnection | Task 45 | Errors handled gracefully |
-| **47** | 🔨 | **Run full validation suite**<br>- 
-pm run validate (ESLint + Knip)<br>- Fix any issues | All previous | Validation passes |
+| **47** | 🔨 | **Run full validation suite**<br>- `npm run validate` (ESLint + Knip)<br>- Fix any issues | All previous | Validation passes |
 | **48** | ✅ | **Final E2E test with Chrome DevTools MCP**<br>- Complete flow: create session → submit prompt → view design<br>- Verify all exit criteria met<br>- Check console for errors | Task 47 | All exit criteria met, no errors |
 
 ---
@@ -1464,6 +1459,7 @@ Phase 3 is complete when all **48 tasks above** are checked off AND the followin
 </details>
 
 ---
+
 ## Dependencies
 
 ### Backend Additions (`apps/server/package.json`)
@@ -1596,60 +1592,60 @@ VITE_TOOL_URL=http://localhost:3000
 **Phase 1: LLM Staging Changes**
 ```
 User: "Create a landing page with animations"
-         â”‚
-         â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  LLM Tool Calls         â”‚
-â”‚  (multiple, staged)     â”‚
-â”‚                         â”‚
-â”‚  1. addDependency       â”‚
-â”‚     {packageName:       â”‚
-â”‚      "framer-motion"}   â”‚
-â”‚                         â”‚
-â”‚  2. createFile          â”‚
-â”‚     {filename:          â”‚
-â”‚      "landing-page.tsx",â”‚
-â”‚      code: "..."}       â”‚
-â”‚                         â”‚
-â”‚  3. submitWork          â”‚
-â”‚     {}  â† EMPTY!        â”‚
-â”‚         System tracks:  â”‚
-â”‚         - filesCreated  â”‚
-â”‚         - dependencies  â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-         â”‚
-         â”‚ Triggers validation + preview start
-         â–¼
+         │
+         ▼
+┌─────────────────────────┐
+│  LLM Tool Calls         │
+│  (multiple, staged)     │
+│                         │
+│  1. addDependency       │
+│     {packageName:       │
+│      "framer-motion"}   │
+│                         │
+│  2. createFile          │
+│     {filename:          │
+│      "landing-page.tsx",│
+│      code: "..."}       │
+│                         │
+│  3. submitWork          │
+│     {}  ← EMPTY!        │
+│         System tracks:  │
+│         - filesCreated  │
+│         - dependencies  │
+└─────────────────────────┘
+         │
+         │ Triggers validation + preview start
+         ▼
 ```
 
 **Phase 2: Validation Pipeline**
 ```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Validation Pipeline    â”‚
-â”‚                         â”‚
-â”‚  1. Check dependencies  â”‚
-â”‚     âœ… framer-motion    â”‚
-â”‚        installed        â”‚
-â”‚                         â”‚
-â”‚  2. TypeScript compile  â”‚
-â”‚     âŒ Error: Line 42   â”‚
-â”‚        "Property 'x'    â”‚
-â”‚        does not exist"  â”‚
-â”‚                         â”‚
-â”‚  3. ESLint              â”‚
-â”‚     (skipped - TS fail) â”‚
-â”‚                         â”‚
-â”‚  4. ID Injection        â”‚
-â”‚     (skipped - TS fail) â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-         â”‚
-         â”‚ Validation failed
-         â–¼
+┌─────────────────────────┐
+│  Validation Pipeline    │
+│                         │
+│  1. Check dependencies  │
+│     ✅ framer-motion    │
+│        installed        │
+│                         │
+│  2. TypeScript compile  │
+│     ❌ Error: Line 42   │
+│        "Property 'x'    │
+│        does not exist"  │
+│                         │
+│  3. ESLint              │
+│     (skipped - TS fail) │
+│                         │
+│  4. ID Injection        │
+│     (skipped - TS fail) │
+└─────────────────────────┘
+         │
+         │ Validation failed
+         ▼
 ```
 
 **Phase 3: Error Feedback to LLM**
 ```
-Backend â†’ LLM:
+Backend → LLM:
 {
   "status": "validation_failed",
   "errors": [
@@ -1664,44 +1660,44 @@ Backend â†’ LLM:
   ],
   "instruction": "Please fix these errors and call submitWork again"
 }
-         â”‚
-         â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  LLM Fixes Errors       â”‚
-â”‚                         â”‚
-â”‚  1. editFile            â”‚
-â”‚     {filename:          â”‚
-â”‚      "landing-page.tsx",â”‚
-â”‚      patch: "@@ -42..."}â”‚
-â”‚                         â”‚
-â”‚  2. submitWork          â”‚
-â”‚     {}  â† EMPTY again!  â”‚
-â”‚         (triggers       â”‚
-â”‚          validation)    â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-         â”‚
-         â”‚ Triggers validation again
-         â–¼
+         │
+         ▼
+┌─────────────────────────┐
+│  LLM Fixes Errors       │
+│                         │
+│  1. editFile            │
+│     {filename:          │
+│      "landing-page.tsx",│
+│      patch: "@@ -42..."}│
+│                         │
+│  2. submitWork          │
+│     {}  ← EMPTY again!  │
+│         (triggers       │
+│          validation)    │
+└─────────────────────────┘
+         │
+         │ Triggers validation again
+         ▼
 ```
 
 **Phase 4: Success**
 ```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  Validation Pipeline    â”‚
-â”‚                         â”‚
-â”‚  1. Check dependencies  â”‚
-â”‚     âœ…                  â”‚
-â”‚  2. TypeScript compile  â”‚
-â”‚     âœ…                  â”‚
-â”‚  3. ESLint              â”‚
-â”‚     âœ…                  â”‚
-â”‚  4. ID Injection        â”‚
-â”‚     âœ… (15 IDs added)   â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-         â”‚
-         âœ… Success!
-         â”‚
-         â–¼
+┌─────────────────────────┐
+│  Validation Pipeline    │
+│                         │
+│  1. Check dependencies  │
+│     ✅                  │
+│  2. TypeScript compile  │
+│     ✅                  │
+│  3. ESLint              │
+│     ✅                  │
+│  4. ID Injection        │
+│     ✅ (15 IDs added)   │
+└─────────────────────────┘
+         │
+         ✅ Success!
+         │
+         ▼
 Preview server reloads with new design
 ```
 
@@ -1752,33 +1748,33 @@ interface SubmitWorkResponse {
 
 ```
 User: "Create a dashboard for my SaaS"
-         â”‚
-         â–¼
+         │
+         ▼
 LLM: "What metrics should the dashboard display?"
-         â”‚
-         â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  UI displays question to user:  â”‚
-â”‚                                 â”‚
-â”‚  ðŸ¤– AI has a question:          â”‚
-â”‚  "What metrics should the       â”‚
-â”‚   dashboard display?"           â”‚
-â”‚                                 â”‚
-â”‚  Context: Need to know what     â”‚
-â”‚  data to show in the dashboard  â”‚
-â”‚                                 â”‚
-â”‚  Suggestions:                   â”‚
-â”‚  [Revenue] [Users] [Activity]   â”‚
-â”‚  [Custom...]                    â”‚
-â”‚                                 â”‚
-â”‚  [Text input] _______________   â”‚
-â”‚  [Submit]                       â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-         â”‚
-         â–¼
+         │
+         ▼
+┌─────────────────────────────────┐
+│  UI displays question to user:  │
+│                                 │
+│  🤖 AI has a question:          │
+│  "What metrics should the       │
+│   dashboard display?"           │
+│                                 │
+│  Context: Need to know what     │
+│  data to show in the dashboard  │
+│                                 │
+│  Suggestions:                   │
+│  [Revenue] [Users] [Activity]   │
+│  [Custom...]                    │
+│                                 │
+│  [Text input] _______________   │
+│  [Submit]                       │
+└─────────────────────────────────┘
+         │
+         ▼
 User: "Monthly recurring revenue, active users, and conversion rate"
-         â”‚
-         â–¼
+         │
+         ▼
 Backend sends to LLM:
 {
   "toolResponse": {
@@ -1788,8 +1784,8 @@ Backend sends to LLM:
     }
   }
 }
-         â”‚
-         â–¼
+         │
+         ▼
 LLM continues with dashboard design
 ```
 
@@ -1809,19 +1805,19 @@ LLM continues with dashboard design
 
 **Example blocked requests:**
 ```typescript
-// âŒ Blocked: Wrong extension
+// ❌ Blocked: Wrong extension
 { filename: "config.json" }
 
-// âŒ Blocked: Path traversal
+// ❌ Blocked: Path traversal
 { filename: "../server/src/malicious.tsx" }
 
-// âŒ Blocked: Absolute path
+// ❌ Blocked: Absolute path
 { filename: "/etc/passwd.tsx" }
 
-// âŒ Blocked: Wrong directory
+// ❌ Blocked: Wrong directory
 { filename: "components/Button.tsx" }
 
-// âœ… Allowed: Valid design file
+// ✅ Allowed: Valid design file
 { filename: "landing-page.tsx", location: "designs" }
 ```
 
@@ -1909,7 +1905,7 @@ data: {"type":"exit","code":0,"timestamp":1234567893}
 
 Code generation is triggered via WebSocket messages (Phase 2a protocol), not REST endpoints.
 
-**Client â†’ Server:**
+**Client → Server:**
 ```typescript
 // User sends generation prompt via WebSocket
 ws.send(JSON.stringify({
@@ -1920,7 +1916,7 @@ ws.send(JSON.stringify({
 }));
 ```
 
-**Server â†’ Client:**
+**Server → Client:**
 ```typescript
 // Immediate acknowledgment
 {
@@ -2025,29 +2021,6 @@ sendMessage('Create a landing page with hero section and features');
 
 ---
 
-## Exit Criteria
-
-Phase 3 is complete when:
-- [ ] Backend can start/stop preview Vite server programmatically
-- [ ] Preview server status exposed via API
-- [ ] Real-time log streaming works (SSE)
-- [ ] UI displays preview server controls (start/stop)
-- [ ] UI displays real-time preview logs
-- [ ] User can submit text prompts describing UI designs **via WebSocket**
-- [ ] LLM generates valid React/TypeScript code
-- [ ] Generated code passes TypeScript compilation
-- [ ] Component IDs are auto-injected
-- [ ] Design renders in isolated iframe preview
-- [ ] Mode switching works (Select / Preview)
-- [ ] Component selection highlights instances
-- [ ] Error states handled gracefully with suggestions
-- [ ] **Generated designs saved to session messages**
-- [ ] **WebSocket integration with Phase 2a working**
-- [ ] Documentation complete
-- [ ] Code reviewed and merged to main
-
----
-
 ## Integration with Phase 2a (WebSocket)
 
 Phase 3 relies on Phase 2a's WebSocket infrastructure for messaging:
@@ -2066,11 +2039,11 @@ Phase 3 relies on Phase 2a's WebSocket infrastructure for messaging:
 - Generated designs automatically saved to session
 
 **Benefits:**
-- âœ… Real-time generation progress streaming
-- âœ… Automatic session persistence
-- âœ… No duplicate API calls
-- âœ… Consistent with chat messaging
-- âœ… Lower latency than REST
+- ✅ Real-time generation progress streaming
+- ✅ Automatic session persistence
+- ✅ No duplicate API calls
+- ✅ Consistent with chat messaging
+- ✅ Lower latency than REST
 
 ---
 
@@ -2147,7 +2120,7 @@ export default function LandingPage() {
       {/* Footer */}
       <Box sx={{ bgcolor: 'grey.100', py: 4, textAlign: 'center' }}>
         <Typography variant="body2" color="text.secondary">
-          Â© 2024 SaaS Product. All rights reserved.
+          © 2024 SaaS Product. All rights reserved.
         </Typography>
       </Box>
     </Box>
@@ -2205,7 +2178,7 @@ export default function LandingPage() {
       {/* Footer */}
       <Box id="id_landing_20" sx={{ bgcolor: 'grey.100', py: 4, textAlign: 'center' }}>
         <Typography id="id_landing_21" variant="body2" color="text.secondary">
-          Â© 2024 SaaS Product. All rights reserved.
+          © 2024 SaaS Product. All rights reserved.
         </Typography>
       </Box>
     </Box>
