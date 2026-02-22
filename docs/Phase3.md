@@ -1154,13 +1154,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] iframe communication failures
   - [ ] **Validate:** Error messages display correctly
 
-- [ ] **4.3** Test performance
-  - [ ] Measure generation time
-  - [ ] Measure validation time
-  - [ ] Measure iframe load time
-  - [ ] Test with large designs (100+ components)
-  - [ ] **Validate:** Performance metrics acceptable
-
 ---
 
 ## Dependencies
