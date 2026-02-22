@@ -981,12 +981,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] **Validate:** Status messages appear in chat in real-time
 
 - [ ] **1.5** Implement validation pipeline
-  - [ ] Create `src/validation/typescript.ts` (tsc runner)
-  - [ ] Create `src/validation/eslint.ts` (eslint runner)
-  - [ ] Create `src/validation/knip.ts` (knip runner)
-  - [ ] Run validations in sequence
-  - [ ] Return detailed error messages
-  - [ ] **Validate:** Test with valid and invalid code samples
+  - [ ] Create `src/validation/typescript.ts` (tsc runner for preview directory)
+  - [ ] Create `src/validation/eslint.ts` (eslint runner, copy apps/server/.eslintrc.js)
+  - [ ] Create `src/validation/knip.ts` (knip runner with default config)
+  - [ ] Run all validators in parallel (Promise.all)
+  - [ ] Aggregate all errors into single array with type, file, line, column, message
+  - [ ] Return aggregated errors to LLM for resolution
+  - [ ] **Validate:** All validation errors returned in single response
+  - [ ] **Validate:** Parallel execution is faster than sequential
 
 - [ ] **1.6** Implement dependency management
   - [ ] Create `src/preview/dependency-manager.ts`
