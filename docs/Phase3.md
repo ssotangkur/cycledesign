@@ -1123,11 +1123,17 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Configure as workspace dependency
 
 - [ ] **3.2** Implement wrapper components
-  - [ ] `AuditWrapper` - Handles audit mode highlighting
-  - [ ] `SelectionBox` - Shows selection bounding box
-  - [ ] `MetadataProvider` - Attaches instance metadata
+  - [ ] `AuditWrapper` - Handles audit mode highlighting (border/background)
+  - [ ] `SelectionBox` - Shows selection bounding box with click handlers
+  - [ ] `MetadataProvider` - Attaches instance metadata (id, componentName)
+  - [ ] Implement postMessage communication to parent window
+    - Send `COMPONENT_SELECTED` event with instanceId, componentName
+    - Send `MODE_READY` event when mode changes
+    - Listen for `SET_MODE`, `HIGHLIGHT_COMPONENT` from parent
+  - [ ] Origin validation (only accept from http://localhost:3000)
   - [ ] Style wrappers with MUI `sx` prop
   - [ ] **Validate:** Verify wrappers render correctly in preview
+  - [ ] **Validate:** postMessage communication works bidirectionally
 
 ---
 
