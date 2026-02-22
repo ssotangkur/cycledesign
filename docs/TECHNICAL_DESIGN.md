@@ -349,3 +349,104 @@ export const findFileTool = tool({
 | ✅ **Metadata-rich** | Total lines, match counts help LLM understand scope |
 
 ---
+
+### 2. Preview Communication Bridge
+
+**Purpose:** postMessage API for cross-origin communication between tool UI (port 3000) and preview iframe (port 3002)
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Tool Frontend (React + MUI)                    │
+│  Port: 3000                                                 │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                   iframe (sandboxed)                  │  │
+│  │  ┌─────────────────────────────────────────────────┐  │  │
+│  │  │   Preview Vite (port 3002)                      │  │  │
+│  │  │   - Loads @design/current.tsx                   │  │  │
+│  │  │   - Wrappers (AuditWrapper, SelectionBox)       │  │  │
+│  │  │   - Design system components                    │  │  │
+│  │  │   - postMessage bridge to parent                │  │  │
+│  │  └─────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                    postMessage API
+                              │
+                    ┌─────────▼─────────┐
+                    │  Communication    │
+                    │  Bridge Hook      │
+                    └───────────────────┘
+```
+
+**Message Types:**
+
+**Parent (tool UI, port 3000) → Iframe (preview, port 3002):**
+```typescript
+interface ParentMessage {
+  type: 'SET_MODE';
+  payload: { mode: 'select' | 'preview' | 'audit' };
+} | {
+  type: 'HIGHLIGHT_COMPONENT';
+  payload: { instanceId: string };
+} | {
+  type: 'UPDATE_PROPS';
+  payload: { instanceId: string; props: Record<string, any> };
+};
+```
+
+**Iframe (preview, port 3002) → Parent (tool UI, port 3000):**
+```typescript
+interface IframeMessage {
+  type: 'MODE_READY';
+  payload: { mode: string };
+} | {
+  type: 'COMPONENT_SELECTED';
+  payload: { instanceId: string; componentName: string };
+} | {
+  type: 'ERROR';
+  payload: { error: string };
+};
+```
+
+**Implementation:**
+```typescript
+// Parent (tool UI, port 3000)
+const iframeRef = useRef<HTMLIFrameElement>(null);
+
+function sendMessageToIframe(message: ParentMessage) {
+  iframeRef.current?.contentWindow?.postMessage(
+    message,
+    'http://localhost:3002'  // Preview origin (dynamic)
+  );
+}
+
+// Iframe (preview, port 3002)
+window.addEventListener('message', (event) => {
+  if (event.origin !== 'http://localhost:3000') return;  // Tool origin
+  
+  const message: ParentMessage = event.data;
+  
+  switch (message.type) {
+    case 'SET_MODE':
+      setMode(message.payload.mode);
+      break;
+    case 'HIGHLIGHT_COMPONENT':
+      highlightComponent(message.payload.instanceId);
+      break;
+  }
+});
+```
+
+**Cross-Origin Security:**
+- Explicit origin validation on both sides
+- Only localhost origins allowed in development
+- Production would require HTTPS + strict origin checking
+
+**Use Cases:**
+- **Mode switching**: Tool sends `SET_MODE` to change select/preview/audit modes
+- **Component selection**: Wrapper sends `COMPONENT_SELECTED` when user clicks component
+- **Highlighting**: Tool sends `HIGHLIGHT_COMPONENT` to show selection in preview
+- **Mode confirmation**: Iframe sends `MODE_READY` when mode change complete
+
+---
