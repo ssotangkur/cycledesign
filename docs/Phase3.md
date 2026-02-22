@@ -7,7 +7,7 @@
 - `Phase3.md` - Implementation details, timelines, checklists, Phase 3-specific flows
 
 **Cross-References:**
-- MCP Server Tools → See `TECHNICAL_DESIGN.md` section "MCP Server" for complete tool definitions
+- Tool Calls → See `TECHNICAL_DESIGN.md` section "Tool Calls (Direct Integration)" for complete tool definitions
 - WebSocket Protocol → Phase 2a prerequisite (implemented in Phase 2a)
 - LLM Tool Calling → Phase 3-specific tool definitions in section "LLM Tool Definitions" below
 - Component Transformer → Phase 3 implementation in section "Component Transformer Pipeline" below
@@ -143,7 +143,7 @@ data: {"type":"ready","port":3002,"timestamp":1234567892}
 - ✅ Centralized control (backend manages all services)
 - ✅ Real-time visibility (logs streamed to UI)
 - ✅ Resource efficiency (stop when not needed)
-- ✅ MCP-ready (future: expose as MCP tools)
+- ✅ Tool-ready (future: expose as additional tool calls)
 - ✅ Error recovery (auto-restart, status monitoring)
 
 ### 3. iframe Sandboxing
@@ -1124,26 +1124,6 @@ CREATE TABLE components (
 
 ---
 
-### 6.3. MCP Server Integration
-
-**Purpose:** Expose design system to LLM for introspection during code generation
-
-**Location:** `apps/server/src/mcp/`
-
-**MCP Tools Available to LLM:**
-- `list_components` - Return all available components with summaries
-- `get_component(name)` - Return full component definition (props, variants)
-- `get_tokens(type)` - Return design tokens by category
-- `check_composition_rules(parent, child)` - Validate component nesting
-- `search_components(query)` - Find components by semantic purpose
-
-**Phase 3 Usage:**
-In Phase 3 (free-form generation), MCP tools are **not yet enforced**. LLM can use any React components. MCP integration becomes critical in Phase 4 (Design System Mode).
-
-**See `docs/TECHNICAL_DESIGN.md` section "MCP Server"** for complete tool definitions.
-
----
-
 ### 7. Preview Communication Bridge
 
 **Decision:** postMessage API for cross-origin communication (3000 ↔ 3002)
@@ -2119,8 +2099,7 @@ Phase 3 relies on Phase 2a's WebSocket infrastructure for messaging:
 
 Phase 4 will add:
 - Design System Mode (tokens, components, rules as code)
-- MCP server for LLM introspection of design system
-- **MCP tools for preview server control** (start/stop/status/logs)
+- Direct tool calls for LLM introspection (`list_components`, `get_component`, etc.)
 - Validation engine (semantic props, design system rules)
 - Select/Preview modes with property editors
 - Database index for component usage tracking
