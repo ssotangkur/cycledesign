@@ -86,6 +86,72 @@ cycledesign/
 
 ---
 
+### 2. iframe Sandboxing
+
+**Decision:** Sandboxed iframe pointing to backend-managed Vite dev server
+
+**iframe Attributes:**
+```html
+<iframe
+  sandbox="allow-scripts allow-same-origin"
+  src="http://localhost:3002"  // Dynamic port from backend
+  title="Design Preview"
+  style={{ width: '100%', height: '100%', border: 'none' }}
+/>
+```
+
+**Server Discovery:**
+- Frontend queries `GET /api/preview/status` to get current preview URL
+- Backend returns `{ status: 'RUNNING', port: 3002, url: 'http://localhost:3002' }`
+- Frontend updates iframe src when server starts/restarts
+
+**WebSocket Integration:**
+- Code generation prompts sent via WebSocket (Phase 2a protocol)
+- Generated designs saved to session messages automatically
+- Use `useMessageListState` hook for sending generation requests
+
+**Security Considerations:**
+- `allow-scripts`: Required for React to run
+- `allow-same-origin`: Required for HMR to work
+- No `allow-forms` or `allow-popups` (not needed for preview)
+- CSS completely isolated from tool UI
+- JavaScript errors in preview don't crash tool UI
+- LLM can install any npm package without affecting tool
+
+---
+
+### 3. Design Code Storage
+
+**Decision:** Store generated code in `workspace/designs/` directory
+
+**File Structure:**
+```
+workspace/
+└── designs/
+    ├── landing-page.tsx
+    ├── dashboard.tsx
+    └── *.tsx
+```
+
+**File Naming:**
+- User-provided name slugified (e.g., "Landing Page" → `landing-page.tsx`)
+- Auto-generated UUID if no name provided
+- Overwrite on regeneration (with confirmation)
+
+**Preview Vite Integration:**
+- Preview Vite configured with alias to `workspace/designs/`
+- LLM-generated designs imported directly in preview:
+  ```tsx
+  // preview/src/main.tsx
+  import Design from '../../workspace/designs/landing-page';
+  render(<Design />);
+  ```
+- File watcher triggers preview reload on design changes
+
+---
+
+## Backend Components
+
 ### 2. Backend-Managed Preview Server Lifecycle
 
 **Decision:** Backend controls preview Vite server (start/stop/restart) with log streaming
@@ -145,238 +211,6 @@ data: {"type":"ready","port":3002,"timestamp":1234567892}
 - ✅ Resource efficiency (stop when not needed)
 - ✅ Tool-ready (future: expose as additional tool calls)
 - ✅ Error recovery (auto-restart, status monitoring)
-
-### 3. iframe Sandboxing
-
-**Decision:** Sandboxed iframe pointing to backend-managed Vite dev server
-
-**iframe Attributes:**
-```html
-<iframe
-  sandbox="allow-scripts allow-same-origin"
-  src="http://localhost:3002"  // Dynamic port from backend
-  title="Design Preview"
-  style={{ width: '100%', height: '100%', border: 'none' }}
-/>
-```
-
-**Server Discovery:**
-- Frontend queries `GET /api/preview/status` to get current preview URL
-- Backend returns `{ status: 'RUNNING', port: 3002, url: 'http://localhost:3002' }`
-- Frontend updates iframe src when server starts/restarts
-
-**WebSocket Integration:**
-- Code generation prompts sent via WebSocket (Phase 2a protocol)
-- Generated designs saved to session messages automatically
-- Use `useMessageListState` hook for sending generation requests
-
-**Security Considerations:**
-- `allow-scripts`: Required for React to run
-- `allow-same-origin`: Required for HMR to work
-- No `allow-forms` or `allow-popups` (not needed for preview)
-- CSS completely isolated from tool UI
-- JavaScript errors in preview don't crash tool UI
-- LLM can install any npm package without affecting tool
-
----
-
-### 2.5. UI Layout Architecture
-
-**Decision:** Full-width header with two-pane split layout (left: chat/sessions, right: preview) with resizable divider
-
-**Layout Structure:**
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Full-Width Header Bar                    │
-│                    CycleDesign Logo + Nav                   │
-├──────────────────────────────────┬──────────────────────────┤
-│                                  │                          │
-│         Left Pane                │      Right Pane          │
-│      (Chat + Sessions)           │    (Preview iframe)      │
-│      (resizable width)           │    (flex remaining)      │
-│                                  │                          │
-│  ┌──────────────────────────┐   │  ┌────────────────────┐  │
-│  │    Session Selector      │   │  │                    │  │
-│  ├──────────────────────────┤   │  │                    │  │
-│  │                          │   │  │                    │  │
-│  │     Message List         │   │  │   Preview iframe   │  │
-│  │                          │   │  │   (port 3002)      │  │
-│  │                          │   │  │                    │  │
-│  ├──────────────────────────┤   │  │                    │  │
-│  │     Prompt Input         │   │  │                    │  │
-│  ├──────────────────────────┤   │  └────────────────────┘  │
-│  │    Status Bar            │   │                          │
-│  │  (connection status)     │   │                          │
-│  └──────────────────────────┘   │                          │
-│                                  │                          │
-└──────────────────────────────────┴──────────────────────────┘
-          ↕ draggable divider ↕
-```
-
-**Layout Specifications:**
-
-| Section | Width | Height | Description |
-|---------|-------|--------|-------------|
-| **Header** | 100% | auto | Auto height based on content, full width, contains logo and navigation |
-| **Left Pane** | 30-70% (user resizable) | 100% - header height | Contains session selector, messages, prompt input, and status bar |
-| **Right Pane** | Remaining (flex) | 100% - header height | Contains preview iframe (backend-managed Vite) |
-| **Divider** | 8px | 100% - header height | Draggable resize handle between panes |
-| **Status Bar** | 100% of left pane | auto | Shows WebSocket connection status, fixed at bottom of left pane |
-
-**Divider Behavior:**
-- User can drag divider left/right to resize panes
-- Left pane has minimum width based on content (session selector, message list, prompt input)
-- Left pane has maximum width (e.g., 70% to keep preview visible)
-- Divider has visual indicator (vertical line with hover state)
-- Drag operation uses smooth resizing (no layout shift)
-- Optional: Persist divider position in localStorage
-
-**Layout Component Structure:**
-```tsx
-// apps/web/src/layouts/MainLayout.tsx
-function MainLayout() {
-  const [leftPaneWidth, setLeftPaneWidth] = useState<number | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  const handleDividerDrag = (newWidth: number) => {
-    const containerWidth = containerRef.current?.clientWidth ?? 0;
-    const minPercentage = 0.3;  // 30% minimum
-    const maxPercentage = 0.7;  // 70% maximum
-    const newPercentage = newWidth / containerWidth;
-    
-    if (newPercentage >= minPercentage && newPercentage <= maxPercentage) {
-      setLeftPaneWidth(newWidth);
-    }
-  };
-  
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      {/* Full-Width Header (auto height) */}
-      <AppBar position="static" sx={{ width: '100%' }}>
-        <Toolbar>
-          <Typography variant="h6">CycleDesign</Typography>
-          {/* Navigation items */}
-        </Toolbar>
-      </AppBar>
-      
-      {/* Two-Pane Split Layout with Resizable Divider */}
-      <Box 
-        ref={containerRef}
-        sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}
-      >
-        {/* Left Pane: Chat + Sessions */}
-        <Box
-          sx={{
-            width: leftPaneWidth ?? '40%',
-            minWidth: '350px',  // Based on content requirements
-            maxWidth: '70%',
-            borderRight: '1px solid divider',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
-        >
-          <SessionSelector />
-          <MessageList />
-          <PromptInput />
-          <ConnectionStatus isConnected={isConnected} />
-        </Box>
-        
-        {/* Resizable Divider */}
-        <Box
-          sx={{
-            width: '8px',
-            cursor: 'col-resize',
-            backgroundColor: 'divider',
-            '&:hover': {
-              backgroundColor: 'primary.main',
-            },
-          }}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            const startX = e.clientX;
-            const startWidth = leftPaneWidth ?? containerRef.current?.clientWidth! * 0.4;
-            
-            const handleMouseMove = (moveEvent: MouseEvent) => {
-              const newWidth = startWidth + (moveEvent.clientX - startX);
-              handleDividerDrag(newWidth);
-            };
-            
-            const handleMouseUp = () => {
-              document.removeEventListener('mousemove', handleMouseMove);
-              document.removeEventListener('mouseup', handleMouseUp);
-            };
-            
-            document.addEventListener('mousemove', handleMouseMove);
-            document.addEventListener('mouseup', handleMouseUp);
-          }}
-        />
-        
-        {/* Right Pane: Preview iframe */}
-        <Box
-          sx={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
-        >
-          <PreviewFrame />
-        </Box>
-      </Box>
-    </Box>
-  );
-}
-```
-
-**Preview iframe Behavior:**
-- Fills entire right pane (100% width/height of pane)
-- No border, seamless integration
-- Auto-scrolls to show full design
-- Loading skeleton while preview server starts
-- Error overlay if preview server fails
-
-**Rationale:**
-- ✅ Clear visual separation between chat and preview
-- ✅ Side-by-side workflow (chat with LLM while viewing results)
-- ✅ User can adjust pane widths based on task (more chat space vs more preview space)
-- ✅ Maximize preview real estate when needed
-- ✅ Persistent chat context visible during preview interaction
-- ✅ No layout shift when preview starts/stops
-- ✅ Header adapts to content (better for future additions)
-- ⚠️ Requires careful handling of divider drag boundaries
-
----
-
-### 3. Design Code Storage
-
-**Decision:** Store generated code in `workspace/designs/` directory
-
-**File Structure:**
-```
-workspace/
-└── designs/
-    ├── landing-page.tsx
-    ├── dashboard.tsx
-    └── *.tsx
-```
-
-**File Naming:**
-- User-provided name slugified (e.g., "Landing Page" → `landing-page.tsx`)
-- Auto-generated UUID if no name provided
-- Overwrite on regeneration (with confirmation)
-
-**Preview Vite Integration:**
-- Preview Vite configured with alias to `workspace/designs/`
-- LLM-generated designs imported directly in preview:
-  ```tsx
-  // preview/src/main.tsx
-  import Design from '../../workspace/designs/landing-page';
-  render(<Design />);
-  ```
-- File watcher triggers preview reload on design changes
-
----
 
 ### 4. Code Generation Flow (WebSocket-Based)
 
@@ -783,6 +617,238 @@ CREATE TABLE components (
 
 ---
 
+### 8. Preview Vite Entry Point
+
+**Decision:** Preview loads design dynamically via import alias
+
+**Preview Structure:**
+```
+apps/preview/
+├── index.html
+├── vite.config.ts
+├── package.json        # Base dependencies (react, react-dom)
+└── src/
+    └── main.tsx        # Dynamic design loader
+```
+
+**Vite Config (apps/preview/vite.config.ts):**
+```typescript
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { resolve } from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@design': resolve(__dirname, '../../workspace/designs'),
+    },
+  },
+  server: {
+    port: 3002,  // Dynamic port assigned by backend
+    strictPort: false,  // Allow port change if 3002 is taken
+    cors: true,  // Allow cross-origin from tool UI
+  },
+});
+```
+
+**Preview Entry (apps/preview/src/main.tsx):**
+```tsx
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+
+// Dynamic import - changes based on current design
+import Design from '@design/current.tsx';
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <Design />
+  </React.StrictMode>
+);
+```
+
+**Design Switching:**
+- Backend copies selected design to `workspace/designs/current.tsx`
+- Preview Vite HMR auto-reloads on file change
+- No page refresh needed
+
+**Log Output:**
+- Vite dev server logs captured by backend (stdio)
+- Logs streamed to UI via SSE
+- Errors visible in real-time for debugging
+
+---
+
+## Frontend Components
+
+### 2.5. UI Layout Architecture
+
+**Decision:** Full-width header with two-pane split layout (left: chat/sessions, right: preview) with resizable divider
+
+**Layout Structure:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Full-Width Header Bar                    │
+│                    CycleDesign Logo + Nav                   │
+├──────────────────────────────────┬──────────────────────────┤
+│                                  │                          │
+│         Left Pane                │      Right Pane          │
+│      (Chat + Sessions)           │    (Preview iframe)      │
+│      (resizable width)           │    (flex remaining)      │
+│                                  │                          │
+│  ┌──────────────────────────┐   │  ┌────────────────────┐  │
+│  │    Session Selector      │   │  │                    │  │
+│  ├──────────────────────────┤   │  │                    │  │
+│  │                          │   │  │                    │  │
+│  │     Message List         │   │  │   Preview iframe   │  │
+│  │                          │   │  │   (port 3002)      │  │
+│  │                          │   │  │                    │  │
+│  ├──────────────────────────┤   │  └────────────────────┘  │
+│  │     Prompt Input         │   │                          │
+│  ├──────────────────────────┤   │                          │
+│  │    Status Bar            │   │                          │
+│  │  (connection status)     │   │                          │
+│  └──────────────────────────┘   │                          │
+│                                  │                          │
+└──────────────────────────────────┴──────────────────────────┘
+          ↕ draggable divider ↕
+```
+
+**Layout Specifications:**
+
+| Section | Width | Height | Description |
+|---------|-------|--------|-------------|
+| **Header** | 100% | auto | Auto height based on content, full width, contains logo and navigation |
+| **Left Pane** | 30-70% (user resizable) | 100% - header height | Contains session selector, messages, prompt input, and status bar |
+| **Right Pane** | Remaining (flex) | 100% - header height | Contains preview iframe (backend-managed Vite) |
+| **Divider** | 8px | 100% - header height | Draggable resize handle between panes |
+| **Status Bar** | 100% of left pane | auto | Shows WebSocket connection status, fixed at bottom of left pane |
+
+**Divider Behavior:**
+- User can drag divider left/right to resize panes
+- Left pane has minimum width based on content (session selector, message list, prompt input)
+- Left pane has maximum width (e.g., 70% to keep preview visible)
+- Divider has visual indicator (vertical line with hover state)
+- Drag operation uses smooth resizing (no layout shift)
+- Optional: Persist divider position in localStorage
+
+**Layout Component Structure:**
+```tsx
+// apps/web/src/layouts/MainLayout.tsx
+function MainLayout() {
+  const [leftPaneWidth, setLeftPaneWidth] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  const handleDividerDrag = (newWidth: number) => {
+    const containerWidth = containerRef.current?.clientWidth ?? 0;
+    const minPercentage = 0.3;  // 30% minimum
+    const maxPercentage = 0.7;  // 70% maximum
+    const newPercentage = newWidth / containerWidth;
+    
+    if (newPercentage >= minPercentage && newPercentage <= maxPercentage) {
+      setLeftPaneWidth(newWidth);
+    }
+  };
+  
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      {/* Full-Width Header (auto height) */}
+      <AppBar position="static" sx={{ width: '100%' }}>
+        <Toolbar>
+          <Typography variant="h6">CycleDesign</Typography>
+          {/* Navigation items */}
+        </Toolbar>
+      </AppBar>
+      
+      {/* Two-Pane Split Layout with Resizable Divider */}
+      <Box 
+        ref={containerRef}
+        sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}
+      >
+        {/* Left Pane: Chat + Sessions */}
+        <Box
+          sx={{
+            width: leftPaneWidth ?? '40%',
+            minWidth: '350px',  // Based on content requirements
+            maxWidth: '70%',
+            borderRight: '1px solid divider',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <SessionSelector />
+          <MessageList />
+          <PromptInput />
+          <ConnectionStatus isConnected={isConnected} />
+        </Box>
+        
+        {/* Resizable Divider */}
+        <Box
+          sx={{
+            width: '8px',
+            cursor: 'col-resize',
+            backgroundColor: 'divider',
+            '&:hover': {
+              backgroundColor: 'primary.main',
+            },
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = leftPaneWidth ?? containerRef.current?.clientWidth! * 0.4;
+            
+            const handleMouseMove = (moveEvent: MouseEvent) => {
+              const newWidth = startWidth + (moveEvent.clientX - startX);
+              handleDividerDrag(newWidth);
+            };
+            
+            const handleMouseUp = () => {
+              document.removeEventListener('mousemove', handleMouseMove);
+              document.removeEventListener('mouseup', handleMouseUp);
+            };
+            
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+          }}
+        />
+        
+        {/* Right Pane: Preview iframe */}
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <PreviewFrame />
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+```
+
+**Preview iframe Behavior:**
+- Fills entire right pane (100% width/height of pane)
+- No border, seamless integration
+- Auto-scrolls to show full design
+- Loading skeleton while preview server starts
+- Error overlay if preview server fails
+
+**Rationale:**
+- ✅ Clear visual separation between chat and preview
+- ✅ Side-by-side workflow (chat with LLM while viewing results)
+- ✅ User can adjust pane widths based on task (more chat space vs more preview space)
+- ✅ Maximize preview real estate when needed
+- ✅ Persistent chat context visible during preview interaction
+- ✅ No layout shift when preview starts/stops
+- ✅ Header adapts to content (better for future additions)
+- ⚠️ Requires careful handling of divider drag boundaries
+
+---
+
 ### 7. Preview Communication Bridge
 
 **Decision:** postMessage API for cross-origin communication (3000 ↔ 3002)
@@ -847,68 +913,6 @@ window.addEventListener('message', (event) => {
 - Explicit origin validation on both sides
 - Only localhost origins allowed in development
 - Production would require HTTPS + strict origin checking
-
----
-
-### 8. Preview Vite Entry Point
-
-**Decision:** Preview loads design dynamically via import alias
-
-**Preview Structure:**
-```
-apps/preview/
-├── index.html
-├── vite.config.ts
-├── package.json        # Base dependencies (react, react-dom)
-└── src/
-    └── main.tsx        # Dynamic design loader
-```
-
-**Vite Config (apps/preview/vite.config.ts):**
-```typescript
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { resolve } from 'path';
-
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      '@design': resolve(__dirname, '../../workspace/designs'),
-    },
-  },
-  server: {
-    port: 3002,  // Dynamic port assigned by backend
-    strictPort: false,  // Allow port change if 3002 is taken
-    cors: true,  // Allow cross-origin from tool UI
-  },
-});
-```
-
-**Preview Entry (apps/preview/src/main.tsx):**
-```tsx
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-
-// Dynamic import - changes based on current design
-import Design from '@design/current.tsx';
-
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <Design />
-  </React.StrictMode>
-);
-```
-
-**Design Switching:**
-- Backend copies selected design to `workspace/designs/current.tsx`
-- Preview Vite HMR auto-reloads on file change
-- No page refresh needed
-
-**Log Output:**
-- Vite dev server logs captured by backend (stdio)
-- Logs streamed to UI via SSE
-- Errors visible in real-time for debugging
 
 ---
 
