@@ -1,20 +1,30 @@
-### 1. MCP Server
+### 1. Design System Tools (Phase 4+)
 
-**Location:** `apps/server/src/mcp/`
+**Location:** `apps/server/src/llm/tools/`
 
-**Purpose:** Expose design system and workspace files to LLM for introspection during code generation
+**Purpose:** Enable LLM to introspect design system during code generation
 
 **Tools:**
-
-#### Design System Tools (Phase 4+)
 
 - `list_components` - Return all available components with summaries (name, description, available props/variants)
 - `get_component(name)` - Return full component definition (props, variants, states, composition rules)
 - `get_tokens(type)` - Return design tokens by category (color, spacing, typography)
 - `check_composition_rules(parent, child)` - Validate if a component can contain another
-- `search_components(query)` - Find components by semantic purpose or description
+- `search_components(query)` - Find components by purpose/semantics
 
-#### File System Tools (Phase 3+)
+**LLM Instructions (system prompt):**
+- Never modify or generate `id` props on components
+- Use only components returned by design system tools
+- Props must use semantic values from design system tokens
+- Reference component names exactly as returned by `list_components`
+
+---
+
+### 2. File System Tools (Phase 3+)
+
+**Location:** `apps/server/src/llm/tools/`
+
+**Purpose:** Enable LLM to read and search workspace files during code generation
 
 **`readFile`** - Read file contents with optional line range
 
@@ -154,15 +164,7 @@ readFile({ path: "designs/landing-page.tsx", startLine: 1, endLine: 50 })
 
 ---
 
-#### LLM Instructions (system prompt)
-
-**For Design System Tools (Phase 4+):**
-- Never modify or generate `id` props on components
-- Use only components returned by MCP tools
-- Props must use semantic values from design system tokens
-- Reference component names exactly as returned by `list_components`
-
-**For File System Tools (Phase 3+):**
+**LLM Instructions (system prompt):**
 - Use `readFile` to inspect existing designs before editing
 - Use `findFile` to locate component usage patterns
 - Always check `totalLines` before reading large files (use line ranges for files >100 lines)
@@ -320,7 +322,6 @@ export const findFileTool = tool({
 ```json
 {
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.5.0",
     "glob": "^10.3.0",
     "ignore": "^5.3.0",
     "zod": "^3.22.4"
@@ -329,7 +330,6 @@ export const findFileTool = tool({
 ```
 
 **Key Packages:**
-- `@modelcontextprotocol/sdk` - Official MCP implementation
 - `glob` - File pattern matching for findFile
 - `ignore` - .gitignore support for findFile
 - `zod` - Schema validation for tool parameters
@@ -347,5 +347,106 @@ export const findFileTool = tool({
 | ✅ **Security** | Workspace boundary enforcement prevents unauthorized access |
 | ✅ **Error resilience** | Graceful error handling prevents generation failures |
 | ✅ **Metadata-rich** | Total lines, match counts help LLM understand scope |
+
+---
+
+### 3. Preview Communication Bridge
+
+**Purpose:** postMessage API for cross-origin communication between tool UI (port 3000) and preview iframe (port 3002)
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Tool Frontend (React + MUI)                    │
+│  Port: 3000                                                 │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                   iframe (sandboxed)                  │  │
+│  │  ┌─────────────────────────────────────────────────┐  │  │
+│  │  │   Preview Vite (port 3002)                      │  │  │
+│  │  │   - Loads @design/current.tsx                   │  │  │
+│  │  │   - Wrappers (AuditWrapper, SelectionBox)       │  │  │
+│  │  │   - Design system components                    │  │  │
+│  │  │   - postMessage bridge to parent                │  │  │
+│  │  └─────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                    postMessage API
+                              │
+                    ┌─────────▼─────────┐
+                    │  Communication    │
+                    │  Bridge Hook      │
+                    └───────────────────┘
+```
+
+**Message Types:**
+
+**Parent (tool UI, port 3000) → Iframe (preview, port 3002):**
+```typescript
+interface ParentMessage {
+  type: 'SET_MODE';
+  payload: { mode: 'select' | 'preview' | 'audit' };
+} | {
+  type: 'HIGHLIGHT_COMPONENT';
+  payload: { instanceId: string };
+} | {
+  type: 'UPDATE_PROPS';
+  payload: { instanceId: string; props: Record<string, any> };
+};
+```
+
+**Iframe (preview, port 3002) → Parent (tool UI, port 3000):**
+```typescript
+interface IframeMessage {
+  type: 'MODE_READY';
+  payload: { mode: string };
+} | {
+  type: 'COMPONENT_SELECTED';
+  payload: { instanceId: string; componentName: string };
+} | {
+  type: 'ERROR';
+  payload: { error: string };
+};
+```
+
+**Implementation:**
+```typescript
+// Parent (tool UI, port 3000)
+const iframeRef = useRef<HTMLIFrameElement>(null);
+
+function sendMessageToIframe(message: ParentMessage) {
+  iframeRef.current?.contentWindow?.postMessage(
+    message,
+    'http://localhost:3002'  // Preview origin (dynamic)
+  );
+}
+
+// Iframe (preview, port 3002)
+window.addEventListener('message', (event) => {
+  if (event.origin !== 'http://localhost:3000') return;  // Tool origin
+  
+  const message: ParentMessage = event.data;
+  
+  switch (message.type) {
+    case 'SET_MODE':
+      setMode(message.payload.mode);
+      break;
+    case 'HIGHLIGHT_COMPONENT':
+      highlightComponent(message.payload.instanceId);
+      break;
+  }
+});
+```
+
+**Cross-Origin Security:**
+- Explicit origin validation on both sides
+- Only localhost origins allowed in development
+- Production would require HTTPS + strict origin checking
+
+**Use Cases:**
+- **Mode switching**: Tool sends `SET_MODE` to change select/preview/audit modes
+- **Component selection**: Wrapper sends `COMPONENT_SELECTED` when user clicks component
+- **Highlighting**: Tool sends `HIGHLIGHT_COMPONENT` to show selection in preview
+- **Mode confirmation**: Iframe sends `MODE_READY` when mode change complete
 
 ---

@@ -2,14 +2,14 @@
 
 **This document extends `docs/TECHNICAL_DESIGN.md` with Phase 3 implementation details.**
 
-**Relationship to TECHNICAL_DESIGN.md:**
-- `TECHNICAL_DESIGN.md` - High-level architecture, canonical tool definitions, system prompts
+**Relationship to Other Docs:**
+- `TECHNICAL_DESIGN.md` - High-level architecture, system design
+- `TOOL_CALLING.md` - Complete LLM tool calling specification (tools, workflows, error handling)
 - `Phase3.md` - Implementation details, timelines, checklists, Phase 3-specific flows
 
 **Cross-References:**
-- Tool Calls → See `TECHNICAL_DESIGN.md` section "Tool Calls (Direct Integration)" for complete tool definitions
+- Tool Calls → See `docs/TOOL_CALLING.md` for complete tool calling specification
 - WebSocket Protocol → Phase 2a prerequisite (implemented in Phase 2a)
-- LLM Tool Calling → Phase 3-specific tool definitions in section "LLM Tool Definitions" below
 - Component Transformer → Phase 3 implementation in section "Component Transformer Pipeline" below
 - Database Schema → Phase 3 implementation in section "Database Schema" below
 
@@ -388,6 +388,11 @@ workspace/
 - Server acknowledges immediately, then processes generation
 - Generated design saved to session messages automatically
 
+**Tool Calling:**
+- LLM uses 7 separate tools for code generation
+- Tools are defined in `apps/server/src/llm/tools/`
+- Complete tool specifications in `docs/TOOL_CALLING.md`
+
 **Message Flow:**
 ```typescript
 // Client → Server (via WebSocket)
@@ -408,72 +413,7 @@ workspace/
 
 // Server processes generation (tool calling happens server-side)
 // Server sends status updates for each tool call
-
-// Server → Client (tool call status: starting)
-{
-  "type": "status",
-  "messageId": "msg_003",
-  "status": "tool_call_start",
-  "tool": "addDependency",
-  "details": "Installing framer-motion package..."
-}
-
-// Server → Client (tool call status: complete)
-{
-  "type": "status",
-  "messageId": "msg_003",
-  "status": "tool_call_complete",
-  "tool": "addDependency",
-  "details": "Package installed successfully"
-}
-
-// Server → Client (next tool call)
-{
-  "type": "status",
-  "messageId": "msg_003",
-  "status": "tool_call_start",
-  "tool": "createFile",
-  "details": "Generating landing-page.tsx..."
-}
-
-// Server → Client (tool call complete)
-{
-  "type": "status",
-  "messageId": "msg_003",
-  "status": "tool_call_complete",
-  "tool": "createFile",
-  "details": "File created successfully"
-}
-
-// Server → Client (validation starting)
-{
-  "type": "status",
-  "messageId": "msg_003",
-  "status": "validation_start",
-  "details": "Running TypeScript compilation..."
-}
-
-// Server → Client (validation complete)
-{
-  "type": "status",
-  "messageId": "msg_003",
-  "status": "validation_complete",
-  "details": "All validations passed"
-}
-
-// Server → Client (preview starting)
-{
-  "type": "status",
-  "messageId": "msg_003",
-  "status": "preview_start",
-  "details": "Starting preview server..."
-}
-
-// Server → Client (streaming content response)
-{
-  "type": "content",
-  "content": "Created landing page with hero section and animations!"
-}
+// ... see TOOL_CALLING.md for complete flow
 
 // Server → Client (done)
 {
@@ -485,75 +425,29 @@ workspace/
 
 **Status Message Types:**
 
-| Status Type | Description | Display in Chat |
-|-------------|-------------|-----------------|
-| `tool_call_start` | A tool is about to execute | Info badge: "Installing package..." |
-| `tool_call_complete` | Tool executed successfully | Success badge: "Package installed" |
-| `tool_call_error` | Tool execution failed | Error badge: "Failed to install package" |
-| `validation_start` | Validation pipeline starting | Info badge: "Validating code..." |
-| `validation_complete` | All validations passed | Success badge: "Validation passed" |
-| `validation_error` | Validation failed | Error badge with details |
-| `preview_start` | Preview server starting | Info badge: "Starting preview..." |
-| `preview_ready` | Preview server ready | Success badge: "Preview ready" |
-| `preview_error` | Preview server failed | Error badge: "Preview failed to start" |
-
-**Tool Calling Architecture:**
-
-The LLM uses **7 separate tools** (defined in `apps/server/src/llm/tools/`):
-
-1. **createFile** - Create new design files
-2. **editFile** - Modify existing designs (patch-based)
-3. **renameFile** - Rename design files
-4. **deleteFile** - Delete design files
-5. **addDependency** - Add npm packages to preview environment
-6. **submitWork** - Signal completion and trigger validation (REQUIRED when done)
-7. **askUser** - Request clarification from user
-
-**Why Separate Tools (not single generateCode tool):**
-- ✅ Modular workflow (LLM can make multiple changes before validation)
-- ✅ Patch-based editing (editFile uses unified diff for efficiency)
-- ✅ Clear separation of concerns (create vs edit vs delete)
-- ✅ Better error handling (each tool has specific validation)
-- ✅ Multi-turn conversations (LLM can fix errors incrementally)
-- ✅ User in the loop (askUser for clarification, submitWork for completion)
-
-**Tool Definitions:** See section "LLM Tool Definitions" below for complete tool schemas.
-
-**LLM Instructions:**
-- Export default React functional component
-- Do NOT add `id` props (system will inject them)
-- Use TypeScript with proper types
-- May add dependencies to `apps/preview/package.json` if needed
-- Use tool calling to return structured output (not markdown blocks)
-- **MUST call submitWork when completely done** (triggers validation + preview start)
+| Status Type | Description |
+|-------------|-------------|
+| `tool_call_start` | A tool is about to execute |
+| `tool_call_complete` | Tool executed successfully |
+| `tool_call_error` | Tool execution failed |
+| `validation_start` | Validation pipeline starting |
+| `validation_complete` | All validations passed |
+| `validation_error` | Validation failed |
+| `preview_start` | Preview server starting |
+| `preview_ready` | Preview server ready |
+| `preview_error` | Preview server failed |
 
 **Frontend Integration:**
 ```typescript
 // Use Phase 2a's useMessageListState hook
-function CodeGenerationInput() {
-  const { sendMessage, isConnected } = useMessageListState(sessionId);
-  const [prompt, setPrompt] = useState('');
-  
-  const handleSubmit = () => {
-    sendMessage(prompt);  // Sends via WebSocket
-    setPrompt('');
-  };
-  
-  return (
-    <Box>
-      <TextField 
-        value={prompt}
-        onChange={e => setPrompt(e.target.value)}
-        disabled={!isConnected}
-        placeholder="Describe the UI you want to create..."
-      />
-      <Button onClick={handleSubmit} disabled={!prompt.trim() || !isConnected}>
-        Generate
-      </Button>
-    </Box>
-  );
-}
+const { sendMessage, isConnected } = useMessageListState(sessionId);
+sendMessage('Create a landing page with hero section and features');
 ```
+
+**See Also:**
+- Complete tool definitions: `docs/TOOL_CALLING.md`
+- Status broadcasting: `docs/TOOL_CALLING.md`
+- Multi-turn workflow: `docs/TOOL_CALLING.md`
 
 ---
 
@@ -561,43 +455,12 @@ function CodeGenerationInput() {
 
 **Decision:** Broadcast tool execution status to clients via WebSocket in real-time
 
-**Implementation:**
-```typescript
-// apps/server/src/websocket/status-broadcaster.ts
-import { WebSocket } from 'ws';
-
-interface StatusMessage {
-  type: 'status';
-  messageId: string;  // Original message ID that triggered generation
-  status: 
-    | 'tool_call_start'
-    | 'tool_call_complete'
-    | 'tool_call_error'
-    | 'validation_start'
-    | 'validation_complete'
-    | 'validation_error'
-    | 'preview_start'
-    | 'preview_ready'
-    | 'preview_error';
-  tool?: string;  // Tool name (for tool_call_* statuses)
-  details: string;  // User-friendly description
-  timestamp: number;
-}
-
-export class StatusBroadcaster {
-  private clients: Set<WebSocket>;
-  
-  constructor() {
-    this.clients = new Set();
-  }
-  
-  addClient(ws: WebSocket) {
-    this.clients.add(ws);
-  }
-  
-  removeClient(ws: WebSocket) {
-    this.clients.delete(ws);
-  }
+**Implementation:** See `docs/TOOL_CALLING.md` for complete implementation details including:
+- StatusBroadcaster class
+- Tool calling integration
+- Validation pipeline integration
+- Preview server integration
+- Frontend StatusMessage component
   
   broadcastStatus(status: StatusMessage) {
     const message = JSON.stringify(status);
@@ -695,211 +558,7 @@ export async function executeToolCalls(
   toolCalls: ToolCall[],
   messageId: string
 ) {
-  for (const toolCall of toolCalls) {
-    const toolName = toolCall.function.name;
-    
-    // Broadcast start
-    statusBroadcaster.sendToolCallStart(
-      messageId,
-      toolName,
-      getToolStartMessage(toolName, toolCall.function.arguments)
-    );
-    
-    try {
-      // Execute tool
-      const result = await executeTool(toolCall);
-      
-      // Broadcast success
-      statusBroadcaster.sendToolCallComplete(
-        messageId,
-        toolName,
-        getToolCompleteMessage(toolName, result)
-      );
-    } catch (error) {
-      // Broadcast error
-      statusBroadcaster.sendToolCallError(
-        messageId,
-        toolName,
-        error instanceof Error ? error.message : 'Unknown error'
-      );
-      throw error;
-    }
-  }
-}
-
-function getToolStartMessage(tool: string, args: any): string {
-  switch (tool) {
-    case 'addDependency':
-      return `Installing ${args.packageName}...`;
-    case 'createFile':
-      return `Creating ${args.filename}...`;
-    case 'editFile':
-      return `Editing ${args.filename}...`;
-    default:
-      return `Executing ${tool}...`;
-  }
-}
-
-function getToolCompleteMessage(tool: string, result: any): string {
-  switch (tool) {
-    case 'addDependency':
-      return `Package installed successfully`;
-    case 'createFile':
-      return `File created: ${result.filename}`;
-    case 'editFile':
-      return `File updated: ${result.filename}`;
-    default:
-      return `${tool} completed`;
-  }
-}
-```
-
-**Validation Pipeline Integration:**
-```typescript
-// apps/server/src/validation/pipeline.ts
-import { statusBroadcaster } from '../websocket/status-broadcaster';
-
-export async function validateDesign(
-  code: string,
-  messageId: string
-): Promise<ValidationResult> {
-  // Stage 1: Dependency Check
-  statusBroadcaster.sendValidationStart(messageId, 'dependency check');
-  await checkDependencies(code);
-  
-  // Stage 2: TypeScript Compilation
-  statusBroadcaster.sendValidationStart(messageId, 'TypeScript compilation');
-  const tsResult = await compileTypeScript(code);
-  if (!tsResult.success) {
-    throw new Error(`TypeScript error: ${tsResult.error}`);
-  }
-  
-  // Stage 3: ESLint
-  statusBroadcaster.sendValidationStart(messageId, 'ESLint check');
-  const eslintResult = await runESLint(code);
-  if (!eslintResult.success) {
-    throw new Error(`ESLint error: ${eslintResult.error}`);
-  }
-  
-  // Stage 4: ID Injection
-  statusBroadcaster.sendValidationStart(messageId, 'ID injection');
-  const injectedCode = injectIds(code);
-  
-  // All validations passed
-  statusBroadcaster.sendValidationComplete(messageId);
-  
-  return {
-    success: true,
-    code: injectedCode,
-  };
-}
-```
-
-**Preview Server Integration:**
-```typescript
-// apps/server/src/preview/preview-manager.ts
-import { statusBroadcaster } from '../websocket/status-broadcaster';
-
-export class PreviewManager {
-  async start(messageId?: string) {
-    if (messageId) {
-      statusBroadcaster.sendPreviewStart(messageId);
-    }
-    
-    // Spawn Vite process...
-    const port = await this.spawnVite();
-    
-    if (messageId) {
-      statusBroadcaster.sendPreviewReady(messageId, port);
-    }
-    
-    return { port, status: 'RUNNING' };
-  }
-}
-```
-
-**WebSocket Handler Integration:**
-```typescript
-// apps/server/src/websocket/handler.ts
-import { statusBroadcaster } from './status-broadcaster';
-
-export function handleWebSocketConnection(ws: WebSocket) {
-  // Add client to status broadcaster
-  statusBroadcaster.addClient(ws);
-  
-  ws.on('message', async (data) => {
-    const message = JSON.parse(data.toString());
-    
-    if (message.type === 'message') {
-      // Process generation request
-      await handleGenerationRequest(message);
-    }
-  });
-  
-  ws.on('close', () => {
-    statusBroadcaster.removeClient(ws);
-  });
-}
-```
-
-**Frontend Status Message Component:**
-```typescript
-// apps/web/src/components/chat/StatusMessage.tsx
-import { Box, Chip, Typography, Collapse } from '@mui/material';
-import { useState } from 'react';
-
-interface StatusMessageProps {
-  status: 'tool_call_start' | 'tool_call_complete' | 'tool_call_error' |
-          'validation_start' | 'validation_complete' | 'validation_error' |
-          'preview_start' | 'preview_ready' | 'preview_error';
-  tool?: string;
-  details: string;
-}
-
-export function StatusMessage({ status, tool, details }: StatusMessageProps) {
-  const [expanded, setExpanded] = useState(false);
-  
-  const getColor = () => {
-    if (status.includes('_start')) return 'info';
-    if (status.includes('_complete') || status.includes('_ready')) return 'success';
-    if (status.includes('_error')) return 'error';
-    return 'default';
-  };
-  
-  const getIcon = () => {
-    if (status.includes('_start')) return <CircularProgress size={16} />;
-    if (status.includes('_complete') || status.includes('_ready')) return <CheckCircleIcon />;
-    if (status.includes('_error')) return <ErrorIcon />;
-    return null;
-  };
-  
-  return (
-    <Box 
-      sx={{ 
-        py: 0.5, 
-        px: 1, 
-        bgcolor: 'action.hover',
-        borderRadius: 1,
-        my: 0.5,
-      }}
-      onClick={() => setExpanded(!expanded)}
-    >
-      <Chip
-        icon={getIcon()}
-        label={tool ? `${tool}: ${details}` : details}
-        color={getColor() as any}
-        size="small"
-        variant="outlined"
-      />
-      <Collapse in={expanded}>
-        <Typography variant="caption" color="text.secondary">
-          {status} at {new Date().toLocaleTimeString()}
-        </Typography>
-      </Collapse>
-    </Box>
-  );
-}
-```
+**Implementation:** See `docs/TOOL_CALLING.md` for complete code examples.
 
 **Message List Integration:**
 ```typescript
@@ -1258,12 +917,21 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 ### Backend Setup
 
 - [ ] **1.0** Implement LLM tool calling for code generation
-  - [ ] Create `src/llm/tools/generate-code.ts` (Zod schema + tool definition)
-  - [ ] Create `src/llm/tools/edit-code.ts` (for editing existing designs)
-  - [ ] Create `src/llm/tools/add-dependency.ts` (for preview package.json)
-  - [ ] Update LLM provider to support tool calling
-  - [ ] Set temperature: 0.1, maxTokens: 8192, toolChoice: 'required'
+  - [ ] Create `src/llm/tools/create-file.ts` (Zod schema + tool definition)
+  - [ ] Create `src/llm/tools/edit-file.ts` (patch-based editing with unified diff)
+  - [ ] Create `src/llm/tools/rename-file.ts` (rename design files)
+  - [ ] Create `src/llm/tools/delete-file.ts` (delete design files)
+  - [ ] Create `src/llm/tools/add-dependency.ts` (add npm packages to preview)
+  - [ ] Create `src/llm/tools/submit-work.ts` (trigger validation pipeline, empty args)
+  - [ ] Create `src/llm/tools/ask-user.ts` (request clarification from user)
+  - [ ] Create `src/llm/tools/index.ts` (export all tools)
+  - [ ] Update LLM provider to support tool calling with all 7 tools
+  - [ ] Configure tool calling parameters (temperature: 0.1, maxTokens: 8192)
+  - [ ] Add hardcoded system prompt for code generation (includes tool instructions, submitWork requirement, file constraints)
+  - [ ] Implement tool execution pipeline with error handling
+  - [ ] Add file constraint validation (kebab-case, .tsx only, designs/ directory)
   - [ ] **Validate:** LLM returns structured tool calls consistently
+  - [ ] **Validate:** Each tool executes correctly with proper validation
 
 - [ ] **1.1** Create preview server lifecycle management
   - [ ] Create `src/preview/preview-manager.ts` (process management)
@@ -1313,20 +981,20 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] **Validate:** Status messages appear in chat in real-time
 
 - [ ] **1.5** Implement validation pipeline
-  - [ ] Create `src/validation/typescript.ts` (tsc runner)
-  - [ ] Create `src/validation/eslint.ts` (eslint runner)
-  - [ ] Create `src/validation/knip.ts` (knip runner)
-  - [ ] Run validations in sequence
-  - [ ] Return detailed error messages
-  - [ ] **Validate:** Test with valid and invalid code samples
+  - [ ] Create `src/validation/typescript.ts` (tsc runner for preview directory)
+  - [ ] Create `src/validation/eslint.ts` (eslint runner, copy apps/server/.eslintrc.js)
+  - [ ] Create `src/validation/knip.ts` (knip runner with default config)
+  - [ ] Run all validators in parallel (Promise.all)
+  - [ ] Aggregate all errors into single array with type, file, line, column, message
+  - [ ] Return aggregated errors to LLM for resolution
+  - [ ] **Validate:** All validation errors returned in single response
+  - [ ] **Validate:** Parallel execution is faster than sequential
 
-- [ ] **1.6** Implement dependency management
-  - [ ] Create `src/preview/dependency-manager.ts`
-  - [ ] Parse imports from generated code
-  - [ ] Check against installed packages
-  - [ ] Add missing packages to `apps/preview/package.json`
-  - [ ] Run `npm install` in preview directory
-  - [ ] Return install progress and errors
+- [ ] **1.6** Implement addDependency tool execution
+  - [ ] Run `npm install` as child process in preview directory
+  - [ ] Handle install failures (report error back to LLM)
+  - [ ] Use latest version if not specified
+  - [ ] Stream install progress to status broadcaster
   - [ ] **Validate:** LLM can add new package and it becomes available
 
 - [ ] **1.7** Implement ID injection
@@ -1353,10 +1021,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 - [ ] **2.1** Initialize preview Vite instance
   - [ ] Create `apps/preview/` directory
   - [ ] Create `package.json` with base dependencies (react, react-dom)
-  - [ ] Create `vite.config.ts` with dynamic port and @design alias
+  - [ ] Create `vite.config.ts` with dynamic port and alias to transformed output directory
   - [ ] Create `index.html` entry point
   - [ ] Create `src/main.tsx` with dynamic design loader
-  - [ ] **Validate:** Backend can start preview server
+  - [ ] Create component transformer (wraps components with AuditWrapper/SelectionBox)
+  - [ ] Transformer outputs to separate directory (e.g., `workspace/build/`)
+  - [ ] Transformer invoked by backend after submitWork validation passes
+  - [ ] Vite configured to serve transformed output directory
+  - [ ] **Validate:** Backend can start preview server with transformed code
 
 - [ ] **2.2** Configure dynamic port assignment
   - [ ] Allow Vite to find available port (strictPort: false)
@@ -1451,11 +1123,17 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Configure as workspace dependency
 
 - [ ] **3.2** Implement wrapper components
-  - [ ] `AuditWrapper` - Handles audit mode highlighting
-  - [ ] `SelectionBox` - Shows selection bounding box
-  - [ ] `MetadataProvider` - Attaches instance metadata
+  - [ ] `AuditWrapper` - Handles audit mode highlighting (border/background)
+  - [ ] `SelectionBox` - Shows selection bounding box with click handlers
+  - [ ] `MetadataProvider` - Attaches instance metadata (id, componentName)
+  - [ ] Implement postMessage communication to parent window
+    - Send `COMPONENT_SELECTED` event with instanceId, componentName
+    - Send `MODE_READY` event when mode changes
+    - Listen for `SET_MODE`, `HIGHLIGHT_COMPONENT` from parent
+  - [ ] Origin validation (only accept from http://localhost:3000)
   - [ ] Style wrappers with MUI `sx` prop
   - [ ] **Validate:** Verify wrappers render correctly in preview
+  - [ ] **Validate:** postMessage communication works bidirectionally
 
 ---
 
@@ -1475,13 +1153,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Component not found errors
   - [ ] iframe communication failures
   - [ ] **Validate:** Error messages display correctly
-
-- [ ] **4.3** Test performance
-  - [ ] Measure generation time
-  - [ ] Measure validation time
-  - [ ] Measure iframe load time
-  - [ ] Test with large designs (100+ components)
-  - [ ] **Validate:** Performance metrics acceptable
 
 ---
 
@@ -1592,142 +1263,6 @@ VITE_TOOL_URL=http://localhost:3000
 
 ---
 
-## LLM Tool Definitions
-
-The LLM uses **7 separate tools** (defined in `apps/server/src/llm/tools/`):
-
-- `createFile` - Create new design files
-- `editFile` - Modify existing designs (patch-based)
-- `renameFile` - Rename design files
-- `deleteFile` - Delete design files
-- `addDependency` - Add npm packages to preview environment
-- `submitWork` - Signal completion and trigger validation (REQUIRED when done)
-- `askUser` - Request clarification from user
-
-**Key Points:**
-- All tools enforce file constraints (.tsx only, designs/ directory, kebab-case filenames)
-- `submitWork` MUST be called when LLM is completely done (triggers validation + preview start)
-- `submitWork` takes empty arguments `{}` - system automatically tracks changes
-- See "Multi-Turn Tool Calling Workflow" below for complete flow example
-
----
-
-## Multi-Turn Tool Calling Workflow
-
-**Phase 1: LLM Staging Changes**
-```
-User: "Create a landing page with animations"
-         │
-         ▼
-┌─────────────────────────┐
-│  LLM Tool Calls         │
-│  (multiple, staged)     │
-│                         │
-│  1. addDependency       │
-│     {packageName:       │
-│      "framer-motion"}   │
-│                         │
-│  2. createFile          │
-│     {filename:          │
-│      "landing-page.tsx",│
-│      code: "..."}       │
-│                         │
-│  3. submitWork          │
-│     {}  ← EMPTY!        │
-│         System tracks:  │
-│         - filesCreated  │
-│         - dependencies  │
-└─────────────────────────┘
-         │
-         │ Triggers validation + preview start
-         ▼
-```
-
-**Phase 2: Validation Pipeline**
-```
-┌─────────────────────────┐
-│  Validation Pipeline    │
-│                         │
-│  1. Check dependencies  │
-│     ✅ framer-motion    │
-│        installed        │
-│                         │
-│  2. TypeScript compile  │
-│     ❌ Error: Line 42   │
-│        "Property 'x'    │
-│        does not exist"  │
-│                         │
-│  3. ESLint              │
-│     (skipped - TS fail) │
-│                         │
-│  4. ID Injection        │
-│     (skipped - TS fail) │
-└─────────────────────────┘
-         │
-         │ Validation failed
-         ▼
-```
-
-**Phase 3: Error Feedback to LLM**
-```
-Backend → LLM:
-{
-  "status": "validation_failed",
-  "errors": [
-    {
-      "type": "typescript",
-      "file": "landing-page.tsx",
-      "line": 42,
-      "column": 12,
-      "message": "Property 'x' does not exist on type 'BoxProps'",
-      "code": "TS2322"
-    }
-  ],
-  "instruction": "Please fix these errors and call submitWork again"
-}
-         │
-         ▼
-┌─────────────────────────┐
-│  LLM Fixes Errors       │
-│                         │
-│  1. editFile            │
-│     {filename:          │
-│      "landing-page.tsx",│
-│      patch: "@@ -42..."}│
-│                         │
-│  2. submitWork          │
-│     {}  ← EMPTY again!  │
-│         (triggers       │
-│          validation)    │
-└─────────────────────────┘
-         │
-         │ Triggers validation again
-         ▼
-```
-
-**Phase 4: Success**
-```
-┌─────────────────────────┐
-│  Validation Pipeline    │
-│                         │
-│  1. Check dependencies  │
-│     ✅                  │
-│  2. TypeScript compile  │
-│     ✅                  │
-│  3. ESLint              │
-│     ✅                  │
-│  4. ID Injection        │
-│     ✅ (15 IDs added)   │
-└─────────────────────────┘
-         │
-         ✅ Success!
-         │
-         ▼
-Preview server reloads with new design
-```
-
----
-
 ## Error Handling Strategy
 
 **Error Categories:**
@@ -1741,123 +1276,7 @@ Preview server reloads with new design
 | **Composition** | Design system rules (Phase 4+) | Use valid component nesting |
 | **Semantic** | Invalid prop values | Use design system tokens |
 
-**Error Response Format:**
-```typescript
-interface ValidationError {
-  type: 'typescript' | 'eslint' | 'knip' | 'dependency';
-  severity: 'error' | 'warning';
-  file: string;
-  line?: number;
-  column?: number;
-  message: string;
-  code?: string;  // Error code (e.g., "TS2322")
-  suggestion?: string;  // Optional fix suggestion
-}
-
-interface SubmitWorkResponse {
-  status: 'success' | 'validation_failed' | 'user_input_required';
-  errors?: ValidationError[];
-  warnings?: ValidationError[];
-  message?: string;
-  userQuestion?: {  // If LLM called askUser
-    question: string;
-    context: string;
-    suggestions?: string[];
-  };
-}
-```
-
----
-
-## askUser Flow Example
-
-```
-User: "Create a dashboard for my SaaS"
-         │
-         ▼
-LLM: "What metrics should the dashboard display?"
-         │
-         ▼
-┌─────────────────────────────────┐
-│  UI displays question to user:  │
-│                                 │
-│  🤖 AI has a question:          │
-│  "What metrics should the       │
-│   dashboard display?"           │
-│                                 │
-│  Context: Need to know what     │
-│  data to show in the dashboard  │
-│                                 │
-│  Suggestions:                   │
-│  [Revenue] [Users] [Activity]   │
-│  [Custom...]                    │
-│                                 │
-│  [Text input] _______________   │
-│  [Submit]                       │
-└─────────────────────────────────┘
-         │
-         ▼
-User: "Monthly recurring revenue, active users, and conversion rate"
-         │
-         ▼
-Backend sends to LLM:
-{
-  "toolResponse": {
-    "toolCallId": "call_askUser_123",
-    "result": {
-      "answer": "Monthly recurring revenue, active users, and conversion rate"
-    }
-  }
-}
-         │
-         ▼
-LLM continues with dashboard design
-```
-
----
-
-## Security Constraints
-
-**All file tools enforce:**
-
-| Constraint | Validation | Rationale |
-|------------|------------|-----------|
-| **File extension** | `.tsx` only | Prevents config/system file modification |
-| **Directory** | `designs/` only | LLM can't touch design system or source code |
-| **Filename format** | `^[a-z0-9-]+\.tsx$` | Kebab-case, no special chars, no path traversal |
-| **No absolute paths** | Relative paths only | Prevents writing outside workspace |
-| **No path traversal** | Reject `..` in paths | Prevents escaping designs/ directory |
-
-**Example blocked requests:**
-```typescript
-// ❌ Blocked: Wrong extension
-{ filename: "config.json" }
-
-// ❌ Blocked: Path traversal
-{ filename: "../server/src/malicious.tsx" }
-
-// ❌ Blocked: Absolute path
-{ filename: "/etc/passwd.tsx" }
-
-// ❌ Blocked: Wrong directory
-{ filename: "components/Button.tsx" }
-
-// ✅ Allowed: Valid design file
-{ filename: "landing-page.tsx", location: "designs" }
-```
-
-### Code Generation System Prompt
-
-The system prompt for code generation includes:
-
-- Tool availability and usage instructions
-- **CRITICAL: submitWork requirements** (must call when done, empty arguments)
-- File constraints (.tsx only, designs/ directory, kebab-case)
-- Code requirements (TypeScript, no id props, complete runnable code)
-- Patch-based editing guidelines
-- Dependency management instructions
-- askUser usage guidelines
-- Good/bad filename examples
+**See Also:** Complete error handling, security constraints, and system prompt details in `docs/TOOL_CALLING.md`
 
 ---
 
@@ -1932,7 +1351,6 @@ Code generation is triggered via WebSocket messages (Phase 2a protocol), not RES
 
 **Client → Server:**
 ```typescript
-// User sends generation prompt via WebSocket
 ws.send(JSON.stringify({
   type: 'message',
   id: 'msg_client_1234567890',
@@ -1951,12 +1369,6 @@ ws.send(JSON.stringify({
   "timestamp": Date.now()
 }
 
-// Streaming progress updates
-{
-  "type": "content",
-  "content": "Generating landing page..."
-}
-
 // Generation complete
 {
   "type": "done",
@@ -1968,9 +1380,9 @@ ws.send(JSON.stringify({
 **Server-Side Process:**
 1. WebSocket message received
 2. Immediate acknowledgment sent (Phase 2a protocol)
-3. LLM tool calling triggered (`createFile` tool)
-4. Backend validates filename constraints (kebab-case, .tsx, designs/)
-5. Check dependencies (call `addDependency` if needed)
+3. LLM tool calling triggered
+4. Backend validates filename constraints
+5. Check dependencies
 6. Validate code (TypeScript, ESLint, Knip)
 7. Inject IDs
 8. Write to filesystem
@@ -1979,12 +1391,11 @@ ws.send(JSON.stringify({
 
 **Frontend Usage:**
 ```typescript
-// Use Phase 2a's useMessageListState hook
 const { sendMessage } = useMessageListState(sessionId);
-
-// Send generation prompt
 sendMessage('Create a landing page with hero section and features');
 ```
+
+**See Also:** Complete WebSocket integration and tool calling flow in `docs/TOOL_CALLING.md`
 
 ### Design Management
 

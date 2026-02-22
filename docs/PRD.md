@@ -186,22 +186,32 @@ Design systems are often created but inconsistently applied. Designers drift fro
 
 ### LLM Integration
 
-**MCP (Model Context Protocol) Interface**
-- Expose design system via MCP server for LLM introspection
-- LLM queries components on-demand instead of full serialization
-- Available MCP tools:
-  - `list_components` - Browse available components
-  - `get_component` - Fetch component details (props, variants, states)
-  - `get_tokens` - Query color, typography, spacing tokens
-  - `check_composition_rules` - Validate component nesting
-  - `search_components` - Find components by purpose/semantics
+**Tool Calling Interface**
+- LLM uses tool calling for code generation and design system introspection
+- Tools defined in `apps/server/src/llm/tools/`
+- Complete specification in `docs/TOOL_CALLING.md`
+
+**Phase 3 Tools (Code Generation)**
+- `createFile` - Create new design files
+- `editFile` - Edit existing files with patch-based editing
+- `renameFile` - Rename design files
+- `deleteFile` - Delete design files
+- `addDependency` - Add npm packages to preview environment
+- `submitWork` - Trigger validation pipeline
+- `askUser` - Request clarification from user
+
+**Phase 4 Tools (Design System Introspection)**
+- `list_components` - Browse available components
+- `get_component` - Fetch component details (props, variants, states)
+- `get_tokens` - Query color, typography, spacing tokens
+- `check_composition_rules` - Validate component nesting
+- `search_components` - Find components by purpose/semantics
 
 **Design Generation Flow**
-1. User submits prompt (text and/or image)
-2. LLM introspects design system via MCP to understand available components
-3. LLM returns design specification as structured JSON
-4. Validation engine verifies against design system rules
-5. If violations detected:
+1. User submits prompt (text and/or image) via WebSocket
+2. LLM uses tool calling to generate code
+3. Backend validates code against design system rules (Phase 4+)
+4. If violations detected:
    - Reject and request LLM self-correction with error feedback
    - Or suggest design system modifications to user
 
@@ -212,7 +222,7 @@ Design systems are often created but inconsistently applied. Designers drift fro
 
 **Benefits**
 - No context window limits on design system size
-- LLM discovers components dynamically
+- LLM discovers components dynamically via tool calls
 - Reduced token usage per generation
 - Design system can evolve without prompt template changes
 
@@ -311,7 +321,7 @@ None currently.
 
 **Phase 4**: Design System Mode
 - Design System Mode (tokens, components, rules as code)
-- MCP server for LLM introspection of design system
+- Tool calling for LLM introspection of design system
 - Validation engine (semantic props, design system rules)
 - ID injection with database index
 - Select/Preview modes with property editors
