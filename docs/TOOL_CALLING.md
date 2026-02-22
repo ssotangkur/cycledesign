@@ -12,26 +12,26 @@ The LLM uses **7 separate tools** to generate and manage UI designs. All tools a
 
 ### Tool List
 
-1. **createFile** - Create new design files
-2. **editFile** - Modify existing designs (patch-based)
-3. **renameFile** - Rename design files
-4. **deleteFile** - Delete design files
-5. **addDependency** - Add npm packages to preview environment
-6. **submitWork** - Signal completion and trigger validation (REQUIRED when done)
-7. **askUser** - Request clarification from user
+1. **create_file** - Create new design files
+2. **edit_file** - Modify existing designs (patch-based)
+3. **rename_file** - Rename design files
+4. **delete_file** - Delete design files
+5. **add_dependency** - Add npm packages to preview environment
+6. **submit_work** - Signal completion and trigger validation (REQUIRED when done)
+7. **ask_user** - Request clarification from user
 
 ### Key Points
 
 - All tools enforce file constraints (.tsx only, designs/ directory, kebab-case filenames)
-- `submitWork` MUST be called when LLM is completely done (triggers validation + preview start)
-- `submitWork` takes empty arguments `{}` - system automatically tracks changes
+- `submit_work` MUST be called when LLM is completely done (triggers validation + preview start)
+- `submit_work` takes empty arguments `{}` - system automatically tracks changes
 - Tools are called via WebSocket-triggered LLM completion requests
 
 ---
 
 ## Tool Definitions
 
-### 1. createFile
+### 1. create_file
 
 Create a new design file with the provided code.
 
@@ -64,7 +64,7 @@ export type CreateFileArgs = z.infer<typeof createFileSchema>;
 
 ---
 
-### 2. editFile
+### 2. edit_file
 
 Modify an existing design file using unified diff patch.
 
@@ -99,7 +99,7 @@ export type EditFileArgs = z.infer<typeof editFileSchema>;
 
 ---
 
-### 3. renameFile
+### 3. rename_file
 
 Rename an existing design file.
 
@@ -131,7 +131,7 @@ export type RenameFileArgs = z.infer<typeof renameFileSchema>;
 
 ---
 
-### 4. deleteFile
+### 4. delete_file
 
 Delete an existing design file.
 
@@ -159,7 +159,7 @@ export type DeleteFileArgs = z.infer<typeof deleteFileSchema>;
 
 ---
 
-### 5. addDependency
+### 5. add_dependency
 
 Add an npm package to the preview environment.
 
@@ -189,7 +189,7 @@ export type AddDependencyArgs = z.infer<typeof addDependencySchema>;
 
 ---
 
-### 6. submitWork
+### 6. submit_work
 
 Signal that all work is complete and trigger the validation pipeline.
 
@@ -222,7 +222,7 @@ export type SubmitWorkArgs = z.infer<typeof submitWorkSchema>;
 
 ---
 
-### 7. askUser
+### 7. ask_user
 
 Request clarification from the user before continuing.
 
@@ -268,16 +268,16 @@ User: "Create a landing page with animations"
 │  LLM Tool Calls         │
 │  (multiple, staged)     │
 │                         │
-│  1. addDependency       │
+│  1. add_dependency      │
 │     {packageName:       │
 │      "framer-motion"}   │
 │                         │
-│  2. createFile          │
+│  2. create_file         │
 │     {filename:          │
 │      "landing-page.tsx",│
 │      code: "..."}       │
 │                         │
-│  3. submitWork          │
+│  3. submit_work         │
 │     {}  ← EMPTY!        │
 │         System tracks:  │
 │         - filesCreated  │
@@ -330,19 +330,19 @@ Backend → LLM:
       "code": "TS2322"
     }
   ],
-  "instruction": "Please fix these errors and call submitWork again"
+  "instruction": "Please fix these errors and call submit_work again"
 }
          │
          ▼
 ┌─────────────────────────┐
 │  LLM Fixes Errors       │
 │                         │
-│  1. editFile            │
+│  1. edit_file           │
 │     {filename:          │
 │      "landing-page.tsx",│
 │      patch: "@@ -42..."}│
 │                         │
-│  2. submitWork          │
+│  2. submit_work         │
 │     {}  ← EMPTY again!  │
 │         (triggers       │
 │          validation)    │
@@ -376,7 +376,7 @@ Preview server reloads with new design
 
 ---
 
-## askUser Flow Example
+## ask_user Flow Example
 
 ```
 User: "Create a dashboard for my SaaS"
@@ -432,7 +432,7 @@ LLM continues with dashboard design
 | **TypeScript** | tsc compiler | Fix type errors, imports, or component usage |
 | **ESLint** | ESLint rules | Fix style/syntax issues |
 | **Knip** | Unused imports | Remove unused imports/exports |
-| **Dependency** | Missing package | Call `addDependency` or change imports |
+| **Dependency** | Missing package | Call `add_dependency` or change imports |
 | **Composition** | Design system rules (Phase 4+) | Use valid component nesting |
 | **Semantic** | Invalid prop values | Use design system tokens |
 
@@ -455,7 +455,7 @@ interface SubmitWorkResponse {
   errors?: ValidationError[];
   warnings?: ValidationError[];
   message?: string;
-  userQuestion?: {  // If LLM called askUser
+  userQuestion?: {  // If LLM called ask_user
     question: string;
     context: string;
     suggestions?: string[];
@@ -503,12 +503,12 @@ All file tools enforce:
 The system prompt for code generation includes:
 
 - Tool availability and usage instructions
-- **CRITICAL: submitWork requirements** (must call when done, empty arguments)
+- **CRITICAL: submit_work requirements** (must call when done, empty arguments)
 - File constraints (.tsx only, designs/ directory, kebab-case)
 - Code requirements (TypeScript, no id props, complete runnable code)
 - Patch-based editing guidelines
 - Dependency management instructions
-- askUser usage guidelines
+- ask_user usage guidelines
 - Good/bad filename examples
 
 ---
@@ -567,9 +567,9 @@ ws.send(JSON.stringify({
 
 1. WebSocket message received
 2. Immediate acknowledgment sent (Phase 2a protocol)
-3. LLM tool calling triggered (`createFile` tool)
+3. LLM tool calling triggered (`create_file` tool)
 4. Backend validates filename constraints (kebab-case, .tsx, designs/)
-5. Check dependencies (call `addDependency` if needed)
+5. Check dependencies (call `add_dependency` if needed)
 6. Validate code (TypeScript, ESLint, Knip)
 7. Inject IDs
 8. Write to filesystem
@@ -774,11 +774,11 @@ export async function executeToolCalls(
 
 function getToolStartMessage(tool: string, args: any): string {
   switch (tool) {
-    case 'addDependency':
+    case 'add_dependency':
       return `Installing ${args.packageName}...`;
-    case 'createFile':
+    case 'create_file':
       return `Creating ${args.filename}...`;
-    case 'editFile':
+    case 'edit_file':
       return `Editing ${args.filename}...`;
     default:
       return `Executing ${tool}...`;
@@ -787,11 +787,11 @@ function getToolStartMessage(tool: string, args: any): string {
 
 function getToolCompleteMessage(tool: string, result: any): string {
   switch (tool) {
-    case 'addDependency':
+    case 'add_dependency':
       return `Package installed successfully`;
-    case 'createFile':
+    case 'create_file':
       return `File created: ${result.filename}`;
-    case 'editFile':
+    case 'edit_file':
       return `File updated: ${result.filename}`;
     default:
       return `${tool} completed`;
@@ -989,13 +989,13 @@ function MessageList({ messages }) {
 
 Create the following files in `apps/server/src/llm/tools/`:
 
-- `create-file.ts` - createFile tool definition
-- `edit-file.ts` - editFile tool definition
-- `rename-file.ts` - renameFile tool definition
-- `delete-file.ts` - deleteFile tool definition
-- `add-dependency.ts` - addDependency tool definition
-- `submit-work.ts` - submitWork tool definition
-- `ask-user.ts` - askUser tool definition
+- `create-file.ts` - create_file tool definition
+- `edit-file.ts` - edit_file tool definition
+- `rename-file.ts` - rename_file tool definition
+- `delete-file.ts` - delete_file tool definition
+- `add-dependency.ts` - add_dependency tool definition
+- `submit-work.ts` - submit_work tool definition
+- `ask-user.ts` - ask_user tool definition
 - `index.ts` - Export all tools
 
 Each tool file should export:

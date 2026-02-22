@@ -927,7 +927,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Create `src/llm/tools/index.ts` (export all tools)
   - [ ] Update LLM provider to support tool calling with all 7 tools
   - [ ] Configure tool calling parameters (temperature: 0.1, maxTokens: 8192)
-  - [ ] Add hardcoded system prompt for code generation (includes tool instructions, submitWork requirement, file constraints)
+  - [ ] Add hardcoded system prompt for code generation (includes tool instructions, submit_work requirement, file constraints)
   - [ ] Implement tool execution pipeline with error handling
   - [ ] Add file constraint validation (kebab-case, .tsx only, designs/ directory)
   - [ ] **Validate:** LLM returns structured tool calls consistently
@@ -990,7 +990,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] **Validate:** All validation errors returned in single response
   - [ ] **Validate:** Parallel execution is faster than sequential
 
-- [ ] **1.6** Implement addDependency tool execution
+- [ ] **1.6** Implement add_dependency tool execution
   - [ ] Run `npm install` as child process in preview directory
   - [ ] Handle install failures (report error back to LLM)
   - [ ] Use latest version if not specified
@@ -1026,7 +1026,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Create `src/main.tsx` with dynamic design loader
   - [ ] Create component transformer (wraps components with AuditWrapper/SelectionBox)
   - [ ] Transformer outputs to separate directory (e.g., `workspace/build/`)
-  - [ ] Transformer invoked by backend after submitWork validation passes
+  - [ ] Transformer invoked by backend after submit_work validation passes
   - [ ] Vite configured to serve transformed output directory
   - [ ] **Validate:** Backend can start preview server with transformed code
 
@@ -1272,7 +1272,7 @@ VITE_TOOL_URL=http://localhost:3000
 | **TypeScript** | tsc compiler | Fix type errors, imports, or component usage |
 | **ESLint** | ESLint rules | Fix style/syntax issues |
 | **Knip** | Unused imports | Remove unused imports/exports |
-| **Dependency** | Missing package | Call `addDependency` or change imports |
+| **Dependency** | Missing package | Call `add_dependency` or change imports |
 | **Composition** | Design system rules (Phase 4+) | Use valid component nesting |
 | **Semantic** | Invalid prop values | Use design system tokens |
 
