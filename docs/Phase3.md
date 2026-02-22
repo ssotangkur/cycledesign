@@ -926,7 +926,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] Create `src/llm/tools/ask-user.ts` (request clarification from user)
   - [ ] Create `src/llm/tools/index.ts` (export all tools)
   - [ ] Update LLM provider to support tool calling with all 7 tools
-  - [ ] Configure tool calling parameters (temperature: 0.1, maxTokens: 8192, toolChoice: 'required')
+  - [ ] Configure tool calling parameters (temperature: 0.1, maxTokens: 8192)
+  - [ ] Add hardcoded system prompt for code generation (includes tool instructions, submitWork requirement, file constraints)
   - [ ] Implement tool execution pipeline with error handling
   - [ ] Add file constraint validation (kebab-case, .tsx only, designs/ directory)
   - [ ] **Validate:** LLM returns structured tool calls consistently
