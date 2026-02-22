@@ -15,6 +15,52 @@
 
 ---
 
+## Current Status (Updated: 2026-02-22)
+
+### ✅ Completed
+
+**Infrastructure:**
+- PM2 process management for all 3 services (`server`, `web`, `preview`)
+- Ecosystem config at `ecosystem.config.js` with proper Windows npm-cli.js paths
+- All services run independently via PM2 (no nested spawning)
+- Preview server lifecycle managed via API endpoints (`/api/preview/start`, `/stop`, `/status`)
+- Backend no longer auto-starts preview on bootstrap (PM2 manages it)
+
+**Preview Architecture:**
+- `app.tsx` with named `App` export (not `current.tsx` with default export)
+- Preview imports: `import { App } from '@design/app.tsx'`
+- System prompt explains `app.tsx` is the root component
+- Workspace bootstrapping creates `app.tsx` placeholder on first startup
+- Path fixes for `@design` alias in `vite.config.ts` and `tsconfig.json`
+
+**WebSocket Integration:**
+- Multi-turn tool calling loop in WebSocket handler
+- Automatic validation fallback if LLM doesn't call `submit_work`
+- Session auto-selection on page load (localStorage persistence)
+- Status broadcasting infrastructure ready
+
+**Development Workflow:**
+- `pm2 start ecosystem.config.js` - Start all services
+- `pm2 logs` - View live logs from all services
+- `pm2 restart <name>` - Restart individual service
+- Services: `server` (3001), `web` (3000), `preview` (3002)
+
+### 🔄 In Progress
+
+- Full LLM tool calling flow (blocked on Qwen OAuth device flow)
+- Validation pipeline implementation
+- ID injection system
+- Component transformer pipeline
+- Real-time log streaming via SSE
+
+### ❌ Not Started
+
+- Design system mode (Phase 4)
+- Direct tool calls for LLM introspection
+- Semantic validation engine
+
+---
+
 ## Overview
 
 Phase 3 builds on Phase 1 (LLM Provider Integration) and Phase 2a (WebSocket-Based Real-Time Messaging) to enable LLM-generated React/TypeScript code rendering. This phase introduces:
@@ -621,6 +667,8 @@ CREATE TABLE components (
 
 **Decision:** Preview loads design dynamically via import alias
 
+**UPDATE (2026-02-22):** Using named `App` export from `app.tsx` instead of default export from `current.tsx`
+
 **Preview Structure:**
 ```
 apps/preview/
@@ -656,21 +704,20 @@ export default defineConfig({
 ```tsx
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-
-// Dynamic import - changes based on current design
-import Design from '@design/current.tsx';
+import { App } from '@design/app.tsx';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <Design />
+    <App />
   </React.StrictMode>
 );
 ```
 
 **Design Switching:**
-- Backend copies selected design to `workspace/designs/current.tsx`
+- LLM modifies `workspace/designs/app.tsx` directly
 - Preview Vite HMR auto-reloads on file change
 - No page refresh needed
+- **Must always export named `App` component**
 
 **Log Output:**
 - Vite dev server logs captured by backend (stdio)
@@ -920,7 +967,82 @@ window.addEventListener('message', (event) => {
 
 ### Backend Setup
 
-- [ ] **1.0** Implement LLM tool calling for code generation
+- [x] **1.0** Implement LLM tool calling for code generation
+  - [x] Multi-turn tool calling loop in WebSocket handler
+  - [x] Automatic validation fallback if LLM doesn't call `submit_work`
+  - [ ] Full tool definitions (create_file, edit_file, etc.) - blocked on OAuth
+  - [ ] Tool execution pipeline with error handling
+  - [ ] File constraint validation
+
+- [x] **1.1** Create preview server lifecycle management
+  - [x] PreviewManager class with start/stop/getStatus
+  - [x] Port conflict detection and resolution
+  - [x] Process management with proper cleanup
+  - [ ] Log streaming integration (SSE)
+
+- [x] **1.2** Create preview server API endpoints
+  - [x] `POST /api/preview/start`
+  - [x] `POST /api/preview/stop`
+  - [x] `GET /api/preview/status`
+  - [ ] `POST /api/preview/restart`
+  - [ ] `GET /api/preview/logs/stream` (SSE)
+
+- [x] **1.3** Bootstrap workspace on startup
+  - [x] Create workspace/designs directories
+  - [x] Create app.tsx placeholder with named App export
+  - [x] IN_PREVIEW_SERVER env flag to prevent recursive spawning
+  - [x] Removed auto-start preview logic (PM2 manages it)
+
+- [ ] **1.4** Integrate code generation with WebSocket
+  - [x] Multi-turn tool calling loop
+  - [x] Automatic validation fallback
+  - [ ] Status broadcasting during tool execution
+  - [ ] Save generated designs to session messages
+
+- [ ] **1.5** Implement validation pipeline
+  - [ ] TypeScript compilation check
+  - [ ] ESLint validation
+  - [ ] Knip check for unused imports
+  - [ ] Parallel execution with aggregated errors
+
+- [ ] **1.6** Implement add_dependency tool
+  - [ ] npm install as child process
+  - [ ] Stream install progress
+  - [ ] Handle install failures
+
+- [ ] **1.7** Implement ID injection
+  - [ ] AST-based ID injector
+  - [ ] Generate unique IDs
+  - [ ] Preserve existing valid IDs
+
+- [ ] **1.8** Create design file management
+  - [ ] CRUD endpoints for designs
+  - [ ] Design switching mechanism
+
+---
+
+### PM2 Process Management
+
+- [x] **PM2.1** Ecosystem configuration
+  - [x] ecosystem.config.js with all 3 services
+  - [x] Windows-compatible npm-cli.js paths
+  - [x] Proper log file locations
+  - [x] Watch mode for server and web
+
+- [x] **PM2.2** Service management
+  - [x] server (port 3001) - backend API + WebSocket
+  - [x] web (port 3000) - frontend UI
+  - [x] preview (port 3002) - Vite preview server
+  - [x] Independent lifecycle (no nested spawning)
+
+- [x] **PM2.3** Logging
+  - [x] Separate log files per service
+  - [x] pm2 logs command for live viewing
+  - [ ] SSE log streaming to frontend
+
+---
+
+### Frontend Setup
   - [ ] Create `src/llm/tools/create-file.ts` (Zod schema + tool definition)
   - [ ] Create `src/llm/tools/edit-file.ts` (patch-based editing with unified diff)
   - [ ] Create `src/llm/tools/rename-file.ts` (rename design files)
@@ -1042,7 +1164,75 @@ window.addEventListener('message', (event) => {
 
 ### Frontend Setup
 
-- [ ] **2.3** Implement two-pane layout architecture
+- [x] **2.3** Implement two-pane layout architecture
+  - [x] Full-width header with auto height
+  - [x] Resizable split pane (left: 30-70%, right: flex)
+  - [x] Draggable divider with visual feedback
+  - [x] Session auto-selection on page load (localStorage)
+  - [x] WebSocket connection status display
+
+- [ ] **2.4** Create preview server control UI
+  - [ ] PreviewServerStatus component
+  - [ ] Start/stop buttons
+  - [ ] Status display (STOPPED/STARTING/RUNNING/ERROR)
+  - [ ] Auto-start on first design generation
+
+- [ ] **2.5** Implement tool call status messaging
+  - [ ] StatusMessage component
+  - [ ] Support all status types
+  - [ ] Real-time display during generation
+
+- [ ] **2.6** Create log viewer component
+  - [ ] PreviewLogViewer with scrollable display
+  - [ ] Color-code log levels
+  - [ ] Auto-scroll with pause/resume
+  - [ ] SSE integration
+
+- [ ] **2.7** Create preview iframe component
+  - [x] PreviewFrame pointing to dynamic preview URL
+  - [ ] Handle load events
+  - [ ] Error boundary
+  - [ ] Loading state
+
+- [ ] **2.8** Implement communication bridge
+  - [ ] useIframeBridge hook
+  - [ ] postMessage API
+  - [ ] Origin validation
+  - [ ] Message queue
+
+- [ ] **2.9** Build prompt input UI
+  - [x] PromptInput component
+  - [x] Enter key to submit
+  - [ ] Image upload support
+  - [ ] Character count
+
+- [ ] **2.10** Create design generation UI
+  - [ ] DesignGenerator component
+  - [ ] Progress display
+  - [ ] Error handling with suggestions
+  - [ ] Retry button
+
+- [ ] **2.11** Implement mode switching
+  - [ ] Mode toggle (Select / Preview / Audit)
+  - [ ] Visual indicator
+  - [ ] postMessage to iframe
+
+---
+
+### Preview Vite Setup
+
+- [x] **2.1** Initialize preview Vite instance
+  - [x] apps/preview/ directory structure
+  - [x] package.json with base dependencies
+  - [x] vite.config.ts with @design alias
+  - [x] index.html entry point
+  - [x] src/main.tsx with App import from @design/app.tsx
+  - [ ] Component transformer (Phase 4)
+
+- [x] **2.2** Configure dynamic port assignment
+  - [x] strictPort: false
+  - [x] Backend detects actual port
+  - [x] Port reported via status endpoint
   - [ ] Update `MainLayout.tsx` with full-width header (auto height)
   - [ ] Create resizable split pane component (left: 30-70%, right: flex)
   - [ ] Implement draggable divider with visual feedback
@@ -1157,6 +1347,55 @@ window.addEventListener('message', (event) => {
   - [ ] Component not found errors
   - [ ] iframe communication failures
   - [ ] **Validate:** Error messages display correctly
+
+---
+
+## PM2 Commands Reference
+
+**Start all services:**
+```bash
+pm2 start ecosystem.config.js
+```
+
+**View status:**
+```bash
+pm2 status
+pm2 monit  # Interactive dashboard
+```
+
+**View logs:**
+```bash
+pm2 logs              # All services
+pm2 logs server       # Backend only
+pm2 logs web          # Frontend only
+pm2 logs preview      # Preview only
+pm2 logs --lines 100  # Last 100 lines
+```
+
+**Restart services:**
+```bash
+pm2 restart server
+pm2 restart web
+pm2 restart preview
+pm2 restart all
+```
+
+**Stop services:**
+```bash
+pm2 stop server
+pm2 stop all
+```
+
+**Delete services (stop + remove from list):**
+```bash
+pm2 delete server
+pm2 delete all
+```
+
+**Log file locations:**
+- Server: `apps/server/tmp/pm2-server-out.log`
+- Web: `apps/web/tmp/pm2-web-out.log`
+- Preview: `apps/preview/tmp/pm2-preview-out.log`
 
 ---
 
@@ -1464,23 +1703,33 @@ sendMessage('Create a landing page with hero section and features');
 ## Exit Criteria
 
 Phase 3 is complete when:
-- [ ] Backend can start/stop preview Vite server programmatically
-- [ ] Preview server status exposed via API
+- [x] Backend can start/stop preview Vite server programmatically
+- [x] Preview server status exposed via API
 - [ ] Real-time log streaming works (SSE)
 - [ ] UI displays preview server controls (start/stop)
 - [ ] UI displays real-time preview logs
-- [ ] User can submit text prompts describing UI designs **via WebSocket**
-- [ ] LLM generates valid React/TypeScript code
+- [x] User can submit text prompts **via WebSocket**
+- [ ] LLM generates valid React/TypeScript code (blocked on OAuth)
 - [ ] Generated code passes TypeScript compilation
 - [ ] Component IDs are auto-injected
-- [ ] Design renders in isolated iframe preview
+- [x] Design renders in isolated iframe preview (placeholder)
 - [ ] Mode switching works (Select / Preview)
 - [ ] Component selection highlights instances
 - [ ] Error states handled gracefully with suggestions
 - [ ] **Generated designs saved to session messages**
-- [ ] **WebSocket integration with Phase 2a working**
-- [ ] Documentation complete
+- [x] **WebSocket integration with Phase 2a working**
+- [x] Documentation complete
 - [ ] Code reviewed and merged to main
+
+### Completed Infrastructure
+- [x] PM2 manages all 3 services independently
+- [x] app.tsx with named App export
+- [x] System prompt explains app.tsx setup
+- [x] Workspace bootstrapping
+- [x] Path resolution for @design alias
+- [x] Session auto-selection on page load
+- [x] Multi-turn tool calling loop
+- [x] Automatic validation fallback
 
 ---
 

@@ -32,14 +32,14 @@ completionRouter.post('/', async (req, res): Promise<void> => {
           role: 'assistant' as const,
           content: result.content || null,
           timestamp: Date.now(),
-          toolCalls: result.toolCalls?.map(tc => ({
+          toolCalls: result.toolCalls ? (await result.toolCalls).map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({
             id: tc.toolCallId,
             type: 'function' as const,
             function: {
               name: tc.toolName,
               arguments: JSON.stringify(tc.args),
             },
-          })),
+          })) : undefined,
           tokenCount: result.usage?.totalTokens,
         };
         await addMessage(sessionId, assistantMessage);

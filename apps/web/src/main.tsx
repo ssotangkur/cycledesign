@@ -7,6 +7,16 @@ import App from './App';
 import { theme } from './theme';
 import { SessionProvider } from './context/SessionContext';
 
+window.addEventListener('error', (event) => {
+  if (
+    event.message?.includes('getBoundingClientRect') ||
+    event.message?.includes('Outdated Optimize Dep')
+  ) {
+    event.preventDefault();
+    console.debug('Suppressing known MUI/Vite error:', event.message);
+  }
+});
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider theme={theme}>
