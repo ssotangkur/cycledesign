@@ -990,13 +990,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   - [ ] **Validate:** All validation errors returned in single response
   - [ ] **Validate:** Parallel execution is faster than sequential
 
-- [ ] **1.6** Implement dependency management
-  - [ ] Create `src/preview/dependency-manager.ts`
-  - [ ] Parse imports from generated code
-  - [ ] Check against installed packages
-  - [ ] Add missing packages to `apps/preview/package.json`
-  - [ ] Run `npm install` in preview directory
-  - [ ] Return install progress and errors
+- [ ] **1.6** Implement addDependency tool execution
+  - [ ] Run `npm install` as child process in preview directory
+  - [ ] Handle install failures (report error back to LLM)
+  - [ ] Use latest version if not specified
+  - [ ] Stream install progress to status broadcaster
   - [ ] **Validate:** LLM can add new package and it becomes available
 
 - [ ] **1.7** Implement ID injection
