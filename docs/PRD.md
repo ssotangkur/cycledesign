@@ -192,13 +192,13 @@ Design systems are often created but inconsistently applied. Designers drift fro
 - Complete specification in `docs/TOOL_CALLING.md`
 
 **Phase 3 Tools (Code Generation)**
-- `createFile` - Create new design files
-- `editFile` - Edit existing files with patch-based editing
-- `renameFile` - Rename design files
-- `deleteFile` - Delete design files
-- `addDependency` - Add npm packages to preview environment
-- `submitWork` - Trigger validation pipeline
-- `askUser` - Request clarification from user
+- `create_file` - Create new design files
+- `edit_file` - Edit existing files with patch-based editing
+- `rename_file` - Rename design files
+- `delete_file` - Delete design files
+- `add_dependency` - Add npm packages to preview environment
+- `submit_work` - Trigger validation pipeline
+- `ask_user` - Request clarification from user
 
 **Phase 4 Tools (Design System Introspection)**
 - `list_components` - Browse available components
