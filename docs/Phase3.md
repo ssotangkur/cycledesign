@@ -1021,10 +1021,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 - [ ] **2.1** Initialize preview Vite instance
   - [ ] Create `apps/preview/` directory
   - [ ] Create `package.json` with base dependencies (react, react-dom)
-  - [ ] Create `vite.config.ts` with dynamic port and @design alias
+  - [ ] Create `vite.config.ts` with dynamic port and alias to transformed output directory
   - [ ] Create `index.html` entry point
   - [ ] Create `src/main.tsx` with dynamic design loader
-  - [ ] **Validate:** Backend can start preview server
+  - [ ] Create component transformer (wraps components with AuditWrapper/SelectionBox)
+  - [ ] Transformer outputs to separate directory (e.g., `workspace/build/`)
+  - [ ] Transformer invoked by backend after submitWork validation passes
+  - [ ] Vite configured to serve transformed output directory
+  - [ ] **Validate:** Backend can start preview server with transformed code
 
 - [ ] **2.2** Configure dynamic port assignment
   - [ ] Allow Vite to find available port (strictPort: false)
