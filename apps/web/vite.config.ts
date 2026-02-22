@@ -17,4 +17,8 @@ export default defineConfig({
       '@': '/src',
     },
   },
+  optimizeDeps: {
+    force: true,
+    include: ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
+  },
 });

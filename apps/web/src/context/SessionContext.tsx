@@ -180,6 +180,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
         isLoading: false,
         sessionLabelsMap: { ...prev.sessionLabelsMap, [session.id]: label },
       }));
+      localStorage.setItem('cycledesign:lastSession', session.id);
       setupWebSocket(session.id);
       return session;
     } catch (error) {
@@ -198,6 +199,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
         currentSession: session,
         isLoading: false,
       }));
+      localStorage.setItem('cycledesign:lastSession', id);
       setupWebSocket(id);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load session';
@@ -284,6 +286,46 @@ export function SessionProvider({ children }: SessionProviderProps) {
     const init = async () => {
       if (mounted) {
         await loadSessions();
+        
+        // Auto-select last used session or create new one
+        const lastSessionId = localStorage.getItem('cycledesign:lastSession');
+        if (lastSessionId) {
+          try {
+            const session = await api.getSession(lastSessionId);
+            if (session && mounted) {
+              const label = session.firstMessage || session.id.slice(-8);
+              setState((prev) => ({
+                ...prev,
+                currentSession: session,
+                sessionLabelsMap: { ...prev.sessionLabelsMap, [session.id]: label },
+              }));
+              setupWebSocket(lastSessionId);
+              console.log('[SessionContext] Auto-selected last session:', lastSessionId);
+              return;
+            }
+          } catch {
+            console.log('[SessionContext] Last session not found, will create new one');
+          }
+        }
+        
+        // If no last session or it doesn't exist, create a new one
+        if (mounted && !state.currentSession) {
+          try {
+            const session = await api.createSession();
+            const label = session.firstMessage || session.id.slice(-8);
+            setState((prev) => ({
+              ...prev,
+              currentSession: session,
+              sessions: [...prev.sessions, session],
+              messages: [],
+              sessionLabelsMap: { ...prev.sessionLabelsMap, [session.id]: label },
+            }));
+            setupWebSocket(session.id);
+            console.log('[SessionContext] Created new session:', session.id);
+          } catch (error) {
+            console.error('[SessionContext] Failed to create session:', error);
+          }
+        }
       }
     };
     init();
@@ -291,7 +333,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
       mounted = false;
       cleanupWebSocket();
     };
-  }, [loadSessions, cleanupWebSocket]);
+  }, [loadSessions, setupWebSocket, cleanupWebSocket]);
 
   useEffect(() => {
     return () => {

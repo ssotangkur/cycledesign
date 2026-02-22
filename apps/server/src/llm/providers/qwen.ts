@@ -1,4 +1,4 @@
-import { generateText, streamText, CoreMessage } from 'ai';
+import { generateText, streamText, CoreMessage, ToolSet } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { QwenAuth } from '../qwen-auth';
 import { requestQueue } from '../request-queue';
@@ -36,30 +36,46 @@ export class QwenProvider {
     return this.modelPromise;
   }
 
-  async complete(messages: CoreMessage[], options?: { stream?: boolean; maxRetries?: number }) {
+  async complete(messages: CoreMessage[], options?: { 
+    stream?: boolean; 
+    maxRetries?: number;
+    tools?: ToolSet;
+  }) {
     const maxRetries = options?.maxRetries ?? 3;
     let lastError: Error | null = null;
+
+    console.log('[LLM] complete() called with', messages.length, 'messages, stream:', options?.stream ?? false);
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await requestQueue.enqueue(async () => {
           const model = await this.getModel();
+          console.log('[LLM] Got model instance, starting', options?.stream ? 'stream' : 'completion');
 
           if (options?.stream) {
+            console.log('[LLM] Creating stream with', messages.length, 'messages');
             const result = await streamText({
               model,
               messages,
-              temperature: 0.7,
-              maxTokens: 2048,
+              tools: options.tools,
+              temperature: 0.1,
+              maxTokens: 8192,
             });
-            return { stream: result.textStream };
+            console.log('[LLM] Stream created successfully');
+            return { 
+              stream: result.textStream,
+              toolCalls: result.toolCalls,
+            };
           } else {
+            console.log('[LLM] Generating text with', messages.length, 'messages');
             const result = await generateText({
               model,
               messages,
-              temperature: 0.7,
-              maxTokens: 2048,
+              tools: options?.tools,
+              temperature: 0.1,
+              maxTokens: 8192,
             });
+            console.log('[LLM] Generation complete, tokens used:', result.usage);
             return {
               content: result.text,
               toolCalls: result.toolCalls,
@@ -69,24 +85,29 @@ export class QwenProvider {
         });
       } catch (error: unknown) {
         lastError = error as Error;
+        console.error('[LLM] Error on attempt', attempt + 1, '/', maxRetries + 1 + ':', (error as Error).message);
 
         if (error instanceof AuthError || (error as { status?: number }).status === 401 || (error as { message?: string }).message?.includes('401')) {
+          console.log('[LLM] Authentication error (401) - triggering device auth flow');
           await qwenAuth.performDeviceAuthFlow();
           continue;
         }
 
         if (error instanceof RateLimitError || (error as { status?: number }).status === 429) {
           const backoff = (error as { retryAfterMs?: number }).retryAfterMs ?? Math.min(1000 * Math.pow(2, attempt), 60000);
+          console.log('[LLM] Rate limited - waiting', backoff, 'ms before retry');
           await new Promise(resolve => setTimeout(resolve, backoff));
           continue;
         }
 
         if (attempt < maxRetries) {
           const backoff = Math.min(1000 * Math.pow(2, attempt), 60000);
+          console.log('[LLM] Retrying in', backoff, 'ms...');
           await new Promise(resolve => setTimeout(resolve, backoff));
           continue;
         }
 
+        console.error('[LLM] Max retries exceeded, throwing error');
         throw error;
       }
     }

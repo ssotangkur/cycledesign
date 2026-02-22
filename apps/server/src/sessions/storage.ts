@@ -125,6 +125,7 @@ export async function addMessage(sessionId: string, message: StoredMessage): Pro
   const sessionDir = join(SESSIONS_DIR, sessionId);
   const messagesPath = join(sessionDir, 'messages.jsonl');
   
+  await fs.mkdir(sessionDir, { recursive: true });
   await fs.appendFile(messagesPath, JSON.stringify(message) + '\n', 'utf-8');
   
   const meta = await getSession(sessionId);
