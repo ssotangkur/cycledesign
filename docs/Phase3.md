@@ -23,7 +23,7 @@
 - PM2 process management for all 3 services (`server`, `web`, `preview`)
 - Ecosystem config at `ecosystem.config.js` with proper Windows npm-cli.js paths
 - All services run independently via PM2 (no nested spawning)
-- Preview server lifecycle managed via API endpoints (`/api/preview/start`, `/stop`, `/status`)
+- Preview server lifecycle managed via API endpoints (`/api/preview/start`, `/stop`, `/status`, `/reset`)
 - Backend no longer auto-starts preview on bootstrap (PM2 manages it)
 
 **Preview Architecture:**
@@ -32,6 +32,14 @@
 - System prompt explains `app.tsx` is the root component
 - Workspace bootstrapping creates `app.tsx` placeholder on first startup
 - Path fixes for `@design` alias in `vite.config.ts` and `tsconfig.json`
+- Preview loads correctly with bootstrap template at http://localhost:3002
+
+**Preview Reset API:**
+- `POST /api/preview/reset` - Resets preview to bootstrap version
+- Deletes all design files in `workspace/designs/` except app.tsx
+- Copies bootstrap template from `apps/server/resources/templates/app.tsx`
+- Overwrites existing app.tsx with clean bootstrap version
+- Fixed `loadDesign()` to use `app.tsx` instead of outdated `current.tsx`
 
 **WebSocket Integration:**
 - Multi-turn tool calling loop in WebSocket handler
@@ -232,6 +240,7 @@ workspace/
 | `GET` | `/api/preview/status` | Get server status and port |
 | `GET` | `/api/preview/logs/stream` | Stream logs (SSE) |
 | `POST` | `/api/preview/restart` | Restart with new dependencies |
+| `POST` | `/api/preview/reset` | Reset to bootstrap template |
 
 **Log Streaming (SSE):**
 ```typescript
@@ -984,7 +993,8 @@ window.addEventListener('message', (event) => {
   - [x] `POST /api/preview/start`
   - [x] `POST /api/preview/stop`
   - [x] `GET /api/preview/status`
-  - [ ] `POST /api/preview/restart`
+  - [x] `POST /api/preview/restart`
+  - [x] `POST /api/preview/reset` (reset to bootstrap version)
   - [ ] `GET /api/preview/logs/stream` (SSE)
 
 - [x] **1.3** Bootstrap workspace on startup
@@ -1577,6 +1587,23 @@ VITE_TOOL_URL=http://localhost:3000
   port: number;
   url: string;
 }
+```
+
+**POST /api/preview/reset**
+```typescript
+// Response
+{
+  success: boolean;
+  message: string;
+  url?: string;  // Preview URL if server is running
+}
+```
+
+**Notes:**
+- `reset()` copies bootstrap template from `apps/server/resources/templates/app.tsx` to `workspace/designs/app.tsx`
+- Deletes all other files in `workspace/designs/` directory
+- Does not restart the preview server - only resets the design files
+- Useful for reverting to clean state after experimentation
 ```
 
 **GET /api/preview/logs/stream**

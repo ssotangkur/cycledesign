@@ -87,3 +87,25 @@ previewRouter.post('/restart', async (req, res): Promise<void> => {
     });
   }
 });
+
+previewRouter.post('/reset', async (_req, res): Promise<void> => {
+  console.log('[API] POST /api/preview/reset called');
+  try {
+    console.log('[PREVIEW] Resetting preview to bootstrap version');
+    await previewManager.reset();
+    
+    const status = previewManager.getStatus();
+    res.status(200).json({
+      success: true,
+      message: 'Preview reset to bootstrap version',
+      url: status.url,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to reset preview';
+    console.error('[PREVIEW] Failed to reset preview:', errorMessage);
+    res.status(500).json({
+      success: false,
+      error: errorMessage,
+    });
+  }
+});

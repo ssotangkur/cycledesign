@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@design': resolve(__dirname, '../server/workspace/designs'),
+      '@design': resolve(__dirname, '../../workspace/designs'),
     },
   },
   server: {
