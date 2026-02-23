@@ -57,6 +57,25 @@ const server = app.listen(PORT, () => {
 
 new WebSocketHandler(server);
 
+// Graceful shutdown handlers
+function gracefulShutdown(signal: string) {
+  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+  
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+  
+  // Force close after 10 seconds
+  setTimeout(() => {
+    console.error('Forcing shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 app.use(cors({
   origin: FRONTEND_URL,
   credentials: true,
