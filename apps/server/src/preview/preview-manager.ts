@@ -1,8 +1,8 @@
 import { exec } from 'child_process';
 import { EventEmitter } from 'events';
-import { existsSync, copyFileSync, mkdirSync } from 'fs';
+import { existsSync, copyFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import * as net from 'net';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
 import { promisify } from 'util';
 import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types';
 
@@ -13,6 +13,7 @@ const SERVER_ROOT = resolve(__dirname, '../..');
 const WORKSPACE_DIR = resolve(SERVER_ROOT, '../../workspace');
 const DESIGNS_DIR = resolve(WORKSPACE_DIR, 'designs');
 const PREVIEW_DIR = resolve(SERVER_ROOT, '../preview');
+const TEMPLATE_PATH = resolve(SERVER_ROOT, 'resources/templates/app.tsx');
 const DEFAULT_PORT = 3002;
 const MAX_LOG_BUFFER = 100;
 const PM2_APP_NAME = 'preview';
@@ -119,6 +120,27 @@ export class PreviewManager extends EventEmitter {
     await this.start(options);
   }
 
+  async reset(): Promise<void> {
+    if (!existsSync(DESIGNS_DIR)) {
+      mkdirSync(DESIGNS_DIR, { recursive: true });
+    }
+
+    // Remove all files in designs dir except app.tsx (we'll overwrite it)
+    const files = readdirSync(DESIGNS_DIR);
+    for (const file of files) {
+      if (file !== 'app.tsx') {
+        unlinkSync(join(DESIGNS_DIR, file));
+        this.addLog('stdout', `Deleted: ${file}`);
+      }
+    }
+
+    // Copy bootstrap template to app.tsx (overwrites if exists)
+    const targetPath = join(DESIGNS_DIR, 'app.tsx');
+    this.addLog('stdout', `Resetting preview to bootstrap template`);
+    copyFileSync(TEMPLATE_PATH, targetPath);
+    this.addLog('stdout', `Preview reset to bootstrap version at ${targetPath}`);
+  }
+
   async getLogs(): Promise<LogEntry[]> {
     try {
       const { stdout } = await execAsync(`pm2 logs ${PM2_APP_NAME} --lines 100 --nostream`, { shell: 'cmd.exe' });
@@ -217,7 +239,7 @@ export class PreviewManager extends EventEmitter {
     }
 
     const sourcePath = resolve(DESIGNS_DIR, `${designName}.tsx`);
-    const destPath = resolve(DESIGNS_DIR, 'current.tsx');
+    const destPath = resolve(DESIGNS_DIR, 'app.tsx');
 
     if (!existsSync(sourcePath)) {
       this.addLog('stderr', `Design file not found: ${designName}.tsx`);
