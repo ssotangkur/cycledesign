@@ -1,16 +1,20 @@
 # CycleDesign
 
-Phase 1: LLM Provider Integration - A chat interface for interacting with Qwen LLM for design assistance.
+**Prompt-to-UI Design Tool** - Generate React/TypeScript code from natural language prompts with real-time preview.
 
 ## Overview
 
-CycleDesign is a full-stack application that provides a chat-based interface for interacting with Qwen's code-focused LLM. Phase 1 establishes the foundation with:
+CycleDesign is a full-stack application that provides a chat-based interface for interacting with Qwen's code-focused LLM. The LLM generates React/TypeScript code using Material-UI components, which is then validated and rendered in a live preview.
 
-- Qwen provider integration via Vercel AI SDK
-- OAuth Device Flow authentication (RFC 8628)
-- Basic chat UI with streaming responses
-- Session persistence in JSONL format
-- Full session management (create, switch, delete, rename)
+### Features
+
+- **Qwen LLM Integration** via OAuth Device Flow (RFC 8628)
+- **Real-time Chat** with WebSocket-based messaging
+- **Code Generation** - LLM generates React/TypeScript code from prompts
+- **Live Preview** - Backend-managed Vite server renders generated code
+- **Validation Pipeline** - TypeScript compilation, ESLint, and Knip checks
+- **Session Management** - Create, switch, delete, rename conversations
+- **PM2 Process Management** - All services run independently via PM2
 
 ## Prerequisites
 
@@ -64,33 +68,38 @@ Copy `.env.example` files if they exist, or create new ones from scratch.
 
 ## Running the Development Server
 
-### Start Both Servers (Recommended)
+### Start All Services (Recommended)
 
-From the root directory:
+CycleDesign uses PM2 for process management. All services run independently:
 
 ```bash
-npm run dev
+pm2 start ecosystem.config.js
 ```
 
-This concurrently runs:
-- Backend server on http://localhost:3001
-- Frontend server on http://localhost:3000
+This starts:
+- **server** (port 3001) - Backend API + WebSocket
+- **web** (port 3000) - Frontend UI
+- **preview** (port 3002) - Vite preview server (backend-managed)
 
-### Start Servers Individually
+### Managing Services
 
-**Backend only:**
 ```bash
-npm run dev:server
-# or
-cd apps/server && npm run dev
+pm2 status              # Check service status
+pm2 logs                # View live logs from all services
+pm2 logs server         # View backend logs only
+pm2 restart server      # Restart backend
+pm2 stop all            # Stop all services
+pm2 delete all          # Stop and remove from PM2 list
 ```
 
-**Frontend only:**
-```bash
-npm run dev:web
-# or
-cd apps/web && npm run dev
-```
+### Development Mode
+
+Services auto-reload on file changes (watch mode enabled for server and web).
+
+**Log file locations:**
+- Server: `apps/server/tmp/pm2-server-out.log`
+- Web: `apps/web/tmp/pm2-web-out.log`
+- Preview: `apps/preview/tmp/pm2-preview-out.log`
 
 ## First-Time OAuth Authorization
 
@@ -103,6 +112,13 @@ When you first send a prompt to the LLM:
 5. Subsequent requests use the stored token automatically
 
 **Note:** Credentials are shared with the `qwen-code` CLI if you use it.
+
+### Rate Limits (Qwen OAuth Free Tier)
+
+- 60 requests/minute
+- 1000 requests/day (resets at 0:00 Beijing Time)
+
+The application automatically handles rate limiting with exponential backoff.
 
 ### OAuth Flow Details
 
@@ -126,38 +142,42 @@ The application automatically handles rate limiting with exponential backoff and
 ### Creating a Session
 
 1. Open http://localhost:3000 in your browser
-2. Click the "New Session" button (or dropdown arrow next to it)
+2. Click the "New Session" button
 3. Enter a session name (optional, auto-generated if not provided)
 4. Click "Create"
 
-### Sending Messages
+### Sending Prompts
 
-1. Select a session from the dropdown (or create a new one)
-2. Type your prompt in the text input at the bottom
-3. Press Enter or click the Send button
-4. Watch the streaming response appear in real-time
+1. Select a session from the sidebar
+2. Type your design prompt (e.g., "Create a landing page with hero section")
+3. Press Enter to send
+4. Watch as the LLM generates code and the preview updates in real-time
+
+### UI Layout
+
+- **Left Pane** - Session list, chat messages, prompt input (resizable)
+- **Right Pane** - Live preview of generated code (iframe)
+- **Divider** - Drag to resize left/right panes
 
 ### Managing Sessions
 
-- **Switch Sessions:** Use the dropdown in the top bar
-- **Rename Session:** Click the rename icon next to session name
-- **Delete Session:** Click the delete icon, confirm in dialog
+- **Switch Sessions:** Click session in sidebar
+- **Rename Session:** Click rename icon next to session name
+- **Delete Session:** Click delete icon, confirm in dialog
 - **View History:** All messages persist within a session
 
 ### Example Prompts
 
-Try these to get started:
-
 ```
-Create a landing page for a SaaS product
+Create a landing page with a hero section and features
 ```
 
 ```
-What's the best way to structure a React component library?
+Build a dashboard with charts and metrics
 ```
 
 ```
-Generate a color palette for a fintech app
+Design a pricing page with three tiers
 ```
 
 ## Project Structure
@@ -167,31 +187,46 @@ cycledesign/
 ├── apps/
 │   ├── web/                    # React frontend (Vite + MUI)
 │   │   ├── src/
-│   │   │   ├── components/     # UI components
-│   │   │   ├── pages/          # Route pages
-│   │   │   ├── context/        # React Context providers
-│   │   │   ├── hooks/          # Custom hooks
-│   │   │   ├── api/            # API client
-│   │   │   └── theme/          # MUI theme
+│   │   │   ├── components/     # UI components (Chat, Sessions, Preview)
+│   │   │   ├── hooks/          # Custom hooks (WebSocket, state management)
+│   │   │   └── theme/          # MUI theme configuration
+│   │   ├── tmp/                # PM2 log files
 │   │   └── package.json
 │   │
-│   └── server/                 # Node.js backend (Express)
+│   ├── server/                 # Node.js backend (Express + Vercel AI SDK)
+│   │   ├── src/
+│   │   │   ├── llm/            # LLM integration + tool calling
+│   │   │   │   ├── tools/      # Tool definitions (create_file, edit_file, etc.)
+│   │   │   │   └── system-prompt.ts
+│   │   │   ├── routes/         # REST API endpoints
+│   │   │   ├── ws/             # WebSocket handler
+│   │   │   ├── preview/        # Preview server lifecycle management
+│   │   │   └── validation/     # TypeScript, ESLint, Knip validators
+│   │   ├── resources/          # Templates and prompts (externalized)
+│   │   │   ├── prompts/        # system-prompt.md
+│   │   │   └── templates/      # app.tsx bootstrap template
+│   │   ├── tmp/                # PM2 log files
+│   │   └── package.json
+│   │
+│   └── preview/                # Preview Vite instance (LLM-managed dependencies)
 │       ├── src/
-│       │   ├── llm/            # LLM integration
-│       │   │   ├── providers/  # Provider implementations
-│       │   │   ├── qwen-auth.ts
-│       │   │   └── request-queue.ts
-│       │   ├── routes/         # API endpoints
-│       │   └── sessions/       # Session storage
+│       │   └── main.tsx        # Dynamic design loader
+│       ├── tmp/                # PM2 log files
 │       └── package.json
 │
-├── .cycledesign/               # App data (sessions stored here)
+├── workspace/                  # LLM-generated design code (gitignored)
+│   └── designs/
+│       ├── app.tsx             # Root component (modified by LLM)
+│       └── *.tsx               # Additional components
+│
+├── .cycledesign/               # App data (sessions, index database)
 │   └── sessions/
 │       └── {session-id}/
 │           ├── meta.json
 │           └── messages.jsonl
 │
-├── docs/                       # Documentation
+├── ecosystem.config.js         # PM2 process configuration
+├── docs/                       # Documentation (Phase3.md, TOOL_CALLING.md)
 ├── package.json                # Root workspace config
 └── README.md
 ```
@@ -234,6 +269,8 @@ Sessions are stored in `.cycledesign/sessions/` as JSONL (JSON Lines):
 
 ## API Endpoints
 
+### Sessions
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/sessions` | List all sessions |
@@ -242,26 +279,37 @@ Sessions are stored in `.cycledesign/sessions/` as JSONL (JSON Lines):
 | `GET` | `/api/sessions/:id/messages` | Get session messages |
 | `POST` | `/api/sessions/:id/messages` | Add message to session |
 | `DELETE` | `/api/sessions/:id` | Delete session |
+
+### Preview Server
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/preview/start` | Start preview server |
+| `POST` | `/api/preview/stop` | Stop preview server |
+| `GET` | `/api/preview/status` | Get server status and port |
+| `GET` | `/api/preview/logs/stream` | Stream logs (SSE) |
+
+### Other
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check endpoint |
 | `POST` | `/api/complete/stream` | Stream LLM response (SSE) |
 
 ## Available Scripts
 
 **Root:**
 ```bash
-npm run dev          # Run both frontend and backend
-npm run dev:server   # Run backend only
-npm run dev:web      # Run frontend only
-npm run build        # Build both apps
-npm run lint         # Lint both apps
-npm run test         # Run tests
+npm run build        # Build all apps
+npm run lint         # Lint all apps
+npm run validate     # Run ESLint + Knip validation
 ```
 
 **Backend (`apps/server`):**
 ```bash
-npm run dev          # Development with hot reload
+npm run dev          # Development with tsx watch
 npm run build        # Compile TypeScript
 npm run start        # Start production server
-npm run test         # Run vitest tests
 npm run lint         # Run ESLint
 ```
 
@@ -271,7 +319,12 @@ npm run dev          # Development server (Vite)
 npm run build        # Production build
 npm run preview      # Preview production build
 npm run lint         # Run ESLint
-npm run format       # Format with Prettier
+```
+
+**Preview (`apps/preview`):**
+```bash
+npm run dev          # Preview dev server (managed by backend)
+npm run build        # Production build
 ```
 
 ## Troubleshooting
@@ -310,25 +363,30 @@ Sessions are stored in `.cycledesign/sessions/`. If data seems lost:
 - MUI (Material-UI) v5
 - Vite
 - TypeScript
-- React Router v6
+- WebSocket (real-time messaging)
 
 **Backend:**
 - Node.js + Express
-- Vercel AI SDK
+- Vercel AI SDK (LLM integration)
 - TypeScript
+- PM2 (process management)
+- WebSocket server
 - OAuth Device Flow (RFC 8628)
 
+**Preview:**
+- Vite (backend-managed instance)
+- Isolated iframe rendering
+- Dynamic dependency management
+
 **LLM:**
-- Qwen via OAuth (coder-model, vision-model)
+- Qwen via OAuth (coder-model)
 
-## Next Steps (Phase 2)
+**Development:**
+- PM2 for multi-process management
+- tsx for TypeScript execution
+- Chrome DevTools MCP for testing
 
-Phase 2 will add:
-- Design system integration
-- Code generation with validation
-- Component ID injection
-- Visual preview of generated code
-- Tool calling for design system operations
+
 
 ## License
 
