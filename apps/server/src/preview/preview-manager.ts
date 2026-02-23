@@ -15,7 +15,7 @@ const DESIGNS_DIR = resolve(WORKSPACE_DIR, 'designs');
 const PREVIEW_DIR = resolve(SERVER_ROOT, '../preview');
 const DEFAULT_PORT = 3002;
 const MAX_LOG_BUFFER = 100;
-const PM2_APP_NAME = 'cycledesign-preview';
+const PM2_APP_NAME = 'preview';
 
 export class PreviewManager extends EventEmitter {
   private state: ServerState = 'STOPPED';
@@ -60,20 +60,19 @@ export class PreviewManager extends EventEmitter {
     try {
       console.log('[PREVIEW] Starting Vite via PM2 on port', availablePort);
       
-      // Stop existing instance if any
+      // Stop existing instance if any (don't delete - keep in PM2 list)
       try {
         await execAsync(`pm2 stop ${PM2_APP_NAME}`);
-        await execAsync(`pm2 delete ${PM2_APP_NAME}`);
       } catch {
         // Ignore if not running
       }
 
-      // Start with PM2
+      // Start with PM2 (reuse existing entry)
       const env = { PORT: availablePort.toString(), IN_PREVIEW_SERVER: 'true' };
       const envStr = Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ');
       
       await execAsync(
-        `cd /d "${PREVIEW_DIR}" && ${envStr} pm2 start npm --name "${PM2_APP_NAME}" -- run dev`,
+        `cd /d "${PREVIEW_DIR}" && ${envStr} pm2 restart ${PM2_APP_NAME} --update-env`,
         { shell: 'cmd.exe' }
       );
 
@@ -102,7 +101,6 @@ export class PreviewManager extends EventEmitter {
 
     try {
       await execAsync(`pm2 stop ${PM2_APP_NAME}`, { shell: 'cmd.exe' });
-      await execAsync(`pm2 delete ${PM2_APP_NAME}`, { shell: 'cmd.exe' });
       
       this.addLog('stdout', 'Preview server stopped via PM2');
     } catch (error) {

@@ -8,9 +8,6 @@ export const createFileSchema = z.object({
   filename: z
     .string()
     .regex(/^[a-z0-9-]+\.tsx$/, 'Filename must be kebab-case with .tsx extension'),
-  location: z
-    .literal('designs')
-    .describe('Files can only be created in the designs/ directory'),
   code: z
     .string()
     .describe('Complete TypeScript React code to write to the file'),
@@ -35,9 +32,10 @@ export async function executeCreateFile(args: CreateFileArgs, messageId?: string
     validateFilename(args.filename);
 
     const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const filePath = join(workspaceDir, args.location, args.filename);
+    const designsDir = join(workspaceDir, 'designs');
+    const filePath = join(designsDir, args.filename);
 
-    await fs.mkdir(join(workspaceDir, args.location), { recursive: true });
+    await fs.mkdir(designsDir, { recursive: true });
     await fs.writeFile(filePath, args.code, 'utf-8');
 
     if (messageId) {
@@ -52,7 +50,7 @@ export async function executeCreateFile(args: CreateFileArgs, messageId?: string
 }
 
 export const createFileTool = tool({
-  description: 'Create a new design file with the provided code',
+  description: 'Create a new code file with the provided code',
   parameters: createFileSchema,
   execute: async (args: CreateFileArgs) => {
     return executeCreateFile(args);

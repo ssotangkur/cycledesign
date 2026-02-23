@@ -7,8 +7,6 @@ export const deleteFileSchema = z.object({
   filename: z
     .string()
     .regex(/^[a-z0-9-]+\.tsx$/, 'Filename must be kebab-case with .tsx extension'),
-  location: z
-    .literal('designs'),
 });
 
 export type DeleteFileArgs = z.infer<typeof deleteFileSchema>;
@@ -30,7 +28,8 @@ export async function executeDeleteFile(args: DeleteFileArgs): Promise<{ success
     validateFilename(args.filename);
 
     const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const filePath = join(workspaceDir, args.location, args.filename);
+    const designsDir = join(workspaceDir, 'designs');
+    const filePath = join(designsDir, args.filename);
 
     await fs.unlink(filePath);
 
@@ -42,7 +41,7 @@ export async function executeDeleteFile(args: DeleteFileArgs): Promise<{ success
 }
 
 export const deleteFileTool = tool({
-  description: 'Delete an existing design file',
+  description: 'Delete an existing code file',
   parameters: deleteFileSchema,
   execute: async (args: DeleteFileArgs) => {
     return executeDeleteFile(args);

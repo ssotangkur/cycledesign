@@ -10,8 +10,6 @@ export const renameFileSchema = z.object({
   newFilename: z
     .string()
     .regex(/^[a-z0-9-]+\.tsx$/, 'Filename must be kebab-case with .tsx extension'),
-  location: z
-    .literal('designs'),
 });
 
 export type RenameFileArgs = z.infer<typeof renameFileSchema>;
@@ -34,8 +32,9 @@ export async function executeRenameFile(args: RenameFileArgs): Promise<{ success
     validateFilename(args.newFilename);
 
     const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const oldPath = join(workspaceDir, args.location, args.oldFilename);
-    const newPath = join(workspaceDir, args.location, args.newFilename);
+    const designsDir = join(workspaceDir, 'designs');
+    const oldPath = join(designsDir, args.oldFilename);
+    const newPath = join(designsDir, args.newFilename);
 
     await fs.rename(oldPath, newPath);
 
@@ -47,7 +46,7 @@ export async function executeRenameFile(args: RenameFileArgs): Promise<{ success
 }
 
 export const renameFileTool = tool({
-  description: 'Rename an existing design file',
+  description: 'Rename an existing code file',
   parameters: renameFileSchema,
   execute: async (args: RenameFileArgs) => {
     return executeRenameFile(args);

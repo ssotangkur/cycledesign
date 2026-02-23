@@ -12,7 +12,7 @@ sseRouter.get('/logs/stream', async (_req: Request, res: Response): Promise<void
 
   res.flushHeaders();
 
-  const logs = previewManager.getLogs();
+  const logs = await previewManager.getLogs();
   for (const log of logs) {
     res.write(`data: ${JSON.stringify(log)}\n\n`);
   }
