@@ -1,9 +1,9 @@
 import { exec } from 'child_process';
 import { EventEmitter } from 'events';
 import { existsSync, copyFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
-import * as net from 'net';
 import { resolve, join } from 'path';
 import { promisify } from 'util';
+import killPort from 'kill-port';
 import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types';
 
 const execAsync = promisify(exec);
@@ -55,11 +55,13 @@ export class PreviewManager extends EventEmitter {
       this.loadDesign(designName);
     }
 
-    const availablePort = await this.findAvailablePort(DEFAULT_PORT);
-    this.port = availablePort;
+    // Use default port directly - kill any process using it first
+    const targetPort = DEFAULT_PORT;
+    await this.killPortOnEndpoint(targetPort);
+    this.port = targetPort;
 
     try {
-      console.log('[PREVIEW] Starting Vite via PM2 on port', availablePort);
+      console.log('[PREVIEW] Starting Vite via PM2 on port', targetPort);
       
       // Stop existing instance if any (don't delete - keep in PM2 list)
       try {
@@ -69,22 +71,23 @@ export class PreviewManager extends EventEmitter {
       }
 
       // Start with PM2 (reuse existing entry)
-      const env = { PORT: availablePort.toString(), IN_PREVIEW_SERVER: 'true' };
-      const envStr = Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ');
+      // Use Windows-compatible set command for environment variables
+      const env = { PORT: targetPort.toString(), IN_PREVIEW_SERVER: 'true' };
+      const envStr = Object.entries(env).map(([k, v]) => `set ${k}=${v}`).join('&& ');
       
       await execAsync(
-        `cd /d "${PREVIEW_DIR}" && ${envStr} pm2 restart ${PM2_APP_NAME} --update-env`,
+        `cd /d "${PREVIEW_DIR}" && ${envStr}&& pm2 restart ${PM2_APP_NAME} --update-env`,
         { shell: 'cmd.exe' }
       );
 
       this.startTime = Date.now();
-      this.addLog('stdout', `Started preview server via PM2 on port ${availablePort}`);
+      this.addLog('stdout', `Started preview server via PM2 on port ${targetPort}`);
 
       await this.waitForReady();
 
       this.state = 'RUNNING';
       this.emit('stateChange', this.state);
-      this.emit('ready', { port: availablePort });
+      this.emit('ready', { port: targetPort });
     } catch (error) {
       this.state = 'ERROR';
       this.emit('stateChange', this.state);
@@ -106,6 +109,11 @@ export class PreviewManager extends EventEmitter {
       this.addLog('stdout', 'Preview server stopped via PM2');
     } catch (error) {
       this.addLog('stderr', `Failed to stop via PM2: ${(error as Error).message}`);
+    }
+
+    // Kill any remaining process on the port after PM2 stops
+    if (this.port) {
+      await this.killPortOnEndpoint(this.port);
     }
 
     this.state = 'STOPPED';
@@ -177,10 +185,12 @@ export class PreviewManager extends EventEmitter {
           if (readyLog) {
             const portMatch = readyLog.message.match(/:(\d+)/);
             if (portMatch) {
-              this.port = parseInt(portMatch[1], 10);
+              const detectedPort = parseInt(portMatch[1], 10);
+              console.log('[PREVIEW] Vite ready detected on port:', detectedPort);
+              // Don't overwrite this.port - keep our target port
             }
             clearTimeout(timeout);
-            console.log('[PREVIEW] Vite ready detected, port:', this.port);
+            console.log('[PREVIEW] Preview ready');
             resolve();
           } else {
             setTimeout(checkReady, 500);
@@ -199,38 +209,13 @@ export class PreviewManager extends EventEmitter {
     });
   }
 
-  private async findAvailablePort(startPort: number): Promise<number> {
-    let port = startPort;
-    const maxAttempts = 10;
-
-    for (let i = 0; i < maxAttempts; i++) {
-      const available = await this.isPortAvailable(port);
-      if (available) {
-        return port;
-      }
-      this.addLog('stdout', `Port ${port} is in use, trying ${port + 1}...`);
-      port++;
+  private async killPortOnEndpoint(port: number): Promise<void> {
+    try {
+      await killPort(port);
+      console.log(`[PREVIEW] Killed process on port ${port}`);
+    } catch {
+      // No process on port, that's fine
     }
-
-    throw new Error(`Could not find available port after ${maxAttempts} attempts`);
-  }
-
-  private async isPortAvailable(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const server = net.createServer();
-      
-      server.once('error', () => {
-        resolve(false);
-      });
-
-      server.once('listening', () => {
-        server.close(() => {
-          resolve(true);
-        });
-      });
-
-      server.listen(port, '127.0.0.1');
-    });
   }
 
   private loadDesign(designName: string): void {

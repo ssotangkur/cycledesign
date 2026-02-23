@@ -41,6 +41,13 @@
 - Overwrites existing app.tsx with clean bootstrap version
 - Fixed `loadDesign()` to use `app.tsx` instead of outdated `current.tsx`
 
+**Port Management Fixes:**
+- Installed `kill-port` package (v2.0.1) for cross-platform port killing
+- Added `killPortOnEndpoint()` to kill processes on specific ports
+- Fixed `stop()` to call killPortOnEndpoint after PM2 stop for proper cleanup
+- Fixed `waitForReady()` bug that was overwriting target port with detected port
+- Verified stop now properly frees port 3002 on Windows
+
 **WebSocket Integration:**
 - Multi-turn tool calling loop in WebSocket handler
 - Automatic validation fallback if LLM doesn't call `submit_work`
@@ -1417,6 +1424,8 @@ pm2 delete all
   "dependencies": {
     "ws": "^8.x",                    // From Phase 2a
     "@types/ws": "^8.x",             // From Phase 2a
+    "kill-port": "2.0.1",
+    "@types/kill-port": "2.0.0",
     "@typescript-eslint/parser": "^6.13.0",
     "@typescript-eslint/typescript-estree": "^6.13.0",
     "typescript": "^5.3.0",
@@ -1430,6 +1439,7 @@ pm2 delete all
 
 **Key Packages:**
 - `ws`, `@types/ws` - WebSocket server (Phase 2a requirement)
+- `kill-port` (v2.0.1) - Cross-platform port killing for process cleanup
 - `@typescript-eslint/parser` - Parse TSX for AST manipulation
 - `typescript` - Type checking generated code
 - `eslint` - Linting with custom rules
