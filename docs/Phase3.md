@@ -198,7 +198,7 @@ workspace/
 
 ## Backend Components
 
-### 2. Backend-Managed Preview Server Lifecycle
+### 1. Backend-Managed Preview Server Lifecycle
 
 **Decision:** Backend controls preview Vite server (start/stop/restart) with log streaming
 
@@ -258,7 +258,7 @@ data: {"type":"ready","port":3002,"timestamp":1234567892}
 - ✅ Tool-ready (future: expose as additional tool calls)
 - ✅ Error recovery (auto-restart, status monitoring)
 
-### 4. Code Generation Flow (WebSocket-Based)
+### 2. Code Generation Flow (WebSocket-Based)
 
 **Decision:** LLM generates complete TSX file with imports using **tool calling** for structured output, triggered via WebSocket
 
@@ -331,7 +331,7 @@ sendMessage('Create a landing page with hero section and features');
 
 ---
 
-### 4.1. Server-Side Tool Calling with Status Broadcasting
+### 2.1. Server-Side Tool Calling with Status Broadcasting
 
 **Decision:** Broadcast tool execution status to clients via WebSocket in real-time
 
@@ -474,7 +474,7 @@ function MessageList({ messages }) {
 
 ---
 
-### 5. Validation Pipeline
+### 3. Validation Pipeline
 
 **Decision:** Five-stage validation before rendering
 
@@ -516,7 +516,7 @@ Render in preview iframe
 
 ---
 
-### 6. ID Injection System
+### 4. ID Injection System
 
 **Decision:** AST-based ID injection post-validation
 
@@ -577,7 +577,7 @@ export function injectIds(code: string, existingIds: Set<string>): {
 
 ---
 
-### 6.1. Component Transformer Pipeline
+### 4.1. Component Transformer Pipeline
 
 **Decision:** Wrap component instances with helper HOCs for audit/selection functionality
 
@@ -627,7 +627,7 @@ build/
 
 ---
 
-### 6.2. Database Schema
+### 4.2. Database Schema
 
 **Purpose:** Index component usage for audit mode and selection tracking
 
@@ -663,7 +663,7 @@ CREATE TABLE components (
 
 ---
 
-### 8. Preview Vite Entry Point
+### 5. Preview Vite Entry Point
 
 **Decision:** Preview loads design dynamically via import alias
 
@@ -728,7 +728,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 ## Frontend Components
 
-### 2.5. UI Layout Architecture
+### 1. UI Layout Architecture
 
 **Decision:** Full-width header with two-pane split layout (left: chat/sessions, right: preview) with resizable divider
 
@@ -896,7 +896,7 @@ function MainLayout() {
 
 ---
 
-### 7. Preview Communication Bridge
+### 2. Preview Communication Bridge
 
 **Decision:** postMessage API for cross-origin communication (3000 ↔ 3002)
 
