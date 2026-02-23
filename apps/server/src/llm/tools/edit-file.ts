@@ -8,8 +8,6 @@ export const editFileSchema = z.object({
   filename: z
     .string()
     .regex(/^[a-z0-9-]+\.tsx$/, 'Filename must be kebab-case with .tsx extension'),
-  location: z
-    .literal('designs'),
   patch: z
     .string()
     .describe('Unified diff patch to apply to the file'),
@@ -34,7 +32,8 @@ export async function executeEditFile(args: EditFileArgs): Promise<{ success: bo
     validateFilename(args.filename);
 
     const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const filePath = join(workspaceDir, args.location, args.filename);
+    const designsDir = join(workspaceDir, 'designs');
+    const filePath = join(designsDir, args.filename);
 
     const existingContent = await fs.readFile(filePath, 'utf-8');
     
@@ -54,7 +53,7 @@ export async function executeEditFile(args: EditFileArgs): Promise<{ success: bo
 }
 
 export const editFileTool = tool({
-  description: 'Modify an existing design file using unified diff patch',
+  description: 'Modify an existing code file using unified diff patch',
   parameters: editFileSchema,
   execute: async (args: EditFileArgs) => {
     return executeEditFile(args);

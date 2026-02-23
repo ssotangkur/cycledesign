@@ -7,7 +7,7 @@ import { previewRouter } from './routes/preview';
 import { sseRouter } from './routes/sse';
 import https from 'https';
 import { WebSocketHandler } from './ws';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
 
 dotenv.config();
@@ -28,7 +28,7 @@ const PORT = process.env.PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 // Bootstrap workspace and auto-start preview server
-const WORKSPACE_DIR = join(__dirname, '../../workspace');
+const WORKSPACE_DIR = join(process.cwd(), '../../workspace');
 const DESIGNS_DIR = join(WORKSPACE_DIR, 'designs');
 
 // Create workspace directories
@@ -44,31 +44,10 @@ if (!existsSync(DESIGNS_DIR)) {
 
 // Create a placeholder app.tsx if it doesn't exist
 const appTsXPath = join(DESIGNS_DIR, 'app.tsx');
-if (!existsSync(appTsXPath)) {
-  const placeholder = `import React from 'react';
-import { Box, Typography, Container } from '@mui/material';
-
-export function App() {
-  return (
-    <Container maxWidth="sm" sx={{ py: 8, textAlign: 'center' }}>
-      <Typography variant="h3" gutterBottom>
-        CycleDesign Preview
-      </Typography>
-      <Typography variant="body1" color="text.secondary">
-        The app.tsx component is ready. Modify it to create your design.
-      </Typography>
-      <Box sx={{ mt: 4, p: 3, bgcolor: 'grey.100', borderRadius: 2 }}>
-        <Typography variant="h6">Getting Started</Typography>
-        <Typography variant="body2">
-          Edit this file to build your UI. The App component is the root of your application.
-        </Typography>
-      </Box>
-    </Container>
-  );
-}
-`;
-  writeFileSync(appTsXPath, placeholder, 'utf-8');
-  console.log('[BOOTSTRAP] Created placeholder app.tsx');
+const templatePath = join(process.cwd(), 'resources/templates/app.tsx');
+if (!existsSync(appTsXPath) && existsSync(templatePath)) {
+  copyFileSync(templatePath, appTsXPath);
+  console.log('[BOOTSTRAP] Created placeholder app.tsx from template');
 }
 
 const server = app.listen(PORT, () => {
