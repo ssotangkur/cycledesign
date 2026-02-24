@@ -14,7 +14,7 @@ export async function executeSubmitWork(): Promise<{ success: boolean; message: 
 
 export const submitWorkTool = tool({
   description: 'Signal that all work is complete and trigger the validation pipeline. This tool takes no arguments - the system automatically tracks files created/modified and dependencies added during this turn.',
-  parameters: submitWorkSchema,
+  inputSchema: submitWorkSchema,
   execute: async () => {
     return executeSubmitWork();
   },

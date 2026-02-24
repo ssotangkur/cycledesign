@@ -5,6 +5,7 @@ import { sessionsRouter } from './routes/sessions';
 import { completionRouter } from './routes/completion';
 import { previewRouter } from './routes/preview';
 import { sseRouter } from './routes/sse';
+import providersRouter from './routes/providers';
 import https from 'https';
 import { WebSocketHandler } from './ws';
 import { existsSync, mkdirSync, copyFileSync } from 'fs';
@@ -12,11 +13,11 @@ import { join } from 'path';
 
 dotenv.config();
 
-// Global fetch override to disable SSL verification for Qwen API
+// Global fetch override to disable SSL verification for Qwen and Mistral APIs
 const originalFetch = global.fetch;
 global.fetch = ((url: string | URL, options: RequestInit) => {
   const parsedUrl = new URL(url);
-  if (parsedUrl.hostname.includes('qwen.ai') || parsedUrl.hostname.includes('aliyuncs.com')) {
+  if (parsedUrl.hostname.includes('qwen.ai') || parsedUrl.hostname.includes('aliyuncs.com') || parsedUrl.hostname.includes('mistral.ai')) {
     const agent = new https.Agent({ rejectUnauthorized: false });
     (options as RequestInit & { agent?: https.Agent }).agent = agent;
   }
@@ -77,7 +78,7 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 app.use(cors({
-  origin: FRONTEND_URL,
+  origin: ['http://localhost:3000', 'http://localhost:3003', 'http://127.0.0.1:3000', 'http://127.0.0.1:3003'],
   credentials: true,
 }));
 
@@ -123,5 +124,7 @@ app.use('/api/sessions', sessionsRouter);
 app.use('/api/complete', completionRouter);
 app.use('/api/preview', previewRouter);
 app.use('/api/preview/logs', sseRouter);
+app.use('/api/providers', providersRouter);
 
 export default app;
+// change 3

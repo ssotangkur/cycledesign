@@ -173,6 +173,14 @@ async function executeTool(toolCall: ToolCall, messageId?: string): Promise<unkn
   
   console.log('[TOOL] executeTool called for:', toolName);
   
+  if (!argsString || argsString.trim() === '' || argsString === '{}') {
+    return {
+      success: false,
+      error: `Tool '${toolName}' requires arguments but none were provided. Please ask the user to provide the necessary details.`,
+      message: `The ${toolName} tool needs more information to execute. Consider using ask_user tool to get the required arguments from the user.`,
+    };
+  }
+  
   try {
     const args = JSON.parse(argsString);
     console.log('[TOOL] Parsed args for', toolName + ':', JSON.stringify(args).substring(0, 150));

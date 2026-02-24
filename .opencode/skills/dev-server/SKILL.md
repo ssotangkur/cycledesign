@@ -1,175 +1,84 @@
 ---
 name: dev-server
-description: Start the CycleDesign dev server in the background on Windows with logs redirected to tmp/dev.log
+description: Start the CycleDesign dev server on Windows with proper port killing and logging
 ---
 
-## Starting the Dev Server on Windows
+## Starting the Dev Server
 
-On Windows, running `npm run dev` blocks the terminal. Use this skill to start it properly in the background.
+### Quick Start
 
-### Step 1: Check if ports are already in use
-
-**Git Bash:**
 ```bash
-netstat -anop | grep :3000
-netstat -anop | grep :3001
+npm run dev
 ```
 
-**PowerShell/cmd:**
+This will:
+1. Kill any processes on ports 3000, 3001, 3002
+2. Start the backend server (port 3001)
+3. Start the frontend web server (port 3000)
+4. Log to `tmp/server.log` and `tmp/web.log`
+
+### Individual Commands
+
+**Kill ports only:**
 ```bash
-netstat -ano | findstr :3000
-netstat -ano | findstr :3001
+npm run dev:kill
 ```
 
-If processes are found, kill them:
-
-**Git Bash:**
+**Start server only:**
 ```bash
-kill -f <pid1>
-kill -f <pid2>
+npm run dev:server
 ```
 
-**PowerShell/cmd:**
+**Start web only:**
 ```bash
-taskkill /F /PID <pid1>
-taskkill /F /PID <pid2>
+npm run dev:web
 ```
 
-### Step 2: Start the dev server in the background
+### Log Files
 
-**Git Bash:**
+- Server: `tmp/server.log`
+- Web: `tmp/web.log`
+
+View logs:
 ```bash
-npm run dev > tmp/dev.log 2>&1 &
+# Server logs
+tail -f tmp/server.log
+
+# Web logs  
+tail -f tmp/web.log
+
+# Both
+tail -f tmp/*.log
 ```
 
-**PowerShell/cmd:**
-```bash
-cmd /c "start /B npm run dev > tmp\dev.log 2>&1"
-```
+### Ports
 
-### Step 3: Verify the server started
-
-Wait a few seconds and check the logs:
-
-**Git Bash:**
-```bash
-sleep 3 && tail -50 tmp/dev.log
-```
-
-**PowerShell:**
-```bash
-powershell -Command "Start-Sleep -Seconds 3; Get-Content tmp\dev.log"
-```
-
-Look for:
-- `Local:   http://localhost:3000/` (frontend)
-- `Server running on http://localhost:3001` (backend)
-
-### When to use this skill
-
-Use this skill when:
-- You need to start the development server
-- You want to run other commands after starting the server
-- You need to verify the server is running correctly
-
-### Reading logs later
-
-To check server status at any time:
-
-**Git Bash:**
-```bash
-tail -50 tmp/dev.log
-```
-
-**PowerShell:**
-```bash
-powershell -Command "Get-Content tmp\dev.log -Tail 50"
-```
-
-**cmd:**
-```bash
-type tmp\dev.log
-```
+- Frontend: http://localhost:3000
+- Backend: http://localhost:3001
+- Preview: http://localhost:3002
 
 ### Troubleshooting
 
 **If ports are in use:**
-1. Check what's using the port:
-   ```bash
-   netstat -ano | findstr :3000
-   netstat -ano | findstr :3001
-   ```
-2. Find the process:
-   ```bash
-   tasklist | findstr <PID>
-   ```
-3. Only kill specific Node processes related to dev servers (NOT opencode!)
-   ```bash
-   taskkill /F /PID <specific_pid>
-   ```
+```bash
+npm run dev:kill
+npm run dev
+```
 
 **If servers crash with EADDRINUSE:**
-- Wait 5 seconds for ports to release, then restart
-- Or use different ports:
+The `npm run dev` command automatically kills ports before starting.
 
-**Git Bash:**
-```bash
-export PORT=3002 && npm run dev --workspace=@cycledesign/server
-```
-
-**PowerShell:**
-```bash
-$env:PORT=3002; npm run dev --workspace=@cycledesign/server
-```
-
-**⚠️ NEVER run `taskkill /F /IM node.exe`** - This kills opencode and all Node processes!
-
-**If frontend won't load:**
-1. Check backend is running:
-
-**Git Bash:**
+**Check server health:**
 ```bash
 curl http://localhost:3001/health
+curl http://localhost:3000
 ```
 
-**PowerShell:**
-```bash
-Invoke-RestMethod -Uri "http://localhost:3001/health"
-```
+### File Changes
 
-2. Check logs:
-
-**Git Bash:**
-```bash
-tail -30 tmp/dev.log
-```
-
-**PowerShell:**
-```bash
-Get-Content tmp\dev.log -Tail 30
-```
-
-3. Look for "Server running on" messages
+The server uses `nodemon` to watch for file changes and automatically restart. Check `tmp/server.log` for restart messages.
 
 **If HMR not working:**
 - Check component has default export
-- Restart dev server
+- Check nodemon is running (look for "nodemon watching" in logs)
 - Clear browser cache
-
-**Check logs before restarting:**
-
-**Git Bash:**
-```bash
-tail -20 tmp/dev.log
-```
-
-**PowerShell:**
-```bash
-Get-Content tmp\dev.log -Tail 20
-```
-
-Look for:
-- ✅ `Server running on http://localhost:3001` (backend OK)
-- ✅ `Local: http://localhost:3000/` (frontend OK)
-- ❌ `EADDRINUSE` (port conflict)
-- ❌ `Error: listen` (server failed to start)

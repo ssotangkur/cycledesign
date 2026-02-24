@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'server',
       cwd: './apps/server',
-      script: 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js',
+      script: 'npm.cmd',
       args: 'run dev',
       env: {
         PORT: 3001,
@@ -13,15 +13,13 @@ module.exports = {
       error_file: './tmp/pm2-server-error.log',
       out_file: './tmp/pm2-server-out.log',
       merge_logs: true,
-      autorestart: true,
-      watch: ['src'],
-      ignore_watch: ['node_modules', 'workspace'],
       exec_mode: 'fork',
+      kill_timeout: 5000,
     },
     {
       name: 'web',
       cwd: './apps/web',
-      script: 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js',
+      script: 'npm.cmd',
       args: 'run dev',
       env: {
         PORT: 3000,
@@ -31,15 +29,13 @@ module.exports = {
       error_file: './tmp/pm2-web-error.log',
       out_file: './tmp/pm2-web-out.log',
       merge_logs: true,
-      autorestart: true,
-      watch: ['src'],
-      ignore_watch: ['node_modules'],
       exec_mode: 'fork',
+      kill_timeout: 5000,
     },
     {
       name: 'preview',
       cwd: './apps/preview',
-      script: 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js',
+      script: 'npm.cmd',
       args: 'run dev',
       env: {
         PORT: 3002,
@@ -50,8 +46,8 @@ module.exports = {
       error_file: './tmp/pm2-preview-error.log',
       out_file: './tmp/pm2-preview-out.log',
       merge_logs: true,
-      autorestart: false,
       exec_mode: 'fork',
+      kill_timeout: 5000,
     },
   ],
 };

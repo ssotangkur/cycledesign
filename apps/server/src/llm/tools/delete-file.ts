@@ -42,8 +42,8 @@ export async function executeDeleteFile(args: DeleteFileArgs): Promise<{ success
 
 export const deleteFileTool = tool({
   description: 'Delete an existing code file',
-  parameters: deleteFileSchema,
-  execute: async (args: DeleteFileArgs) => {
-    return executeDeleteFile(args);
+  inputSchema: deleteFileSchema,
+  execute: async ({ filename }) => {
+    return executeDeleteFile({ filename });
   },
 });

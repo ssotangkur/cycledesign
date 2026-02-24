@@ -27,8 +27,8 @@ export async function executeAskUser(args: AskUserArgs): Promise<{ success: bool
 
 export const askUserTool = tool({
   description: 'Request clarification from the user before continuing. Use this when you need more information to proceed with the task.',
-  parameters: askUserSchema,
-  execute: async (args: AskUserArgs) => {
-    return executeAskUser(args);
+  inputSchema: askUserSchema,
+  execute: async ({ question, context, suggestions }) => {
+    return executeAskUser({ question, context, suggestions });
   },
 });

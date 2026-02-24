@@ -7,9 +7,15 @@
         "packages/*"
     ],
     "scripts": {
-        "dev": "concurrently \"npm run dev --workspace=@cycledesign/server\" \"npm run dev --workspace=@cycledesign/web\"",
+        "dev": "npm run dev:kill && concurrently --kill-others \"npm run dev:server:log\" \"npm run dev:web:log\"",
+        "dev:kill": "kill-port 3000 3001 3002 || true",
         "dev:server": "npm run dev --workspace=@cycledesign/server",
         "dev:web": "npm run dev --workspace=@cycledesign/web",
+        "dev:server:log": "npm run dev:kill:3001 && npm run dev:server 2>&1 | tee tmp/server.log",
+        "dev:web:log": "npm run dev:kill:3000 && npm run dev:web 2>&1 | tee tmp/web.log",
+        "dev:kill:3000": "kill-port 3000 || true",
+        "dev:kill:3001": "kill-port 3001 || true",
+        "dev:kill:3002": "kill-port 3002 || true",
         "build": "npm run build --workspaces",
         "lint": "npm run lint --workspaces",
         "lint:fix": "npm run lint:fix --workspaces --if-present",
@@ -20,6 +26,7 @@
     },
     "devDependencies": {
         "concurrently": "^9.2.1",
+        "kill-port": "^2.0.1",
         "knip": "^5.85.0",
         "typescript": "^5.9.3"
     }

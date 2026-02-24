@@ -54,8 +54,8 @@ export async function executeEditFile(args: EditFileArgs): Promise<{ success: bo
 
 export const editFileTool = tool({
   description: 'Modify an existing code file using unified diff patch',
-  parameters: editFileSchema,
-  execute: async (args: EditFileArgs) => {
-    return executeEditFile(args);
+  inputSchema: editFileSchema,
+  execute: async ({ filename, patch }) => {
+    return executeEditFile({ filename, patch });
   },
 });

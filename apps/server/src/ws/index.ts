@@ -2,14 +2,14 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { IncomingMessage } from 'http';
 import { parse as parseUrl } from 'url';
-import { getMessages, addMessage } from '../sessions/storage';
-import { QwenProvider } from '../llm/providers/qwen';
-import { generateMessageId } from '../sessions/storage';
+import { getMessages, addMessage, generateMessageId } from '../sessions/storage';
 import { StoredMessage } from '../llm/types';
 import { SYSTEM_PROMPT } from '../llm/system-prompt';
 import { executeToolCalls } from '../llm/tool-executor';
 import { allTools } from '../llm/tools';
-import { CoreMessage, ToolResultPart } from 'ai';
+import { CoreMessage } from 'ai';
+import { getLLMProvider } from '../llm/provider-factory';
+import { getProviderConfig } from '../routes/providers';
 
 interface SessionConnection {
   ws: WebSocket;
@@ -38,10 +38,8 @@ const MAX_CONNECTIONS_PER_SESSION = 5;
 export class WebSocketHandler {
   private wss: WebSocketServer;
   private connections = new Map<string, SessionConnection[]>();
-  private qwenProvider: QwenProvider;
 
   constructor(server: Server) {
-    this.qwenProvider = new QwenProvider();
 
     this.wss = new WebSocketServer({
       noServer: true,
@@ -334,15 +332,19 @@ export class WebSocketHandler {
       while (hasMoreToolCalls) {
         loopCount++;
         console.log('[LLM] === Loop iteration', loopCount, '===');
-        console.log('[LLM] Calling QwenProvider.complete with', currentMessages.length, 'messages');
+        const providerConfig = getProviderConfig();
+        console.log('[LLM] Calling', providerConfig.provider, 'provider with', currentMessages.length, 'messages');
         console.log('[LLM] Tools available:', Object.keys(allTools).join(', '));
         
-        const result = await this.qwenProvider.complete(currentMessages, {
+        const result = await getLLMProvider().complete(currentMessages, {
           stream: true,
           tools: allTools,
-        });
+        }) as unknown as { 
+          stream: AsyncIterable<string>; 
+          toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>;
+        };
         
-        console.log('[LLM] QwenProvider.complete returned, result type:', typeof result);
+        console.log('[LLM] Provider.complete returned, result type:', typeof result);
 
         if (!result.stream) {
           console.error('[WS] Stream not available for session:', sessionId);
@@ -370,22 +372,47 @@ export class WebSocketHandler {
 
         console.log('[WS] Waiting for tool calls from LLM for session:', sessionId);
         const toolCalls = await result.toolCalls;
+        
+        console.log('[WS] Raw tool calls from LLM:', JSON.stringify(toolCalls, null, 2));
+        
+        const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+        const messageId = lastUserMsg?.id || 'unknown';
+        
+        const toolCallsMissingArgs = !toolCalls || toolCalls.length === 0 || 
+          toolCalls.some((tc: unknown) => {
+            const t = tc as { args?: unknown };
+            const args = t.args;
+            return !args || (typeof args === 'object' && Object.keys(args).length === 0) || 
+                   (typeof args === 'string' && (args === '' || args === '{}'));
+          });
+        
+        if (toolCallsMissingArgs) {
+          console.log('[WS] Tool calls missing arguments or no tool calls - ending loop');
+          if (toolCalls && toolCalls.length > 0) {
+            const tc = toolCalls[0] as { name?: string; toolName?: string };
+            const name = tc.name || tc.toolName || 'unknown';
+            ws.send(JSON.stringify({
+              type: 'content',
+              messageId,
+              content: `I need more information to proceed. The ${name} tool requires additional parameters. Could you please provide more details?`,
+            } as ServerMessage));
+          }
+          break;
+        }
+        
         if (toolCalls && toolCalls.length > 0) {
           console.log('[WS] Detected', toolCalls.length, 'tool calls for session:', sessionId);
-          toolCalls.forEach((tc, idx) => {
-            console.log('[TOOL] Tool call', idx + 1, ':', tc.toolName, 'with args:', JSON.stringify(tc.args));
+          toolCalls.forEach((tc: unknown, idx: number) => {
+            console.log('[TOOL] Raw tool call', idx + 1, ':', JSON.stringify(tc));
           });
           hasToolCalls = true;
           
-          const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-          const messageId = lastUserMsg?.id || 'unknown';
-          
           const toolCallArray = toolCalls.map(tc => ({
-            id: tc.toolCallId,
+            id: tc.toolCallId ?? tc.id,
             type: 'function' as const,
             function: {
-              name: tc.toolName,
-              arguments: JSON.stringify(tc.args),
+              name: tc.toolName ?? tc.name,
+              arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}),
             },
           }));
           
@@ -399,16 +426,11 @@ export class WebSocketHandler {
             newMessages.push({ role: 'assistant', content: fullContent });
           }
 
-          for (const tc of toolCalls) {
-            const toolResult: ToolResultPart = {
-              type: 'tool-result',
-              toolCallId: tc.toolCallId,
-              toolName: tc.toolName,
-              result: { success: true, filename: tc.toolName === 'create_file' ? 'File created' : 'Done' },
-            };
+          for (let i = 0; i < toolCalls.length; i++) {
+            const resultContent = JSON.stringify({ success: true, output: 'Tool executed' });
             newMessages.push({
               role: 'tool',
-              content: [toolResult],
+              content: resultContent,
             });
           }
 

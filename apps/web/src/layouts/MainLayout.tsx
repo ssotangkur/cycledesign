@@ -1,5 +1,6 @@
 import { Box, AppBar, Toolbar, Typography, IconButton, Collapse } from '@mui/material';
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import SessionSelector from '../components/chat/SessionSelector';
 import MessageList from '../components/chat/MessageList';
 import PromptInput from '../components/chat/PromptInput';
@@ -12,6 +13,7 @@ import { useSession } from '../hooks/useSession';
 import { useMessageListState } from '../hooks/useMessageListState';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import SettingsIcon from '@mui/icons-material/Settings';
 
 const MIN_LEFT_PANE_WIDTH = 350;
 const MAX_LEFT_PANE_PERCENT = 0.7;
@@ -19,6 +21,7 @@ const DEFAULT_LEFT_PANE_PERCENT = 0.4;
 const LOG_PANEL_HEIGHT = 200;
 
 function MainLayout() {
+  const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [leftPaneWidth, setLeftPaneWidth] = useState<number | null>(null);
@@ -127,9 +130,12 @@ function MainLayout() {
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <AppBar position="static" sx={{ width: '100%', flexShrink: 0 }}>
         <Toolbar>
-          <Typography variant="h6" noWrap component="div">
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             CycleDesign
           </Typography>
+          <IconButton color="inherit" onClick={() => navigate('/settings')}>
+            <SettingsIcon />
+          </IconButton>
         </Toolbar>
       </AppBar>
 

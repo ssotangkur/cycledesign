@@ -46,8 +46,8 @@ export async function executeAddDependency(args: AddDependencyArgs, messageId?: 
 
 export const addDependencyTool = tool({
   description: 'Add an npm package to the preview environment',
-  parameters: addDependencySchema,
-  execute: async (args: AddDependencyArgs) => {
-    return executeAddDependency(args);
+  inputSchema: addDependencySchema,
+  execute: async ({ packageName, version }) => {
+    return executeAddDependency({ packageName, version });
   },
 });

@@ -333,6 +333,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
       mounted = false;
       cleanupWebSocket();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadSessions, setupWebSocket, cleanupWebSocket]);
 
   useEffect(() => {

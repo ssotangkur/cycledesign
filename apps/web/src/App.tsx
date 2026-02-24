@@ -10,8 +10,8 @@ function App() {
       <Routes>
         <Route path="/" element={<MainLayout />}>
           <Route index element={<ChatPage />} />
-          <Route path="settings" element={<SettingsPage />} />
         </Route>
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </ErrorBoundary>
   );
