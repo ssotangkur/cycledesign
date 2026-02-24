@@ -314,10 +314,10 @@ export class WebSocketHandler {
       console.log('[WS] Messages:', messages.map(m => ({ role: m.role, content: m.content?.substring(0, 50) })));
 
       let currentMessages: CoreMessage[] = [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: [{ type: 'text', text: SYSTEM_PROMPT }] },
         ...messages.map(msg => ({
           role: msg.role as 'user' | 'assistant',
-          content: msg.content || '',
+          content: [{ type: 'text', text: msg.content || '' }],
         })),
       ];
 
@@ -423,18 +423,22 @@ export class WebSocketHandler {
           const newMessages: CoreMessage[] = [];
 
           if (fullContent.trim()) {
-            newMessages.push({ role: 'assistant', content: fullContent });
+            newMessages.push({ role: 'assistant', content: [{ type: 'text', text: fullContent }] });
           }
 
           for (let i = 0; i < toolCalls.length; i++) {
             const tc = toolCalls[i] as { toolCallId?: string; id?: string; toolName?: string; name?: string };
-            const resultContent = JSON.stringify({ success: true, output: 'Tool executed' });
+            const toolCallId = tc.toolCallId ?? tc.id ?? `tool-${i}`;
+            const toolName = tc.toolName ?? tc.name ?? 'unknown';
             newMessages.push({
-              role: 'tool',
-              content: resultContent,
-              toolCallId: tc.toolCallId ?? tc.id ?? `tool-${i}`,
-              toolName: tc.toolName ?? tc.name ?? 'unknown',
-            } as any);
+              role: 'tool' as const,
+              content: [{
+                type: 'tool-result',
+                toolCallId,
+                toolName,
+                output: { success: true, output: 'Tool executed' },
+              }],
+            });
           }
 
           currentMessages = [...currentMessages, ...newMessages];
