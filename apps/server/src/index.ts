@@ -26,7 +26,6 @@ global.fetch = ((url: string | URL, options: RequestInit) => {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 // Bootstrap workspace and auto-start preview server
 const WORKSPACE_DIR = join(process.cwd(), '../../workspace');

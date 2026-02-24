@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -36,11 +36,17 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchProviderConfig();
+  const fetchModels = useCallback(async (provider: string) => {
+    try {
+      const res = await fetch(`/api/providers/models?provider=${provider}`);
+      const data = await res.json();
+      setModels(data.models || []);
+    } catch (err) {
+      console.error('Failed to fetch models:', err);
+    }
   }, []);
 
-  const fetchProviderConfig = async () => {
+  const fetchProviderConfig = useCallback(async () => {
     try {
       const res = await fetch('/api/providers/config');
       const data = await res.json();
@@ -53,17 +59,11 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchModels]);
 
-  const fetchModels = async (provider: string) => {
-    try {
-      const res = await fetch(`/api/providers/models?provider=${provider}`);
-      const data = await res.json();
-      setModels(data.models || []);
-    } catch (err) {
-      console.error('Failed to fetch models:', err);
-    }
-  };
+  useEffect(() => {
+    fetchProviderConfig();
+  }, [fetchProviderConfig]);
 
   const handleProviderChange = async (provider: string) => {
     setSaving(true);
