@@ -1,10 +1,10 @@
-import { generateText, streamText, CoreMessage, ToolSet } from 'ai';
+import { generateText, streamText, type ToolSet, type ModelMessage } from 'ai';
 import { createMistral } from '@ai-sdk/mistral';
 
 export interface LLMResponse {
   content: string;
   toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  usage?: { totalTokens: number };
 }
 
 export class MistralProvider {
@@ -23,7 +23,7 @@ export class MistralProvider {
   }
 
   async complete(
-    messages: CoreMessage[],
+    messages: ModelMessage[],
     options?: {
       tools?: ToolSet;
       stream?: boolean;
@@ -37,17 +37,16 @@ export class MistralProvider {
         messages,
         tools: options.tools,
         temperature: 0.1,
-        maxTokens: 8192,
+        maxOutputTokens: 8192,
       });
       const toolCalls = await result.toolCalls;
       return {
-        stream: result.textStream,
         content: '',
         toolCalls: toolCalls
-          ? toolCalls.map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({
+          ? toolCalls.map((tc: { toolCallId: string; toolName: string; input: unknown }) => ({
               id: tc.toolCallId,
               name: tc.toolName,
-              args: tc.args as Record<string, unknown>,
+              args: tc.input as Record<string, unknown>,
             }))
           : [],
       };
@@ -57,19 +56,19 @@ export class MistralProvider {
         messages,
         tools: options?.tools,
         temperature: 0.1,
-        maxTokens: 8192,
+        maxOutputTokens: 8192,
       });
       const toolCalls = result.toolCalls;
       return {
         content: result.text,
         toolCalls: toolCalls
-          ? toolCalls.map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({
+          ? toolCalls.map((tc: { toolCallId: string; toolName: string; input: unknown }) => ({
               id: tc.toolCallId,
               name: tc.toolName,
-              args: tc.args as Record<string, unknown>,
+              args: tc.input as Record<string, unknown>,
             }))
           : [],
-        usage: result.usage,
+        usage: { totalTokens: result.usage.totalTokens ?? 0 },
       };
     }
   }
