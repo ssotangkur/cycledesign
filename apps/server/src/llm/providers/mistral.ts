@@ -5,6 +5,7 @@ export interface LLMResponse {
   content: string;
   toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
   usage?: { totalTokens: number };
+  stream?: AsyncIterable<string>;
 }
 
 export class MistralProvider {
@@ -41,6 +42,7 @@ export class MistralProvider {
       });
       const toolCalls = await result.toolCalls;
       return {
+        stream: result.textStream,
         content: '',
         toolCalls: toolCalls
           ? toolCalls.map((tc: { toolCallId: string; toolName: string; input: unknown }) => ({

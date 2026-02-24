@@ -427,11 +427,14 @@ export class WebSocketHandler {
           }
 
           for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i] as { toolCallId?: string; id?: string; toolName?: string; name?: string };
             const resultContent = JSON.stringify({ success: true, output: 'Tool executed' });
             newMessages.push({
               role: 'tool',
               content: resultContent,
-            });
+              toolCallId: tc.toolCallId ?? tc.id ?? `tool-${i}`,
+              toolName: tc.toolName ?? tc.name ?? 'unknown',
+            } as any);
           }
 
           currentMessages = [...currentMessages, ...newMessages];
