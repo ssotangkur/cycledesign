@@ -33,9 +33,21 @@ export class MistralProvider {
     const model = this.client(this.model);
 
     if (options?.stream) {
+      // Extract system message if present
+      const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
+      const userMessages = messages.filter(m => m.role !== 'system');
+      
+      // Extract text from system message content (handle both string and array formats)
+      const systemText = typeof systemMessage?.content === 'string' 
+        ? systemMessage.content 
+        : Array.isArray(systemMessage?.content) 
+          ? systemMessage.content.map(c => c.text).join('') 
+          : undefined;
+      
       const result = await streamText({
         model,
-        messages,
+        messages: userMessages,
+        system: systemText,
         tools: options.tools,
         temperature: 0.1,
         maxOutputTokens: 8192,
@@ -53,9 +65,21 @@ export class MistralProvider {
           : [],
       };
     } else {
+      // Extract system message if present
+      const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
+      const userMessages = messages.filter(m => m.role !== 'system');
+      
+      // Extract text from system message content (handle both string and array formats)
+      const systemText = typeof systemMessage?.content === 'string' 
+        ? systemMessage.content 
+        : Array.isArray(systemMessage?.content) 
+          ? systemMessage.content.map(c => c.text).join('') 
+          : undefined;
+      
       const result = await generateText({
         model,
-        messages,
+        messages: userMessages,
+        system: systemText,
         tools: options?.tools,
         temperature: 0.1,
         maxOutputTokens: 8192,

@@ -59,9 +59,22 @@ export class QwenProvider {
 
           if (options?.stream) {
             console.log('[LLM] Creating stream with', messages.length, 'messages');
+            
+            // Extract system message if present
+            const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
+            const userMessages = messages.filter(m => m.role !== 'system');
+            
+            // Extract text from system message content (handle both string and array formats)
+            const systemText = typeof systemMessage?.content === 'string' 
+              ? systemMessage.content 
+              : Array.isArray(systemMessage?.content) 
+                ? systemMessage.content.map(c => c.text).join('') 
+                : undefined;
+            
             const result = await streamText({
               model,
-              messages,
+              messages: userMessages,
+              system: systemText,
               tools: options.tools,
               temperature: 0.1,
               maxTokens: 8192,
@@ -74,9 +87,22 @@ export class QwenProvider {
             };
           } else {
             console.log('[LLM] Generating text with', messages.length, 'messages');
+            
+            // Extract system message if present
+            const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
+            const userMessages = messages.filter(m => m.role !== 'system');
+            
+            // Extract text from system message content (handle both string and array formats)
+            const systemText = typeof systemMessage?.content === 'string' 
+              ? systemMessage.content 
+              : Array.isArray(systemMessage?.content) 
+                ? systemMessage.content.map(c => c.text).join('') 
+                : undefined;
+            
             const result = await generateText({
               model,
-              messages,
+              messages: userMessages,
+              system: systemText,
               tools: options?.tools,
               temperature: 0.1,
               maxTokens: 8192,
