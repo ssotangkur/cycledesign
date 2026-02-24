@@ -1,5 +1,7 @@
 # Phase 3: Prompt-to-UI Rendering
 
+> **⚠️ Update (2026-02-24):** CycleDesign has migrated from PM2 to npm scripts for development. See [Development Commands](#development-commands) below for the new commands.
+
 **This document extends `docs/TECHNICAL_DESIGN.md` with Phase 3 implementation details.**
 
 **Relationship to Other Docs:**
@@ -15,13 +17,36 @@
 
 ---
 
+## Development Commands
+
+### Current (npm scripts - as of 2026-02-24)
+
+```bash
+npm run dev              # Start all services with logging
+npm run dev:kill         # Kill processes on ports 3000/3001/3002
+npm run dev:server       # Start backend only
+npm run dev:web          # Start frontend only
+```
+
+Log files: `tmp/server.log`, `tmp/web.log`
+
+### Previous (PM2 - deprecated)
+
+```bash
+pm2 start ecosystem.config.js
+pm2 logs
+pm2 restart server
+```
+
+---
+
 ## Current Status (Updated: 2026-02-22)
 
 ### ✅ Completed
 
-**Infrastructure:**
-- PM2 process management for all 3 services (`server`, `web`, `preview`)
-- Ecosystem config at `ecosystem.config.js` with proper Windows npm-cli.js paths
+**Infrastructure (old approach - see note at top):**
+- ~~PM2 process management for all 3 services (`server`, `web`, `preview`)~~
+- ~~Ecosystem config at `ecosystem.config.js` with proper Windows npm-cli.js paths~~
 - All services run independently via PM2 (no nested spawning)
 - Preview server lifecycle managed via API endpoints (`/api/preview/start`, `/stop`, `/status`, `/reset`)
 - Backend no longer auto-starts preview on bootstrap (PM2 manages it)
@@ -55,9 +80,9 @@
 - Status broadcasting infrastructure ready
 
 **Development Workflow:**
-- `pm2 start ecosystem.config.js` - Start all services
-- `pm2 logs` - View live logs from all services
-- `pm2 restart <name>` - Restart individual service
+- `npm run dev` - Start all services with logging
+- `npm run dev:kill` - Kill ports before starting
+- Log files: `tmp/server.log`, `tmp/web.log`
 - Services: `server` (3001), `web` (3000), `preview` (3002)
 
 ### 🔄 In Progress
@@ -1038,21 +1063,23 @@ window.addEventListener('message', (event) => {
 
 ---
 
-### PM2 Process Management
+### ⚠️ PM2 Process Management (Deprecated - use npm scripts instead)
 
-- [x] **PM2.1** Ecosystem configuration
+> **Note:** As of 2026-02-24, CycleDesign uses npm scripts instead of PM2. See "Development Commands" at the top of this document.
+
+- [x] **PM2.1** Ecosystem configuration (deprecated)
   - [x] ecosystem.config.js with all 3 services
   - [x] Windows-compatible npm-cli.js paths
   - [x] Proper log file locations
   - [x] Watch mode for server and web
 
-- [x] **PM2.2** Service management
+- [x] **PM2.2** Service management (deprecated)
   - [x] server (port 3001) - backend API + WebSocket
   - [x] web (port 3000) - frontend UI
   - [x] preview (port 3002) - Vite preview server
   - [x] Independent lifecycle (no nested spawning)
 
-- [x] **PM2.3** Logging
+- [x] **PM2.3** Logging (deprecated)
   - [x] Separate log files per service
   - [x] pm2 logs command for live viewing
   - [ ] SSE log streaming to frontend
@@ -1367,7 +1394,11 @@ window.addEventListener('message', (event) => {
 
 ---
 
-## PM2 Commands Reference
+## ⚠️ PM2 Commands Reference (Deprecated)
+
+> **Use npm scripts instead.** See "Development Commands" at the top of this document.
+
+### Old PM2 Commands (deprecated)
 
 **Start all services:**
 ```bash

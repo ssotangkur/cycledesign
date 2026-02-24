@@ -47,8 +47,8 @@ export async function executeRenameFile(args: RenameFileArgs): Promise<{ success
 
 export const renameFileTool = tool({
   description: 'Rename an existing code file',
-  parameters: renameFileSchema,
-  execute: async (args: RenameFileArgs) => {
-    return executeRenameFile(args);
+  inputSchema: renameFileSchema,
+  execute: async ({ oldFilename, newFilename }) => {
+    return executeRenameFile({ oldFilename, newFilename });
   },
 });

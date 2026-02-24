@@ -2,12 +2,20 @@
 
 ## Development Workflow
 
-1. **Start servers**: Use `/dev-server` skill
-2. **Make changes** to code
+1. **Start servers**: Run `npm run dev`
+2. **Make changes** to code (server auto-restarts via nodemon)
 3. **Run validations**: Execute `npm run validate` to run ESLint and Knip
 4. **Test with @chrome-devtools** or `@ui-tester` to verify UI works
 5. **Fix issues** based on feedback
 6. **Repeat** until verified
+
+### Dev Server Commands
+
+- `npm run dev` - Start all servers with logging
+- `npm run dev:kill` - Kill processes on ports 3000/3001/3002
+- `npm run dev:server` - Start server only
+- `npm run dev:web` - Start web only
+- Logs: `tmp/server.log` and `tmp/web.log`
 
 ---
 

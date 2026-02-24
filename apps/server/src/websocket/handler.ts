@@ -1,6 +1,10 @@
 import { WebSocket } from 'ws';
 import { statusBroadcaster } from './status-broadcaster';
 import { executeToolCalls } from '../llm/tool-executor';
+import { QwenProvider } from '../llm/providers/qwen';
+import { allTools } from '../llm/tools';
+import { SYSTEM_PROMPT } from '../llm/system-prompt';
+import type { CoreMessage } from 'ai';
 
 interface WebSocketMessage {
   type: string;
@@ -8,6 +12,8 @@ interface WebSocketMessage {
   content?: string;
   timestamp?: number;
 }
+
+const llmProvider = new QwenProvider();
 
 export function handleWebSocketConnection(ws: WebSocket) {
   statusBroadcaster.addClient(ws);
@@ -43,6 +49,7 @@ async function handleGenerationRequest(
   message: WebSocketMessage
 ) {
   const messageId = message.id!;
+  const userPrompt = message.content!;
   
   ws.send(JSON.stringify({
     type: 'ack',
@@ -51,22 +58,68 @@ async function handleGenerationRequest(
   }));
   
   try {
-    const mockToolCalls = [
-      {
-        id: `call_${Date.now()}`,
-        type: 'function' as const,
-        function: {
-          name: 'create_file',
-          arguments: JSON.stringify({
-            filename: 'example.tsx',
-            location: 'designs',
-            code: 'export default function Example() { return null; }',
-          }),
-        },
-      },
+    const messages: CoreMessage[] = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
     ];
     
-    await executeToolCalls(mockToolCalls, messageId);
+    const response = await llmProvider.complete(messages, { tools: allTools });
+    let toolCalls = response.toolCalls;
+    let iterations = 0;
+    const maxIterations = 10;
+    
+    while (iterations < maxIterations) {
+      iterations++;
+      
+      if (!toolCalls || toolCalls.length === 0) {
+        console.log('[HANDLER] No tool calls returned, using fallback validation');
+        break;
+      }
+      
+      const formattedToolCalls = toolCalls.map((tc) => ({
+        id: tc.id ?? `call_${Date.now()}_${iterations}`,
+        type: 'function' as const,
+        function: {
+          name: tc.name,
+          arguments: JSON.stringify(tc.args),
+        },
+      }));
+      
+      await executeToolCalls(formattedToolCalls, messageId);
+      
+      const submitCall = toolCalls.find((tc) => tc.name === 'submit_work');
+      if (submitCall) {
+        console.log('[HANDLER] submit_work called, ending loop');
+        break;
+      }
+      
+      ws.send(JSON.stringify({
+        type: 'content',
+        messageId,
+        content: response.content || '',
+        timestamp: Date.now(),
+      }));
+      
+      messages.push({ role: 'assistant', content: response.content || '' });
+      for (const tc of toolCalls) {
+        messages.push({
+          role: 'tool',
+          content: [{ type: 'tool-result', toolCallId: tc.id, toolName: tc.name, result: JSON.stringify(tc.args) }],
+        });
+      }
+      
+      const nextResponse = await llmProvider.complete(messages, { tools: allTools });
+      toolCalls = nextResponse.toolCalls;
+    }
+    
+    if (!toolCalls || toolCalls.length === 0) {
+      ws.send(JSON.stringify({
+        type: 'content',
+        messageId,
+        content: response.content || 'No code was generated. Please try again.',
+        timestamp: Date.now(),
+      }));
+    }
     
     ws.send(JSON.stringify({
       type: 'done',

@@ -1,10 +1,9 @@
 import { Router } from 'express';
-import { QwenProvider } from '../llm/providers/qwen';
 import { addMessage, generateMessageId } from '../sessions/storage';
 import { CoreMessage } from 'ai';
+import { getLLMProvider } from '../llm/provider-factory';
 
 export const completionRouter = Router();
-const qwenProvider = new QwenProvider();
 
 completionRouter.post('/', async (req, res): Promise<void> => {
   try {
@@ -19,7 +18,7 @@ completionRouter.post('/', async (req, res): Promise<void> => {
     const timeoutId = setTimeout(() => controller.abort(), 120000);
     
     try {
-      const result = await qwenProvider.complete(messages as CoreMessage[], {
+      const result = await getLLMProvider().complete(messages as CoreMessage[], {
         stream: false,
         maxRetries: 3,
       });
@@ -32,11 +31,11 @@ completionRouter.post('/', async (req, res): Promise<void> => {
           role: 'assistant' as const,
           content: result.content || null,
           timestamp: Date.now(),
-          toolCalls: result.toolCalls ? (await result.toolCalls).map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({
-            id: tc.toolCallId,
+          toolCalls: result.toolCalls ? result.toolCalls.map((tc: { id: string; name: string; args: Record<string, unknown> }) => ({
+            id: tc.id,
             type: 'function' as const,
             function: {
-              name: tc.toolName,
+              name: tc.name,
               arguments: JSON.stringify(tc.args),
             },
           })) : undefined,
@@ -99,10 +98,10 @@ completionRouter.post('/stream', async (req, res): Promise<void> => {
     let fullContent = '';
     
     try {
-      const result = await qwenProvider.complete(messages as CoreMessage[], {
+      const result = await getLLMProvider().complete(messages as CoreMessage[], {
         stream: true,
         maxRetries: 3,
-      });
+      }) as { stream: AsyncIterable<string> };
       
       if (!result.stream) {
         throw new Error('Stream not available');

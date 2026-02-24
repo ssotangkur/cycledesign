@@ -1,16 +1,22 @@
-import { generateText, streamText, CoreMessage, ToolSet } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
+import { generateText, streamText, type CoreMessage, type ToolSet } from 'ai';
+import { createQwen } from 'qwen-ai-provider-v5';
 import { QwenAuth } from '../qwen-auth';
 import { requestQueue } from '../request-queue';
 import { RateLimitError, AuthError } from '../errors';
 
 const qwenAuth = new QwenAuth();
 
-export class QwenProvider {
-  private model: ReturnType<ReturnType<typeof createOpenAI>> | null = null;
-  private modelPromise: Promise<ReturnType<ReturnType<typeof createOpenAI>>> | null = null;
+export interface LLMResponse {
+  content: string;
+  toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+}
 
-  private async getModel(): Promise<ReturnType<ReturnType<typeof createOpenAI>>> {
+export class QwenProvider {
+  private model: ReturnType<ReturnType<typeof createQwen>> | null = null;
+  private modelPromise: Promise<ReturnType<ReturnType<typeof createQwen>>> | null = null;
+
+  private async getModel(): Promise<ReturnType<ReturnType<typeof createQwen>>> {
     if (this.model) return this.model;
 
     if (this.modelPromise) return this.modelPromise;
@@ -23,12 +29,11 @@ export class QwenProvider {
         return this.getModel();
       }
       
-      const openai = createOpenAI({
+      const qwen = createQwen({
         apiKey: token,
-        baseURL: process.env.QWEN_BASE_URL || 'https://portal.qwen.ai/v1',
       });
       
-      this.model = openai('coder-model');
+      this.model = qwen('qwen-coder-model');
       this.modelPromise = null;
       return this.model;
     })();
@@ -62,9 +67,10 @@ export class QwenProvider {
               maxTokens: 8192,
             });
             console.log('[LLM] Stream created successfully');
+            const toolCalls = await result.toolCalls;
             return { 
               stream: result.textStream,
-              toolCalls: result.toolCalls,
+              toolCalls: toolCalls ? toolCalls.map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({ id: tc.toolCallId, name: tc.toolName, args: tc.args as Record<string, unknown> })) : [],
             };
           } else {
             console.log('[LLM] Generating text with', messages.length, 'messages');
@@ -76,9 +82,10 @@ export class QwenProvider {
               maxTokens: 8192,
             });
             console.log('[LLM] Generation complete, tokens used:', result.usage);
+            const toolCalls = result.toolCalls;
             return {
               content: result.text,
-              toolCalls: result.toolCalls,
+              toolCalls: toolCalls ? toolCalls.map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({ id: tc.toolCallId, name: tc.toolName, args: tc.args as Record<string, unknown> })) : [],
               usage: result.usage,
             };
           }

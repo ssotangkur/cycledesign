@@ -51,8 +51,8 @@ export async function executeCreateFile(args: CreateFileArgs, messageId?: string
 
 export const createFileTool = tool({
   description: 'Create a new code file with the provided code',
-  parameters: createFileSchema,
-  execute: async (args: CreateFileArgs) => {
-    return executeCreateFile(args);
+  inputSchema: createFileSchema,
+  execute: async ({ filename, code }) => {
+    return executeCreateFile({ filename, code });
   },
 });

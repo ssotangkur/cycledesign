@@ -14,7 +14,7 @@ CycleDesign is a full-stack application that provides a chat-based interface for
 - **Live Preview** - Backend-managed Vite server renders generated code
 - **Validation Pipeline** - TypeScript compilation, ESLint, and Knip checks
 - **Session Management** - Create, switch, delete, rename conversations
-- **PM2 Process Management** - All services run independently via PM2
+- **Multi-Service Development** - Backend and frontend run independently with nodemon/vite HMR
 
 ## Prerequisites
 
@@ -68,38 +68,42 @@ Copy `.env.example` files if they exist, or create new ones from scratch.
 
 ## Running the Development Server
 
-### Start All Services (Recommended)
-
-CycleDesign uses PM2 for process management. All services run independently:
+### Start All Services
 
 ```bash
-pm2 start ecosystem.config.js
+npm run dev
 ```
 
-This starts:
-- **server** (port 3001) - Backend API + WebSocket
-- **web** (port 3000) - Frontend UI
-- **preview** (port 3002) - Vite preview server (backend-managed)
+This will:
+1. Kill any processes on ports 3000, 3001, 3002
+2. Start the backend server (port 3001) with nodemon
+3. Start the frontend (port 3000) with Vite HMR
+4. Log to `tmp/server.log` and `tmp/web.log`
 
-### Managing Services
+### Individual Commands
 
 ```bash
-pm2 status              # Check service status
-pm2 logs                # View live logs from all services
-pm2 logs server         # View backend logs only
-pm2 restart server      # Restart backend
-pm2 stop all            # Stop all services
-pm2 delete all          # Stop and remove from PM2 list
+npm run dev:kill      # Kill processes on ports 3000/3001/3002
+npm run dev:server     # Start backend only
+npm run dev:web       # Start frontend only
 ```
 
-### Development Mode
+### Log Files
 
-Services auto-reload on file changes (watch mode enabled for server and web).
+- Server: `tmp/server.log`
+- Web: `tmp/web.log`
 
-**Log file locations:**
-- Server: `apps/server/tmp/pm2-server-out.log`
-- Web: `apps/web/tmp/pm2-web-out.log`
-- Preview: `apps/preview/tmp/pm2-preview-out.log`
+View live logs:
+```bash
+tail -f tmp/server.log
+tail -f tmp/web.log
+```
+
+### Services
+
+- **Server** (port 3001) - Backend API + WebSocket
+- **Web** (port 3000) - Frontend UI with HMR
+- **Preview** (port 3002) - Vite preview server (backend-managed)
 
 ## First-Time OAuth Authorization
 
@@ -190,8 +194,7 @@ cycledesign/
 │   │   │   ├── components/     # UI components (Chat, Sessions, Preview)
 │   │   │   ├── hooks/          # Custom hooks (WebSocket, state management)
 │   │   │   └── theme/          # MUI theme configuration
-│   │   ├── tmp/                # PM2 log files
-│   │   └── package.json
+│   │   └── tmp/                # Log files
 │   │
 │   ├── server/                 # Node.js backend (Express + Vercel AI SDK)
 │   │   ├── src/
@@ -205,29 +208,27 @@ cycledesign/
 │   │   ├── resources/          # Templates and prompts (externalized)
 │   │   │   ├── prompts/        # system-prompt.md
 │   │   │   └── templates/      # app.tsx bootstrap template
-│   │   ├── tmp/                # PM2 log files
-│   │   └── package.json
+│   │   └── tmp/                # Log files
 │   │
 │   └── preview/                # Preview Vite instance (LLM-managed dependencies)
 │       ├── src/
 │       │   └── main.tsx        # Dynamic design loader
-│       ├── tmp/                # PM2 log files
-│       └── package.json
+│       └── tmp/                # Log files
 │
 ├── workspace/                  # LLM-generated design code (gitignored)
 │   └── designs/
 │       ├── app.tsx             # Root component (modified by LLM)
 │       └── *.tsx               # Additional components
 │
-├── .cycledesign/               # App data (sessions, index database)
+├── .cycledesign/               # App data (sessions, provider config)
 │   └── sessions/
 │       └── {session-id}/
 │           ├── meta.json
 │           └── messages.jsonl
 │
-├── ecosystem.config.js         # PM2 process configuration
-├── docs/                       # Documentation (Phase3.md, TOOL_CALLING.md)
-├── package.json                # Root workspace config
+├── docs/                       # Documentation
+├── package.json                # Root workspace config (npm run dev)
+├── tmp/                       # Log files (server.log, web.log)
 └── README.md
 ```
 
@@ -369,7 +370,7 @@ Sessions are stored in `.cycledesign/sessions/`. If data seems lost:
 - Node.js + Express
 - Vercel AI SDK (LLM integration)
 - TypeScript
-- PM2 (process management)
+- nodemon (auto-restart on file changes)
 - WebSocket server
 - OAuth Device Flow (RFC 8628)
 
@@ -382,8 +383,9 @@ Sessions are stored in `.cycledesign/sessions/`. If data seems lost:
 - Qwen via OAuth (coder-model)
 
 **Development:**
-- PM2 for multi-process management
+- npm scripts (npm run dev)
 - tsx for TypeScript execution
+- nodemon for server auto-restart
 - Chrome DevTools MCP for testing
 
 

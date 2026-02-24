@@ -1,0 +1,11 @@
+{
+  "watch": ["src"],
+  "ext": "ts,js,json",
+  "ignore": ["node_modules", "workspace"],
+  "exec": "npm run dev:start",
+  "env": {
+    "PORT": "3001"
+  },
+  "delay": "1000",
+  "restartable": "rs"
+}

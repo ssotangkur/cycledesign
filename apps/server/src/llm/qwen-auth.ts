@@ -21,10 +21,10 @@ interface QwenOAuthConfig {
 }
 
 const QWEN_OAUTH_CONFIG: QwenOAuthConfig = {
-  clientId: process.env.QWEN_OAUTH_CLIENT_ID || 'qwen-code-cli',
-  deviceCodeEndpoint: process.env.QWEN_OAUTH_DEVICE_ENDPOINT || 'https://auth.qwen.ai/oauth/device/code',
-  tokenEndpoint: process.env.QWEN_OAUTH_TOKEN_ENDPOINT || 'https://auth.qwen.ai/oauth/token',
-  scope: 'openid qwen_code',
+  clientId: process.env.QWEN_OAUTH_CLIENT_ID || 'f0304373b74a44d2b584a3fb70ca9e56',
+  deviceCodeEndpoint: process.env.QWEN_OAUTH_DEVICE_ENDPOINT || 'https://chat.qwen.ai/api/v1/oauth2/device/code',
+  tokenEndpoint: process.env.QWEN_OAUTH_TOKEN_ENDPOINT || 'https://chat.qwen.ai/api/v1/oauth2/token',
+  scope: 'openid profile email model.completion',
   grantType: 'urn:ietf:params:oauth:grant-type:device_code',
 };
 

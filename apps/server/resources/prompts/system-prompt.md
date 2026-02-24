@@ -167,3 +167,16 @@ Assistant (tool calls):
 - Use TypeScript types for all props and state
 - Do NOT add id props to components (system injects them)
 - Use kebab-case filenames only
+
+## Tool Calling Requirements (CRITICAL)
+
+When you call a tool, you MUST provide ALL required arguments. NEVER call a tool without arguments.
+
+For example:
+- create_file requires: filename AND code
+- edit_file requires: filename AND patch
+- add_dependency requires: packageName AND version
+- submit_work requires: {} (empty object)
+
+If you don't have the required information, use ask_user to ask for it first.
+DO NOT call a tool without all required arguments - the system will reject it.
