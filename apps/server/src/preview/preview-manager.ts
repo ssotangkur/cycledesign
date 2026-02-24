@@ -1,12 +1,9 @@
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { existsSync, copyFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { resolve, join } from 'path';
-import { promisify } from 'util';
 import killPort from 'kill-port';
 import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types';
-
-const execAsync = promisify(exec);
 
 // Paths are relative to the server root (apps/server)
 const SERVER_ROOT = resolve(__dirname, '../..');
@@ -16,7 +13,8 @@ const PREVIEW_DIR = resolve(SERVER_ROOT, '../preview');
 const TEMPLATE_PATH = resolve(SERVER_ROOT, 'resources/templates/app.tsx');
 const DEFAULT_PORT = 3002;
 const MAX_LOG_BUFFER = 100;
-const PM2_APP_NAME = 'preview';
+
+let previewProcess: ReturnType<typeof spawn> | null = null;
 
 export class PreviewManager extends EventEmitter {
   private state: ServerState = 'STOPPED';
@@ -61,33 +59,50 @@ export class PreviewManager extends EventEmitter {
     this.port = targetPort;
 
     try {
-      console.log('[PREVIEW] Starting Vite via PM2 on port', targetPort);
+      console.log('[PREVIEW] Starting Vite on port', targetPort);
       
-      // Stop existing instance if any (don't delete - keep in PM2 list)
-      try {
-        await execAsync(`pm2 stop ${PM2_APP_NAME}`);
-      } catch {
-        // Ignore if not running
-      }
-
-      // Start with PM2 (reuse existing entry)
-      // Use Windows-compatible set command for environment variables
-      const env = { PORT: targetPort.toString(), IN_PREVIEW_SERVER: 'true' };
-      const envStr = Object.entries(env).map(([k, v]) => `set ${k}=${v}`).join('&& ');
+      // Start Vite directly with spawn
+      const env = { ...process.env, PORT: targetPort.toString(), IN_PREVIEW_SERVER: 'true' };
       
-      await execAsync(
-        `cd /d "${PREVIEW_DIR}" && ${envStr}&& pm2 restart ${PM2_APP_NAME} --update-env`,
-        { shell: 'cmd.exe' }
-      );
+      previewProcess = spawn('npx', ['vite'], {
+        cwd: PREVIEW_DIR,
+        env,
+        shell: true,
+      });
 
-      this.startTime = Date.now();
-      this.addLog('stdout', `Started preview server via PM2 on port ${targetPort}`);
+      previewProcess.stdout?.on('data', (data: Buffer) => {
+        const line = data.toString();
+        this.addLog('stdout', line.trim());
+        if (line.includes('ready in')) {
+          this.startTime = Date.now();
+          this.state = 'RUNNING';
+          this.emit('stateChange', this.state);
+          this.emit('ready', { port: targetPort });
+        }
+      });
+
+      previewProcess.stderr?.on('data', (data: Buffer) => {
+        this.addLog('stderr', data.toString().trim());
+      });
+
+      previewProcess.on('error', (error: Error) => {
+        this.state = 'ERROR';
+        this.emit('stateChange', this.state);
+        this.emit('error', error);
+      });
+
+      previewProcess.on('exit', (code: number | null) => {
+        this.state = 'STOPPED';
+        this.port = undefined;
+        this.startTime = undefined;
+        this.emit('stateChange', this.state);
+        this.emit('stopped');
+        this.addLog('stdout', `Preview server exited with code ${code}`);
+      });
+
+      this.addLog('stdout', `Started preview server on port ${targetPort}`);
 
       await this.waitForReady();
-
-      this.state = 'RUNNING';
-      this.emit('stateChange', this.state);
-      this.emit('ready', { port: targetPort });
     } catch (error) {
       this.state = 'ERROR';
       this.emit('stateChange', this.state);
@@ -103,15 +118,14 @@ export class PreviewManager extends EventEmitter {
 
     this.emit('stopping');
 
-    try {
-      await execAsync(`pm2 stop ${PM2_APP_NAME}`, { shell: 'cmd.exe' });
-      
-      this.addLog('stdout', 'Preview server stopped via PM2');
-    } catch (error) {
-      this.addLog('stderr', `Failed to stop via PM2: ${(error as Error).message}`);
+    // Kill the preview process if running
+    if (previewProcess) {
+      previewProcess.kill();
+      previewProcess = null;
+      this.addLog('stdout', 'Preview server stopped');
     }
 
-    // Kill any remaining process on the port after PM2 stops
+    // Kill any remaining process on the port
     if (this.port) {
       await this.killPortOnEndpoint(this.port);
     }
@@ -150,18 +164,7 @@ export class PreviewManager extends EventEmitter {
   }
 
   async getLogs(): Promise<LogEntry[]> {
-    try {
-      const { stdout } = await execAsync(`pm2 logs ${PM2_APP_NAME} --lines 100 --nostream`, { shell: 'cmd.exe' });
-      const lines = stdout.split('\n').filter(Boolean);
-      
-      return lines.map((line) => ({
-        type: 'stdout',
-        message: line,
-        timestamp: Date.now(),
-      }));
-    } catch {
-      return [...this.logs];
-    }
+    return [...this.logs];
   }
 
   clearLogs(): void {
