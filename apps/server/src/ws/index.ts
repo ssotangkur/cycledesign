@@ -8,8 +8,8 @@ import { SYSTEM_PROMPT } from '../llm/system-prompt';
 import { executeToolCalls } from '../llm/tool-executor';
 import { allTools } from '../llm/tools';
 import { CoreMessage } from 'ai';
-import { getLLMProvider } from '../llm/provider-factory';
-import { getProviderConfig } from '../routes/providers';
+import { getLLMProvider } from '../llm/providers/provider-factory';
+import { getProviderConfig } from '../trpc/routers/providers';
 
 interface SessionConnection {
   ws: WebSocket;
@@ -50,7 +50,7 @@ export class WebSocketHandler {
 
     server.on('upgrade', (request: IncomingMessage, socket: import('net').Socket, head: Buffer) => {
       const parsedUrl = parseUrl(request.url || '', true);
-      
+
       if (parsedUrl.pathname !== '/ws') {
         return;
       }
@@ -145,7 +145,7 @@ export class WebSocketHandler {
 
     try {
       const messages = await getMessages(sessionId);
-      
+
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: 'history',
@@ -335,15 +335,15 @@ export class WebSocketHandler {
         const providerConfig = getProviderConfig();
         console.log('[LLM] Calling', providerConfig.provider, 'provider with', currentMessages.length, 'messages');
         console.log('[LLM] Tools available:', Object.keys(allTools).join(', '));
-        
+
         const result = await getLLMProvider().complete(currentMessages, {
           stream: true,
           tools: allTools,
-        }) as unknown as { 
-          stream: AsyncIterable<string>; 
+        }) as unknown as {
+          stream: AsyncIterable<string>;
           toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>;
         };
-        
+
         console.log('[LLM] Provider.complete returned, result type:', typeof result);
 
         if (!result.stream) {
@@ -372,20 +372,20 @@ export class WebSocketHandler {
 
         console.log('[WS] Waiting for tool calls from LLM for session:', sessionId);
         const toolCalls = await result.toolCalls;
-        
+
         console.log('[WS] Raw tool calls from LLM:', JSON.stringify(toolCalls, null, 2));
-        
+
         const lastUserMsg = messages.filter(m => m.role === 'user').pop();
         const messageId = lastUserMsg?.id || 'unknown';
-        
-        const toolCallsMissingArgs = !toolCalls || toolCalls.length === 0 || 
+
+        const toolCallsMissingArgs = !toolCalls || toolCalls.length === 0 ||
           toolCalls.some((tc: unknown) => {
             const t = tc as { args?: unknown };
             const args = t.args;
-            return !args || (typeof args === 'object' && Object.keys(args).length === 0) || 
-                   (typeof args === 'string' && (args === '' || args === '{}'));
+            return !args || (typeof args === 'object' && Object.keys(args).length === 0) ||
+              (typeof args === 'string' && (args === '' || args === '{}'));
           });
-        
+
         if (toolCallsMissingArgs) {
           console.log('[WS] Tool calls missing arguments or no tool calls - ending loop');
           if (toolCalls && toolCalls.length > 0) {
@@ -399,14 +399,14 @@ export class WebSocketHandler {
           }
           break;
         }
-        
+
         if (toolCalls && toolCalls.length > 0) {
           console.log('[WS] Detected', toolCalls.length, 'tool calls for session:', sessionId);
           toolCalls.forEach((tc: unknown, idx: number) => {
             console.log('[TOOL] Raw tool call', idx + 1, ':', JSON.stringify(tc));
           });
           hasToolCalls = true;
-          
+
           const toolCallArray = toolCalls.map(tc => ({
             id: tc.toolCallId ?? tc.id,
             type: 'function' as const,
@@ -415,7 +415,7 @@ export class WebSocketHandler {
               arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}),
             },
           }));
-          
+
           console.log('[TOOL] Executing', toolCallArray.length, 'tool calls for message:', messageId);
           await executeToolCalls(toolCallArray, messageId);
           console.log('[TOOL] All tool calls completed for message:', messageId);
@@ -447,7 +447,7 @@ export class WebSocketHandler {
         } else {
           console.log('[WS] No tool calls detected for session:', sessionId);
           hasMoreToolCalls = false;
-          
+
           const assistantMsg: StoredMessage = {
             id: generateMessageId(),
             role: 'assistant',
@@ -472,20 +472,20 @@ export class WebSocketHandler {
       // After multi-turn loop completes
       if (hasToolCalls) {
         // Check if submit_work was called by looking at the messages
-        const submitWorkCalled = currentMessages.some(msg => 
-          msg.role === 'assistant' && 
-          typeof msg.content === 'string' && 
+        const submitWorkCalled = currentMessages.some(msg =>
+          msg.role === 'assistant' &&
+          typeof msg.content === 'string' &&
           msg.content.includes('[Design generated]')
         );
-        
+
         // If files were created but submit_work wasn't called, trigger validation automatically
         if (!submitWorkCalled) {
           console.log('[WS] submit_work not called by LLM - triggering validation automatically');
-          
+
           // Get the messageId from the last user message
           const lastUserMsg = messages.filter(m => m.role === 'user').pop();
           const autoMessageId = lastUserMsg?.id || generateMessageId();
-          
+
           // Trigger validation pipeline
           try {
             const { handleValidationAndPreview } = await import('../llm/tool-executor.js');
@@ -503,7 +503,7 @@ export class WebSocketHandler {
       console.error('[WS] Error message:', errorMsg);
       console.error('[WS] Error stack:', errorStack);
       console.error('[WS] Session:', sessionId);
-      
+
       if (ws.readyState === WebSocket.OPEN) {
         console.log('[WS] Sending error to client');
         ws.send(JSON.stringify({
@@ -521,11 +521,11 @@ export class WebSocketHandler {
 
   private onClose(connection: SessionConnection): void {
     const { sessionId, ws } = connection;
-    
+
     console.log('[WS] Cleaning up connection for session:', sessionId);
     const connections = this.connections.get(sessionId) || [];
     const filtered = connections.filter(conn => conn.ws !== ws);
-    
+
     if (filtered.length === 0) {
       console.log('[WS] Last connection closed - removing session:', sessionId);
       this.connections.delete(sessionId);
@@ -537,7 +537,7 @@ export class WebSocketHandler {
 
   public broadcastToSession(sessionId: string, message: ServerMessage): void {
     const connections = this.connections.get(sessionId) || [];
-    
+
     connections.forEach(conn => {
       if (conn.ws.readyState === WebSocket.OPEN) {
         conn.ws.send(JSON.stringify(message));
@@ -547,11 +547,11 @@ export class WebSocketHandler {
 
   public closeSessionConnections(sessionId: string): void {
     const connections = this.connections.get(sessionId) || [];
-    
+
     connections.forEach(conn => {
       conn.ws.close(4002, 'Session deleted');
     });
-    
+
     this.connections.delete(sessionId);
   }
 

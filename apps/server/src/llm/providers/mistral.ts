@@ -1,22 +1,54 @@
 import { generateText, streamText, type ToolSet, type ModelMessage } from 'ai';
 import { createMistral } from '@ai-sdk/mistral';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { IProvider, IProviderConfig, LLMResponse } from '../types';
 
-export interface LLMResponse {
-  content: string;
-  toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
-  usage?: { totalTokens: number };
-  stream?: AsyncIterable<string>;
+const CONFIG_DIR = join(process.cwd(), '.cycledesign');
+const MISTRAL_CONFIG_FILE = join(CONFIG_DIR, 'mistral.json');
+const MISTRAL_KEY_FILE = join(CONFIG_DIR, 'mistral-api-key');
+
+interface MistralConfig {
+  apiKey?: string;
+  model?: string;
 }
 
-export class MistralProvider {
+function ensureConfigDir(): void {
+  if (!existsSync(CONFIG_DIR)) {
+    mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+}
+
+function loadConfig(): MistralConfig {
+  try {
+    // First try new config file
+    if (existsSync(MISTRAL_CONFIG_FILE)) {
+      const data = readFileSync(MISTRAL_CONFIG_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+    // Fallback to legacy key file for backwards compatibility
+    if (existsSync(MISTRAL_KEY_FILE)) {
+      const apiKey = readFileSync(MISTRAL_KEY_FILE, 'utf-8').trim();
+      if (apiKey) {
+        return { apiKey };
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load Mistral config:', error);
+  }
+  return {};
+}
+
+export class MistralProvider implements IProvider {
+  readonly name = 'mistral' as const;
   private apiKey: string;
   private model: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private client: any;
+  private client: MistralProvider;
 
   constructor(apiKey?: string, model?: string) {
-    this.apiKey = apiKey || process.env.MISTRAL_API_KEY || '';
-    this.model = model || process.env.MISTRAL_MODEL || 'devstral-latest';
+    const config = loadConfig();
+    this.apiKey = apiKey || config.apiKey || '';
+    this.model = model || config.model || 'codestral-2508';
     if (!this.apiKey) {
       throw new Error('MISTRAL_API_KEY is not set');
     }
@@ -36,14 +68,14 @@ export class MistralProvider {
       // Extract system message if present
       const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
       const userMessages = messages.filter(m => m.role !== 'system');
-      
+
       // Extract text from system message content (handle both string and array formats)
-      const systemText = typeof systemMessage?.content === 'string' 
-        ? systemMessage.content 
-        : Array.isArray(systemMessage?.content) 
-          ? systemMessage.content.map(c => c.text).join('') 
+      const systemText = typeof systemMessage?.content === 'string'
+        ? systemMessage.content
+        : Array.isArray(systemMessage?.content)
+          ? systemMessage.content.map(c => c.text).join('')
           : undefined;
-      
+
       const result = await streamText({
         model,
         messages: userMessages,
@@ -58,24 +90,24 @@ export class MistralProvider {
         content: '',
         toolCalls: toolCalls
           ? toolCalls.map((tc: { toolCallId: string; toolName: string; input: unknown }) => ({
-              id: tc.toolCallId,
-              name: tc.toolName,
-              args: tc.input as Record<string, unknown>,
-            }))
+            id: tc.toolCallId,
+            name: tc.toolName,
+            args: tc.input as Record<string, unknown>,
+          }))
           : [],
       };
     } else {
       // Extract system message if present
       const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
       const userMessages = messages.filter(m => m.role !== 'system');
-      
+
       // Extract text from system message content (handle both string and array formats)
-      const systemText = typeof systemMessage?.content === 'string' 
-        ? systemMessage.content 
-        : Array.isArray(systemMessage?.content) 
-          ? systemMessage.content.map(c => c.text).join('') 
+      const systemText = typeof systemMessage?.content === 'string'
+        ? systemMessage.content
+        : Array.isArray(systemMessage?.content)
+          ? systemMessage.content.map(c => c.text).join('')
           : undefined;
-      
+
       const result = await generateText({
         model,
         messages: userMessages,
@@ -89,13 +121,59 @@ export class MistralProvider {
         content: result.text,
         toolCalls: toolCalls
           ? toolCalls.map((tc: { toolCallId: string; toolName: string; input: unknown }) => ({
-              id: tc.toolCallId,
-              name: tc.toolName,
-              args: tc.input as Record<string, unknown>,
-            }))
+            id: tc.toolCallId,
+            name: tc.toolName,
+            args: tc.input as Record<string, unknown>,
+          }))
           : [],
         usage: { totalTokens: result.usage.totalTokens ?? 0 },
       };
+    }
+  }
+
+  static saveConfig(config: IProviderConfig): void {
+    ensureConfigDir();
+    const currentConfig = loadConfig();
+    const newConfig: MistralConfig = {
+      ...currentConfig,
+      ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+      ...(config.model ? { model: config.model } : {}),
+    };
+    writeFileSync(MISTRAL_CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+  }
+
+  static name(): string {
+    return 'mistral';
+  }
+
+  static displayName(): string {
+    return 'Mistral (API Key)';
+  }
+
+  static requiresApiKey(): boolean {
+    return true;
+  }
+
+  static loadConfig(): IProviderConfig {
+    const config = loadConfig();
+    return { model: config.model || undefined, apiKey: config.apiKey || undefined };
+  }
+
+  static hasApiKey(): boolean {
+    const config = loadConfig();
+    return !!config.apiKey;
+  }
+
+  async listModels(): Promise<{ id: string; name: string }[]> {
+    if (!this.apiKey) {
+      return [];
+    }
+    try {
+      const models = await listMistralModels(this.apiKey);
+      return models.map((id) => ({ id, name: id }));
+    } catch (error) {
+      console.error('Failed to fetch Mistral models:', error);
+      return [];
     }
   }
 }
