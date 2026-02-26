@@ -1,18 +1,19 @@
-import { generateText, streamText, type CoreMessage, type ToolSet } from 'ai';
+import { generateText, streamText, type ToolSet, type ModelMessage } from 'ai';
 import { createQwen } from 'qwen-ai-provider-v5';
 import { QwenAuth } from '../qwen-auth';
 import { requestQueue } from '../request-queue';
 import { RateLimitError, AuthError } from '../errors';
+import { IProvider, IProviderConfig, LLMResponse } from '../types';
 
 const qwenAuth = new QwenAuth();
 
-export interface LLMResponse {
-  content: string;
-  toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
-}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const CONFIG_DIR = '.cycledesign';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const CONFIG_FILE = 'qwen-config.json';
 
-export class QwenProvider {
+export class QwenProvider implements IProvider {
+  readonly name = 'qwen' as const;
   private model: ReturnType<ReturnType<typeof createQwen>> | null = null;
   private modelPromise: Promise<ReturnType<ReturnType<typeof createQwen>>> | null = null;
 
@@ -23,16 +24,16 @@ export class QwenProvider {
 
     this.modelPromise = (async () => {
       const token = await qwenAuth.getToken();
-      
+
       if (!token) {
         await qwenAuth.performDeviceAuthFlow();
         return this.getModel();
       }
-      
+
       const qwen = createQwen({
         apiKey: token,
       });
-      
+
       this.model = qwen('qwen-coder-model');
       this.modelPromise = null;
       return this.model;
@@ -41,11 +42,11 @@ export class QwenProvider {
     return this.modelPromise;
   }
 
-  async complete(messages: CoreMessage[], options?: { 
-    stream?: boolean; 
+  async complete(messages: ModelMessage[], options?: {
+    stream?: boolean;
     maxRetries?: number;
     tools?: ToolSet;
-  }) {
+  }): Promise<LLMResponse> {
     const maxRetries = options?.maxRetries ?? 3;
     let lastError: Error | null = null;
 
@@ -59,35 +60,62 @@ export class QwenProvider {
 
           if (options?.stream) {
             console.log('[LLM] Creating stream with', messages.length, 'messages');
+
+            // Extract system message if present
+            const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
+            const userMessages = messages.filter(m => m.role !== 'system');
+
+            // Extract text from system message content (handle both string and array formats)
+            const systemText = typeof systemMessage?.content === 'string'
+              ? systemMessage.content
+              : Array.isArray(systemMessage?.content)
+                ? systemMessage.content.map(c => c.text).join('')
+                : undefined;
+
             const result = await streamText({
               model,
-              messages,
+              messages: userMessages,
+              system: systemText,
               tools: options.tools,
               temperature: 0.1,
-              maxTokens: 8192,
             });
             console.log('[LLM] Stream created successfully');
             const toolCalls = await result.toolCalls;
-            return { 
+
+            return {
               stream: result.textStream,
-              toolCalls: toolCalls ? toolCalls.map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({ id: tc.toolCallId, name: tc.toolName, args: tc.args as Record<string, unknown> })) : [],
-            };
+              // @ts-expect-error - toolCall args type mismatch
+              toolCalls: toolCalls ? toolCalls.map((tc) => ({ id: tc.toolCallId, name: tc.toolName, args: (tc.args ?? {}) as Record<string, unknown> })) : [],
+            } as unknown as LLMResponse;
           } else {
             console.log('[LLM] Generating text with', messages.length, 'messages');
+
+            // Extract system message if present
+            const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
+            const userMessages = messages.filter(m => m.role !== 'system');
+
+            // Extract text from system message content (handle both string and array formats)
+            const systemText = typeof systemMessage?.content === 'string'
+              ? systemMessage.content
+              : Array.isArray(systemMessage?.content)
+                ? systemMessage.content.map(c => c.text).join('')
+                : undefined;
+
             const result = await generateText({
               model,
-              messages,
+              messages: userMessages,
+              system: systemText,
               tools: options?.tools,
               temperature: 0.1,
-              maxTokens: 8192,
             });
             console.log('[LLM] Generation complete, tokens used:', result.usage);
             const toolCalls = result.toolCalls;
             return {
               content: result.text,
-              toolCalls: toolCalls ? toolCalls.map((tc: { toolCallId: string; toolName: string; args: unknown }) => ({ id: tc.toolCallId, name: tc.toolName, args: tc.args as Record<string, unknown> })) : [],
+              // @ts-expect-error - toolCall args type mismatch
+              toolCalls: toolCalls ? toolCalls.map((tc) => ({ id: tc.toolCallId, name: tc.toolName, args: (tc.args ?? {}) as Record<string, unknown> })) : [],
               usage: result.usage,
-            };
+            } as LLMResponse;
           }
         });
       } catch (error: unknown) {
@@ -120,5 +148,41 @@ export class QwenProvider {
     }
 
     throw lastError || new Error('Max retries exceeded');
+  }
+
+  async listModels(): Promise<{ id: string; name: string }[]> {
+    try {
+      const token = await qwenAuth.getToken();
+      if (!token) {
+        return [];
+      }
+    } catch {
+      return [];
+    }
+    return [
+      { id: 'coder-model', name: 'Qwen Coder (1M context)' },
+      { id: 'vision-model', name: 'Qwen Vision (128K context)' },
+    ];
+  }
+
+  static name(): string {
+    return 'qwen';
+  }
+
+  static displayName(): string {
+    return 'Qwen (OAuth - Free)';
+  }
+
+  static requiresApiKey(): boolean {
+    return false;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  static saveConfig(config: IProviderConfig): void {
+    // Qwen uses OAuth, no API key to save - model not persisted
+  }
+
+  static loadConfig(): IProviderConfig {
+    return { model: 'coder-model' };
   }
 }

@@ -6,6 +6,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { theme } from './theme';
 import { SessionProvider } from './context/SessionContext';
+import { TRPCProvider } from './components/TRPCProvider';
 
 window.addEventListener('error', (event) => {
   if (
@@ -19,13 +20,15 @@ window.addEventListener('error', (event) => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <BrowserRouter>
-        <SessionProvider>
-          <App />
-        </SessionProvider>
-      </BrowserRouter>
-    </ThemeProvider>
+    <TRPCProvider>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <BrowserRouter>
+          <SessionProvider>
+            <App />
+          </SessionProvider>
+        </BrowserRouter>
+      </ThemeProvider>
+    </TRPCProvider>
   </React.StrictMode>
 );

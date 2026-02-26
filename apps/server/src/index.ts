@@ -5,11 +5,13 @@ import { sessionsRouter } from './routes/sessions';
 import { completionRouter } from './routes/completion';
 import { previewRouter } from './routes/preview';
 import { sseRouter } from './routes/sse';
-import providersRouter from './routes/providers';
+
 import https from 'https';
 import { WebSocketHandler } from './ws';
 import { existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
+import { appRouter } from './trpc';
+import { createExpressMiddleware } from '@trpc/server/adapters/express';
 
 dotenv.config();
 
@@ -60,12 +62,12 @@ new WebSocketHandler(server);
 // Graceful shutdown handlers
 function gracefulShutdown(signal: string) {
   console.log(`\nReceived ${signal}. Shutting down gracefully...`);
-  
+
   server.close(() => {
     console.log('HTTP server closed');
     process.exit(0);
   });
-  
+
   // Force close after 10 seconds
   setTimeout(() => {
     console.error('Forcing shutdown after timeout');
@@ -123,7 +125,9 @@ app.use('/api/sessions', sessionsRouter);
 app.use('/api/complete', completionRouter);
 app.use('/api/preview', previewRouter);
 app.use('/api/preview/logs', sseRouter);
-app.use('/api/providers', providersRouter);
+
+// tRPC middleware
+app.use('/trpc', createExpressMiddleware({ router: appRouter }));
 
 export default app;
 // change 3
