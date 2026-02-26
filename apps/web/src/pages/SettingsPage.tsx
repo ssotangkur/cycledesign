@@ -17,7 +17,6 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { trpc } from '../utils/trpc';
 
-// Placeholder value shown when API key is configured (displays as dots in password field)
 const API_KEY_PLACEHOLDER = '**********';
 
 export default function SettingsPage() {
@@ -25,14 +24,12 @@ export default function SettingsPage() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
 
-  // tRPC queries
   const { data: providersData, isLoading: loadingProviders } = trpc.providers.list.useQuery();
   const { data: configData, isLoading: loadingConfig, refetch: refetchConfig } = trpc.providers.getConfig.useQuery();
   const { data: modelsData, isLoading: loadingModels } = trpc.providers.listModels.useQuery(undefined, {
     enabled: !!configData?.hasApiKey,
   });
 
-  // tRPC mutations
   const updateConfigMutation = trpc.providers.updateConfig.useMutation({
     onSuccess: () => {
       refetchConfig();
@@ -45,7 +42,6 @@ export default function SettingsPage() {
 
   const currentProvider = providersData?.find((p) => p.name === configData?.provider);
 
-  // Compute the display value for API key field
   const showPlaceholder = configData?.hasApiKey && !apiKeyTouched;
   const apiKeyDisplayValue = loadingConfig
     ? ''
@@ -62,11 +58,9 @@ export default function SettingsPage() {
   };
 
   const handleApiKeyChange = (value: string) => {
-    // Mark as touched when user starts typing
     if (!apiKeyTouched) {
       setApiKeyTouched(true);
     }
-    // If value starts with placeholder (user typed into it), clear it
     setApiKeyInput(value.startsWith(API_KEY_PLACEHOLDER) ? '' : value);
   };
 
@@ -151,7 +145,6 @@ export default function SettingsPage() {
             <InputLabel>Model</InputLabel>
             <Select
               value={
-                // Ensure value is valid - use first model if saved model not in list
                 modelsData?.some((m) => m.id === configData?.model)
                   ? configData?.model
                   : modelsData?.[0]?.id || ''
