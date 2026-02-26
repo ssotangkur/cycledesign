@@ -1,8 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { sessionsRouter } from './routes/sessions';
-import { completionRouter } from './routes/completion';
 import { previewRouter } from './routes/preview';
 import { sseRouter } from './routes/sse';
 
@@ -121,8 +119,6 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', timestamp: Date.now() });
 });
 
-app.use('/api/sessions', sessionsRouter);
-app.use('/api/complete', completionRouter);
 app.use('/api/preview', previewRouter);
 app.use('/api/preview/logs', sseRouter);
 
