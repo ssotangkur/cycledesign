@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
-import { api, Session } from '../api/client';
+import { trpc } from '../utils/trpc';
+import type { Session } from '../api/client';
 import { SessionWebSocket, DisplayMessage } from '../api/websocket';
 
 export interface SessionState {
@@ -155,7 +156,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
 
   const loadSessions = useCallback(async () => {
     try {
-      const sessions = await api.getSessions();
+      const sessions = await trpc.sessions.list.query();
       const labelsMap: Record<string, string> = {};
       sessions.forEach((session) => {
         labelsMap[session.id] = session.firstMessage || session.id.slice(-8);
@@ -169,7 +170,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
   const createSession = useCallback(async (name?: string): Promise<Session> => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
-      const session = await api.createSession(name);
+      const session = await trpc.sessions.create.mutate({ name });
       const label = session.firstMessage || session.id.slice(-8);
       cleanupWebSocket();
       setState((prev) => ({
@@ -193,7 +194,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
   const loadSession = useCallback(async (id: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
-      const session = await api.getSession(id);
+      const session = await trpc.sessions.get.query(id);
       setState((prev) => ({
         ...prev,
         currentSession: session,
@@ -258,7 +259,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
   const deleteSession = useCallback(async (id: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
-      await api.deleteSession(id);
+      await trpc.sessions.delete.mutate(id);
       setState((prev) => {
         const newLabelsMap = { ...prev.sessionLabelsMap };
         delete newLabelsMap[id];
@@ -286,12 +287,12 @@ export function SessionProvider({ children }: SessionProviderProps) {
     const init = async () => {
       if (mounted) {
         await loadSessions();
-        
+
         // Auto-select last used session or create new one
         const lastSessionId = localStorage.getItem('cycledesign:lastSession');
         if (lastSessionId) {
           try {
-            const session = await api.getSession(lastSessionId);
+            const session = await trpc.sessions.get.query(lastSessionId);
             if (session && mounted) {
               const label = session.firstMessage || session.id.slice(-8);
               setState((prev) => ({
@@ -307,11 +308,11 @@ export function SessionProvider({ children }: SessionProviderProps) {
             console.log('[SessionContext] Last session not found, will create new one');
           }
         }
-        
+
         // If no last session or it doesn't exist, create a new one
         if (mounted && !state.currentSession) {
           try {
-            const session = await api.createSession();
+            const session = await trpc.sessions.create.mutate({});
             const label = session.firstMessage || session.id.slice(-8);
             setState((prev) => ({
               ...prev,
