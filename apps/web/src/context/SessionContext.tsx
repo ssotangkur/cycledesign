@@ -119,7 +119,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
     } else if (createSessionMutation.isPending) {
       setState((prev) => ({ ...prev, isLoading: true, error: null }));
     }
-  }, [createSessionMutation.isSuccess, createSessionMutation.isError, createSessionMutation.isPending, createSessionMutation.data, createSessionMutation.error]);
+  }, [createSessionMutation.isSuccess, createSessionMutation.isError, createSessionMutation.isPending, createSessionMutation.data, createSessionMutation.error, cleanupWebSocket, setupWebSocket]);
 
   // Handle delete session mutation state changes
   useEffect(() => {
