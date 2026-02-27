@@ -7,11 +7,6 @@ import { IProvider, IProviderConfig, LLMResponse } from '../types';
 
 const qwenAuth = new QwenAuth();
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const CONFIG_DIR = '.cycledesign';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const CONFIG_FILE = 'qwen-config.json';
-
 export class QwenProvider implements IProvider {
   readonly name = 'qwen' as const;
   private model: ReturnType<ReturnType<typeof createQwen>> | null = null;
@@ -177,8 +172,7 @@ export class QwenProvider implements IProvider {
     return false;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  static saveConfig(config: IProviderConfig): void {
+  static saveConfig(_config: IProviderConfig): void {
     // Qwen uses OAuth, no API key to save - model not persisted
   }
 

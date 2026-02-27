@@ -8,7 +8,7 @@ export const router = t.router;
 export const publicProcedure = t.procedure;
 
 export const appRouter = router({
-  providers: providersRouter,
+  providerConfig: providersRouter,
   sessions: sessionsRouter,
 });
 
