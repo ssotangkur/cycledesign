@@ -86,49 +86,6 @@ export function SessionProvider({ children }: SessionProviderProps) {
     },
   });
 
-  // Update state when sessions list changes
-  useEffect(() => {
-    if (listSessionsQuery.data) {
-      const labelsMap: Record<string, string> = {};
-      listSessionsQuery.data.forEach((session) => {
-        labelsMap[session.id] = session.firstMessage || session.id.slice(-8);
-      });
-      setState((prev) => ({ ...prev, sessions: listSessionsQuery.data || [], sessionLabelsMap: labelsMap }));
-    }
-  }, [listSessionsQuery.data]);
-
-  // Handle create session mutation state changes
-  useEffect(() => {
-    if (createSessionMutation.isSuccess && createSessionMutation.data) {
-      const session = createSessionMutation.data;
-      const label = session.firstMessage || session.id.slice(-8);
-      cleanupWebSocket();
-      setState((prev) => ({
-        ...prev,
-        currentSession: session,
-        sessions: [...prev.sessions, session],
-        messages: [],
-        isLoading: false,
-        sessionLabelsMap: { ...prev.sessionLabelsMap, [session.id]: label },
-      }));
-      localStorage.setItem('cycledesign:lastSession', session.id);
-      setupWebSocket(session.id);
-    } else if (createSessionMutation.isError) {
-      const errorMessage = createSessionMutation.error?.message || 'Failed to create session';
-      setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
-    } else if (createSessionMutation.isPending) {
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
-    }
-  }, [createSessionMutation.isSuccess, createSessionMutation.isError, createSessionMutation.isPending, createSessionMutation.data, createSessionMutation.error, cleanupWebSocket, setupWebSocket]);
-
-  // Handle delete session mutation state changes
-  useEffect(() => {
-    if (deleteSessionMutation.isError) {
-      const errorMessage = deleteSessionMutation.error?.message || 'Failed to delete session';
-      setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
-    }
-  }, [deleteSessionMutation.isSuccess, deleteSessionMutation.isError, deleteSessionMutation.error]);
-
   const setupWebSocket = useCallback((sessionId: string) => {
     if (wsRef.current) {
       wsRef.current.disconnect();
@@ -221,6 +178,49 @@ export function SessionProvider({ children }: SessionProviderProps) {
     }
     streamingMsgIdRef.current = null;
   }, []);
+
+  // Update state when sessions list changes
+  useEffect(() => {
+    if (listSessionsQuery.data) {
+      const labelsMap: Record<string, string> = {};
+      listSessionsQuery.data.forEach((session) => {
+        labelsMap[session.id] = session.firstMessage || session.id.slice(-8);
+      });
+      setState((prev) => ({ ...prev, sessions: listSessionsQuery.data || [], sessionLabelsMap: labelsMap }));
+    }
+  }, [listSessionsQuery.data]);
+
+  // Handle create session mutation state changes
+  useEffect(() => {
+    if (createSessionMutation.isSuccess && createSessionMutation.data) {
+      const session = createSessionMutation.data;
+      const label = session.firstMessage || session.id.slice(-8);
+      cleanupWebSocket();
+      setState((prev) => ({
+        ...prev,
+        currentSession: session,
+        sessions: [...prev.sessions, session],
+        messages: [],
+        isLoading: false,
+        sessionLabelsMap: { ...prev.sessionLabelsMap, [session.id]: label },
+      }));
+      localStorage.setItem('cycledesign:lastSession', session.id);
+      setupWebSocket(session.id);
+    } else if (createSessionMutation.isError) {
+      const errorMessage = createSessionMutation.error?.message || 'Failed to create session';
+      setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
+    } else if (createSessionMutation.isPending) {
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    }
+  }, [createSessionMutation.isSuccess, createSessionMutation.isError, createSessionMutation.isPending, createSessionMutation.data, createSessionMutation.error, cleanupWebSocket, setupWebSocket]);
+
+  // Handle delete session mutation state changes
+  useEffect(() => {
+    if (deleteSessionMutation.isError) {
+      const errorMessage = deleteSessionMutation.error?.message || 'Failed to delete session';
+      setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
+    }
+  }, [deleteSessionMutation.isSuccess, deleteSessionMutation.isError, deleteSessionMutation.error]);
 
   const loadSessions = useCallback(async () => {
     await utils.sessions.list.invalidate();
