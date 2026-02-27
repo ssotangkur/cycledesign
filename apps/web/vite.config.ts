@@ -10,6 +10,11 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      '/trpc': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   resolve: {
@@ -20,5 +25,6 @@ export default defineConfig({
   optimizeDeps: {
     force: true,
     include: ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
+    exclude: ['@trpc/react-query', '@trpc/client', '@trpc/server'],
   },
 });
