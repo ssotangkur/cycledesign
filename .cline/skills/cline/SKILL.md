@@ -1,39 +1,18 @@
 ---
 name: cline
-description: Use when working with CycleDesign codebase, building features, fixing bugs, or any development tasks. This skill provides context about the project structure, development workflow, and testing patterns specific to this codebase.
+description: Use when creating or modifying Cline skills, rules, workflows, hooks, or any automation files. Always check docs.cline.bot for the latest official format and capabilities.
 ---
 
-# CycleDesign Development
+# Cline Skill Development
 
-This skill provides guidance for working with the CycleDesign project.
+Always check https://docs.cline.bot for the latest official documentation before making any changes to Cline-related files.
 
-## Project Structure
+## Best Practices
 
-- `apps/web/` - React frontend (Vite + MUI)
-- `apps/server/` - Node.js backend (Express + Vercel AI SDK)
-- `.cline/skills/` - Custom Cline skills
-- `docs/` - Project documentation
-
-## Development Commands
-
-- `npm run dev` - Start all development servers
-- `npm run dev:server` - Start server only
-- `npm run dev:web` - Start web only
-- `npm run dev:kill` - Kill processes on ports 3000/3001/3002
-- `npm run validate` - Run ESLint and Knip validation
-
-## Testing Workflow
-
-After making UI changes:
-
-1. Quick Smoke Test - Navigate to http://localhost:3000 and verify the page loads
-2. Feature-specific testing using Chrome DevTools MCP
-3. Check for console errors
-4. Verify state updates for React changes
-
-## Key Patterns
-
-- Sessions use tRPC for API communication (not REST)
-- SessionContext manages all session state
-- WebSocket handles real-time messaging
-- Sessions auto-name based on first message content
+- **Check documentation first** - Format and capabilities may change; always verify the latest at docs.cline.bot/customization/skills
+- **Keep SKILL.md under 5k tokens** - Put important information first; Cline reads sequentially
+- **Write actionable descriptions** - Describe when to use the skill and what it does, not vague intentions
+- **Use clear section headers** - Helps Cline scan for relevant sections
+- **Reference supporting files** - Use docs/ subdirectory for detailed content rather than bloating SKILL.md
+- **Include real examples** - Show actual commands and expected output, not abstract instructions
+- **Version control project skills** - Store in .cline/skills/ to share with your team
