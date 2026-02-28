@@ -1,10 +1,10 @@
-import { createFileTool, createFileSchema, type CreateFileArgs, executeCreateFile } from './create-file';
-import { editFileTool, editFileSchema, type EditFileArgs, executeEditFile } from './edit-file';
-import { renameFileTool, renameFileSchema, type RenameFileArgs, executeRenameFile } from './rename-file';
-import { deleteFileTool, deleteFileSchema, type DeleteFileArgs, executeDeleteFile } from './delete-file';
-import { addDependencyTool, addDependencySchema, type AddDependencyArgs, executeAddDependency } from './add-dependency';
-import { submitWorkTool, submitWorkSchema, type SubmitWorkArgs, executeSubmitWork } from './submit-work';
-import { askUserTool, askUserSchema, type AskUserArgs, executeAskUser } from './ask-user';
+import { createFileTool, createFileSchema, type CreateFileArgs, executeCreateFile } from './create-file.js';
+import { editFileTool, editFileSchema, type EditFileArgs, executeEditFile } from './edit-file.js';
+import { renameFileTool, renameFileSchema, type RenameFileArgs, executeRenameFile } from './rename-file.js';
+import { deleteFileTool, deleteFileSchema, type DeleteFileArgs, executeDeleteFile } from './delete-file.js';
+import { addDependencyTool, addDependencySchema, type AddDependencyArgs, executeAddDependency } from './add-dependency.js';
+import { submitWorkTool, submitWorkSchema, type SubmitWorkArgs, executeSubmitWork } from './submit-work.js';
+import { askUserTool, askUserSchema, type AskUserArgs, executeAskUser } from './ask-user.js';
 
 export {
   createFileTool,
@@ -50,4 +50,4 @@ export const allTools = {
   ask_user: askUserTool,
 };
 
-export type { ToolExecutionResult } from './types';
+export type { ToolExecutionResult } from './types.js';

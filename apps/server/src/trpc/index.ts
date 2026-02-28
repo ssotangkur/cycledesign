@@ -1,6 +1,6 @@
 import { initTRPC } from '@trpc/server';
-import { providersRouter } from './routers/providers';
-import { sessionsRouter } from './routers/sessions';
+import { providersRouter } from './routers/providers.js';
+import { sessionsRouter } from './routers/sessions.js';
 
 const t = initTRPC.create();
 

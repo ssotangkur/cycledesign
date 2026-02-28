@@ -2,7 +2,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, copyFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { ValidationError } from './types';
+import { ValidationError } from './types.js';
 
 const execAsync = promisify(exec);
 

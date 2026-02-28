@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { addMessage, generateMessageId } from '../sessions/storage';
+import { addMessage, generateMessageId } from '../sessions/storage.js';
 import { ModelMessage } from 'ai';
-import { getLLMProvider } from '../llm/providers/provider-factory';
+import { getLLMProvider } from '../llm/providers/provider-factory.js';
 
 export const completionRouter = Router();
 

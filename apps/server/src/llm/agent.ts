@@ -1,12 +1,12 @@
 import { ToolLoopAgent, stepCountIs, type Tool } from 'ai';
 import { createMistral } from '@ai-sdk/mistral';
-import { allTools } from './tools';
-import { SYSTEM_PROMPT } from './system-prompt';
-import { statusBroadcaster } from '../websocket/status-broadcaster';
-import { getPendingWork, clearPendingWork } from './work-tracker';
-import { injectIds } from '../parser/id-injector';
-import { previewManager } from '../preview/preview-manager';
-import { ValidationPipeline } from '../validation/pipeline';
+import { allTools } from './tools/index.js';
+import { SYSTEM_PROMPT } from './system-prompt.js';
+import { statusBroadcaster } from '../websocket/status-broadcaster.js';
+import { getPendingWork, clearPendingWork } from './work-tracker.js';
+import { injectIds } from '../parser/id-injector.js';
+import { previewManager } from '../preview/preview-manager.js';
+import { ValidationPipeline } from '../validation/pipeline.js';
 import { join, resolve } from 'path';
 import { promises as fs } from 'fs';
 

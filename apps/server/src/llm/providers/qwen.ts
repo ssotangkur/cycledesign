@@ -1,9 +1,9 @@
 import { generateText, streamText, type ToolSet, type ModelMessage } from 'ai';
 import { createQwen } from 'qwen-ai-provider-v5';
-import { QwenAuth } from '../qwen-auth';
-import { requestQueue } from '../request-queue';
-import { RateLimitError, AuthError } from '../errors';
-import { IProvider, IProviderConfig, LLMResponse } from '../types';
+import { QwenAuth } from '../qwen-auth.js';
+import { requestQueue } from '../request-queue.js';
+import { RateLimitError, AuthError } from '../errors.js';
+import { IProvider, IProviderConfig, LLMResponse } from '../types.js';
 
 const qwenAuth = new QwenAuth();
 

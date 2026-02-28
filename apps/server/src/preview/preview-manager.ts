@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { existsSync, copyFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { resolve, join } from 'path';
 import killPort from 'kill-port';
-import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types';
+import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types.js';
 
 // Paths are relative to the server root (apps/server)
 const SERVER_ROOT = resolve(__dirname, '../..');

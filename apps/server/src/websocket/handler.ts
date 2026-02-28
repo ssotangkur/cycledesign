@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
-import { statusBroadcaster } from "./status-broadcaster";
-import { runAgent } from "../llm/agent";
+import { statusBroadcaster } from "./status-broadcaster.js";
+import { runAgent } from "../llm/agent.js";
 
 interface WebSocketMessage {
   type: string;

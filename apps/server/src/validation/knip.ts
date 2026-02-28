@@ -1,6 +1,6 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { ValidationError } from './types';
+import { ValidationError } from './types.js';
 
 const execAsync = promisify(exec);
 

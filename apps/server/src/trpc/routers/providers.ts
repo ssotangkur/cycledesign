@@ -1,8 +1,8 @@
-import { router, publicProcedure } from '../init';
+import { router, publicProcedure } from '../init.js';
 import { z } from 'zod';
-import { MistralProvider } from '../../llm/providers/mistral';
-import { QwenProvider } from '../../llm/providers/qwen';
-import { IProvider, IProviderClass, IProviderConfig } from '../../llm/types';
+import { MistralProvider } from '../../llm/providers/mistral.js';
+import { QwenProvider } from '../../llm/providers/qwen.js';
+import { IProvider, IProviderClass, IProviderConfig } from '../../llm/types.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 

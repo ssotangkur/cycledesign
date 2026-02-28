@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { StatusMessage } from './types';
+import { StatusMessage } from './types.js';
 
 export class StatusBroadcaster {
   private clients: Set<WebSocket>;

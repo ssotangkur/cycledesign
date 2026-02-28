@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { previewManager } from '../preview/preview-manager';
-import { LogEntry } from '../preview/types';
+import { previewManager } from '../preview/preview-manager.js';
+import { LogEntry } from '../preview/types.js';
 
 export const sseRouter = Router();
 

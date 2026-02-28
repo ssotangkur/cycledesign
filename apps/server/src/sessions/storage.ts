@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
-import { StoredMessage } from '../llm/types';
+import { StoredMessage } from '../llm/types.js';
 
 const SESSIONS_DIR = join(process.cwd(), '.cycledesign', 'sessions');
 
