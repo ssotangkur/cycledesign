@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "CycleDesign Backend Server",
   "main": "dist/index.js",
+  "type": "module",
   "scripts": {
     "dev": "nodemon",
     "dev:start": "tsx src/index.ts",
