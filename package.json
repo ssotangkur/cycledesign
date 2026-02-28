@@ -17,15 +17,16 @@
         "dev:kill:3001": "node scripts/succeed.js npx kill-port 3001",
         "dev:kill:3002": "node scripts/succeed.js npx kill-port 3002",
         "build": "npm run build --workspaces",
-        "lint": "npm run lint --workspaces",
-        "lint:fix": "npm run lint:fix --workspaces --if-present",
+        "lint": "cross-env NODE_OPTIONS=--max-old-space-size=4096 npm run lint --workspaces",
+        "lint:fix": "cross-env NODE_OPTIONS=--max-old-space-size=4096 npm run lint:fix --workspaces --if-present",
         "knip": "knip",
-        "typecheck": "npx tsc --noEmit --project apps/server/tsconfig.json && npx tsc --noEmit --project apps/web/tsconfig.json",
+        "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit --project apps/server/tsconfig.json && cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit --project apps/web/tsconfig.json",
         "validate": "npm run lint && npm run typecheck && npm run knip",
         "test": "npm run test --workspaces"
     },
     "devDependencies": {
         "concurrently": "^9.2.1",
+        "cross-env": "^7.0.3",
         "kill-port": "^2.0.1",
         "knip": "^5.85.0",
         "typescript": "^5.9.3"
