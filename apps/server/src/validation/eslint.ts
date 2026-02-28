@@ -102,8 +102,9 @@ function parseESLintOutput(output: string): ValidationError[] {
       }
     }
   } catch (parseError) {
+    const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
     console.error('[ESLint Validation] Failed to parse ESLint JSON output, falling back to regex parsing');
-    console.error('[ESLint Validation] Parse error:', parseError instanceof Error ? parseError.message : parseError);
+    console.error('[ESLint Validation] Parse error:', errorMessage);
     console.error('[ESLint Validation] Raw output:', output.slice(0, 500));
 
     const lines = output.split('\n');
