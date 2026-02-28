@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest",
-    "lint": "cross-env NODE_OPTIONS=--max-old-space-size=4096 eslint src --ext .ts",
+    "lint": "cross-env NODE_OPTIONS=--max-old-space-size=4096 eslint src",
     "validate": "npm run lint && npx knip --no-progress"
   },
   "dependencies": {
