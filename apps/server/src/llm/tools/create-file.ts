@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { promises as fs } from 'fs';
 import { join, resolve } from 'path';
-import { trackFileCreation } from '../work-tracker';
+import { trackFileCreation } from '../work-tracker.js';
 
 export const createFileSchema = z.object({
   filename: z

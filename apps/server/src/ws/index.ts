@@ -2,14 +2,14 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { IncomingMessage } from 'http';
 import { parse as parseUrl } from 'url';
-import { getMessages, addMessage, generateMessageId } from '../sessions/storage';
-import { StoredMessage } from '../llm/types';
-import { SYSTEM_PROMPT } from '../llm/system-prompt';
-import { executeToolCalls } from '../llm/tool-executor';
-import { allTools } from '../llm/tools';
+import { getMessages, addMessage, generateMessageId } from '../sessions/storage.js';
+import { StoredMessage } from '../llm/types.js';
+import { SYSTEM_PROMPT } from '../llm/system-prompt.js';
+import { executeToolCalls } from '../llm/tool-executor.js';
+import { allTools } from '../llm/tools/index.js';
 import { CoreMessage } from 'ai';
-import { getLLMProvider } from '../llm/providers/provider-factory';
-import { getProviderConfig } from '../trpc/routers/providers';
+import { getLLMProvider } from '../llm/providers/provider-factory.js';
+import { getProviderConfig } from '../trpc/routers/providers.js';
 
 interface SessionConnection {
   ws: WebSocket;

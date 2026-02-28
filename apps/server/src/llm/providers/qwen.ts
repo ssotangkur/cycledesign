@@ -1,16 +1,11 @@
 import { generateText, streamText, type ToolSet, type ModelMessage } from 'ai';
 import { createQwen } from 'qwen-ai-provider-v5';
-import { QwenAuth } from '../qwen-auth';
-import { requestQueue } from '../request-queue';
-import { RateLimitError, AuthError } from '../errors';
-import { IProvider, IProviderConfig, LLMResponse } from '../types';
+import { QwenAuth } from '../qwen-auth.js';
+import { requestQueue } from '../request-queue.js';
+import { RateLimitError, AuthError } from '../errors.js';
+import { IProvider, IProviderConfig, LLMResponse } from '../types.js';
 
 const qwenAuth = new QwenAuth();
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const CONFIG_DIR = '.cycledesign';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const CONFIG_FILE = 'qwen-config.json';
 
 export class QwenProvider implements IProvider {
   readonly name = 'qwen' as const;
@@ -177,8 +172,7 @@ export class QwenProvider implements IProvider {
     return false;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  static saveConfig(config: IProviderConfig): void {
+  static saveConfig(_config: IProviderConfig): void {
     // Qwen uses OAuth, no API key to save - model not persisted
   }
 

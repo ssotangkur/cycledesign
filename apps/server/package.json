@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "description": "CycleDesign Backend Server",
   "main": "dist/index.js",
+  "type": "module",
   "scripts": {
     "dev": "nodemon",
     "dev:start": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest",
-    "lint": "eslint src --ext .ts",
+    "lint": "cross-env NODE_OPTIONS=--max-old-space-size=4096 eslint src",
     "validate": "npm run lint && npx knip --no-progress"
   },
   "dependencies": {
@@ -35,12 +36,13 @@
     "@types/kill-port": "2.0.0",
     "@types/node": "^20.10.0",
     "@types/uuid": "^9.0.7",
-    "@typescript-eslint/eslint-plugin": "^6.13.0",
-    "@typescript-eslint/parser": "^6.13.0",
-    "eslint": "^8.55.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "cross-env": "^7.0.3",
+    "eslint": "^9.38.0",
     "nodemon": "^3.1.14",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.0",
+    "typescript": "^5.9.3",
     "vitest": "^1.0.0"
   }
 }

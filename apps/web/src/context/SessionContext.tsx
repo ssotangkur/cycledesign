@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
-import { trpc } from '../utils/trpc';
 import type { Session } from '../api/client';
+import { trpc } from '../utils/trpc';
 import { SessionWebSocket, DisplayMessage } from '../api/websocket';
 
 export interface SessionState {
@@ -60,6 +60,31 @@ export function SessionProvider({ children }: SessionProviderProps) {
 
   const wsRef = useRef<SessionWebSocket | null>(null);
   const streamingMsgIdRef = useRef<string | null>(null);
+
+  // tRPC hooks for session operations
+  const utils = trpc.useUtils();
+
+  // List sessions query - auto-fetches on mount
+  const listSessionsQuery = trpc.sessions.list.useQuery();
+
+  // Create session mutation
+  const createSessionMutation = trpc.sessions.create.useMutation({
+    onSuccess: () => {
+      utils.sessions.list.invalidate();
+    },
+  });
+
+  // Get session query - we'll use utils to fetch when needed
+  const getSessionById = useCallback(async (id: string): Promise<Session> => {
+    return utils.sessions.get.fetch(id);
+  }, [utils]);
+
+  // Delete session mutation
+  const deleteSessionMutation = trpc.sessions.delete.useMutation({
+    onSuccess: () => {
+      utils.sessions.list.invalidate();
+    },
+  });
 
   const setupWebSocket = useCallback((sessionId: string) => {
     if (wsRef.current) {
@@ -154,23 +179,21 @@ export function SessionProvider({ children }: SessionProviderProps) {
     streamingMsgIdRef.current = null;
   }, []);
 
-  const loadSessions = useCallback(async () => {
-    try {
-      const sessions = await trpc.sessions.list.query();
+  // Update state when sessions list changes
+  useEffect(() => {
+    if (listSessionsQuery.data) {
       const labelsMap: Record<string, string> = {};
-      sessions.forEach((session) => {
+      listSessionsQuery.data.forEach((session) => {
         labelsMap[session.id] = session.firstMessage || session.id.slice(-8);
       });
-      setState((prev) => ({ ...prev, sessions, sessionLabelsMap: labelsMap }));
-    } catch (error) {
-      console.error('Failed to load sessions:', error);
+      setState((prev) => ({ ...prev, sessions: listSessionsQuery.data || [], sessionLabelsMap: labelsMap }));
     }
-  }, []);
+  }, [listSessionsQuery.data]);
 
-  const createSession = useCallback(async (name?: string): Promise<Session> => {
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
-    try {
-      const session = await trpc.sessions.create.mutate({ name });
+  // Handle create session mutation state changes
+  useEffect(() => {
+    if (createSessionMutation.isSuccess && createSessionMutation.data) {
+      const session = createSessionMutation.data;
       const label = session.firstMessage || session.id.slice(-8);
       cleanupWebSocket();
       setState((prev) => ({
@@ -183,18 +206,49 @@ export function SessionProvider({ children }: SessionProviderProps) {
       }));
       localStorage.setItem('cycledesign:lastSession', session.id);
       setupWebSocket(session.id);
-      return session;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create session';
+    } else if (createSessionMutation.isError) {
+      const errorMessage = createSessionMutation.error?.message || 'Failed to create session';
       setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
-      throw error;
+    } else if (createSessionMutation.isPending) {
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
     }
-  }, [setupWebSocket, cleanupWebSocket]);
+  }, [createSessionMutation.isSuccess, createSessionMutation.isError, createSessionMutation.isPending, createSessionMutation.data, createSessionMutation.error, cleanupWebSocket, setupWebSocket]);
+
+  // Handle delete session mutation state changes
+  useEffect(() => {
+    if (deleteSessionMutation.isError) {
+      const errorMessage = deleteSessionMutation.error?.message || 'Failed to delete session';
+      setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
+    }
+  }, [deleteSessionMutation.isSuccess, deleteSessionMutation.isError, deleteSessionMutation.error]);
+
+  const loadSessions = useCallback(async () => {
+    await utils.sessions.list.invalidate();
+  }, [utils]);
+
+  const createSession = useCallback(async (name?: string): Promise<Session> => {
+    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    createSessionMutation.mutate({ name });
+
+    // Return a promise that resolves when the mutation completes
+    return new Promise((resolve, reject) => {
+      const checkResult = () => {
+        if (createSessionMutation.isSuccess && createSessionMutation.data) {
+          resolve(createSessionMutation.data);
+        } else if (createSessionMutation.isError) {
+          reject(createSessionMutation.error);
+        } else {
+          setTimeout(checkResult, 50);
+        }
+      };
+      checkResult();
+    });
+  }, [createSessionMutation]);
 
   const loadSession = useCallback(async (id: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
-      const session = await trpc.sessions.get.query(id);
+      const session = await getSessionById(id);
       setState((prev) => ({
         ...prev,
         currentSession: session,
@@ -206,7 +260,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load session';
       setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
     }
-  }, [setupWebSocket]);
+  }, [getSessionById, setupWebSocket]);
 
   const sendMessage = useCallback(async (content: string) => {
     if (!state.currentSession) {
@@ -253,75 +307,73 @@ export function SessionProvider({ children }: SessionProviderProps) {
           [sessionId]: content,
         },
       }));
+      // Invalidate sessions list to refresh firstMessage from server
+      utils.sessions.list.invalidate();
     }
-  }, [state.currentSession, state.messages, state.isStreaming]);
+  }, [state.currentSession, state.messages, state.isStreaming, utils]);
 
   const deleteSession = useCallback(async (id: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
-    try {
-      await trpc.sessions.delete.mutate(id);
-      setState((prev) => {
-        const newLabelsMap = { ...prev.sessionLabelsMap };
-        delete newLabelsMap[id];
-        return {
-          ...prev,
-          sessions: prev.sessions.filter((s) => s.id !== id),
-          currentSession: prev.currentSession?.id === id ? null : prev.currentSession,
-          messages: prev.currentSession?.id === id ? [] : prev.messages,
-          sessionLabelsMap: newLabelsMap,
-          isLoading: false,
-        };
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to delete session';
-      setState((prev) => ({ ...prev, error: errorMessage, isLoading: false }));
-    }
-  }, []);
+    deleteSessionMutation.mutate(id);
+
+    // Return a promise that resolves when the mutation completes
+    return new Promise<void>((resolve, reject) => {
+      const checkResult = () => {
+        if (deleteSessionMutation.isSuccess) {
+          // Update state immediately
+          setState((prev) => {
+            const newLabelsMap = { ...prev.sessionLabelsMap };
+            delete newLabelsMap[id];
+            return {
+              ...prev,
+              sessions: prev.sessions.filter((s) => s.id !== id),
+              currentSession: prev.currentSession?.id === id ? null : prev.currentSession,
+              messages: prev.currentSession?.id === id ? [] : prev.messages,
+              sessionLabelsMap: newLabelsMap,
+              isLoading: false,
+            };
+          });
+          resolve();
+        } else if (deleteSessionMutation.isError) {
+          reject(deleteSessionMutation.error);
+        } else {
+          setTimeout(checkResult, 50);
+        }
+      };
+      checkResult();
+    });
+  }, [deleteSessionMutation]);
 
   const clearError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null }));
   }, []);
 
+  // Initial load and auto-select last session
   useEffect(() => {
     let mounted = true;
     const init = async () => {
-      if (mounted) {
-        await loadSessions();
-
+      if (mounted && listSessionsQuery.data) {
         // Auto-select last used session or create new one
         const lastSessionId = localStorage.getItem('cycledesign:lastSession');
         if (lastSessionId) {
-          try {
-            const session = await trpc.sessions.get.query(lastSessionId);
-            if (session && mounted) {
-              const label = session.firstMessage || session.id.slice(-8);
-              setState((prev) => ({
-                ...prev,
-                currentSession: session,
-                sessionLabelsMap: { ...prev.sessionLabelsMap, [session.id]: label },
-              }));
-              setupWebSocket(lastSessionId);
-              console.log('[SessionContext] Auto-selected last session:', lastSessionId);
-              return;
-            }
-          } catch {
-            console.log('[SessionContext] Last session not found, will create new one');
+          const lastSession = listSessionsQuery.data.find(s => s.id === lastSessionId);
+          if (lastSession && mounted) {
+            const label = lastSession.firstMessage || lastSession.id.slice(-8);
+            setState((prev) => ({
+              ...prev,
+              currentSession: lastSession,
+              sessionLabelsMap: { ...prev.sessionLabelsMap, [lastSession.id]: label },
+            }));
+            setupWebSocket(lastSessionId);
+            console.log('[SessionContext] Auto-selected last session:', lastSessionId);
+            return;
           }
         }
 
         // If no last session or it doesn't exist, create a new one
         if (mounted && !state.currentSession) {
           try {
-            const session = await trpc.sessions.create.mutate({});
-            const label = session.firstMessage || session.id.slice(-8);
-            setState((prev) => ({
-              ...prev,
-              currentSession: session,
-              sessions: [...prev.sessions, session],
-              messages: [],
-              sessionLabelsMap: { ...prev.sessionLabelsMap, [session.id]: label },
-            }));
-            setupWebSocket(session.id);
+            const session = await createSession();
             console.log('[SessionContext] Created new session:', session.id);
           } catch (error) {
             console.error('[SessionContext] Failed to create session:', error);
@@ -335,7 +387,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
       cleanupWebSocket();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadSessions, setupWebSocket, cleanupWebSocket]);
+  }, [listSessionsQuery.data]);
 
   useEffect(() => {
     return () => {

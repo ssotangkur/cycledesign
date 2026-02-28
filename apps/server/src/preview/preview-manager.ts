@@ -1,9 +1,14 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { existsSync, copyFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
-import { resolve, join } from 'path';
+import { resolve, join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import killPort from 'kill-port';
-import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types';
+import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types.js';
+
+// Get directory name in ES module scope
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Paths are relative to the server root (apps/server)
 const SERVER_ROOT = resolve(__dirname, '../..');
@@ -60,20 +65,24 @@ export class PreviewManager extends EventEmitter {
 
     try {
       console.log('[PREVIEW] Starting Vite on port', targetPort);
-      
+      console.log('[PREVIEW] Preview directory:', PREVIEW_DIR);
+
       // Start Vite directly with spawn
       const env = { ...process.env, PORT: targetPort.toString(), IN_PREVIEW_SERVER: 'true' };
-      
-      previewProcess = spawn('npx', ['vite'], {
+
+      previewProcess = spawn('npx', ['vite', '--port', targetPort.toString()], {
         cwd: PREVIEW_DIR,
         env,
         shell: true,
       });
 
+      console.log('[PREVIEW] Spawned npx vite with PID:', previewProcess.pid);
+
       previewProcess.stdout?.on('data', (data: Buffer) => {
         const line = data.toString();
         this.addLog('stdout', line.trim());
-        if (line.includes('ready in')) {
+        console.log('[PREVIEW] stdout:', line.trim());
+        if (line.includes('ready in') || line.includes('Local:')) {
           this.startTime = Date.now();
           this.state = 'RUNNING';
           this.emit('stateChange', this.state);
@@ -82,7 +91,9 @@ export class PreviewManager extends EventEmitter {
       });
 
       previewProcess.stderr?.on('data', (data: Buffer) => {
-        this.addLog('stderr', data.toString().trim());
+        const line = data.toString().trim();
+        this.addLog('stderr', line);
+        console.error('[PREVIEW] stderr:', line);
       });
 
       previewProcess.on('error', (error: Error) => {

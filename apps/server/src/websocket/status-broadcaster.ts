@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { StatusMessage } from './types';
+import { StatusMessage } from './types.js';
 
 export class StatusBroadcaster {
   private clients: Set<WebSocket>;
@@ -94,6 +94,36 @@ export class StatusBroadcaster {
       messageId,
       status: 'preview_ready',
       details: `Preview ready at http://localhost:${port}`,
+      timestamp: Date.now(),
+    });
+  }
+
+  sendGenerationStart(messageId: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'generation_start',
+      details: 'Starting AI generation...',
+      timestamp: Date.now(),
+    });
+  }
+
+  sendGenerationThinking(messageId: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'generation_thinking',
+      details: 'AI is thinking...',
+      timestamp: Date.now(),
+    });
+  }
+
+  sendGenerationComplete(messageId: string, text: string) {
+    this.broadcastStatus({
+      type: 'status',
+      messageId,
+      status: 'generation_complete',
+      details: text,
       timestamp: Date.now(),
     });
   }

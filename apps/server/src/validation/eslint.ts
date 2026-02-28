@@ -2,7 +2,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, copyFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { ValidationError } from './types';
+import { ValidationError } from './types.js';
 
 const execAsync = promisify(exec);
 
@@ -102,6 +102,11 @@ function parseESLintOutput(output: string): ValidationError[] {
       }
     }
   } catch (parseError) {
+    const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
+    console.error('[ESLint Validation] Failed to parse ESLint JSON output, falling back to regex parsing');
+    console.error('[ESLint Validation] Parse error:', errorMessage);
+    console.error('[ESLint Validation] Raw output:', output.slice(0, 500));
+
     const lines = output.split('\n');
     for (const line of lines) {
       const errorMatch = line.match(/(\d+):(\d+)\s+(.*)/);

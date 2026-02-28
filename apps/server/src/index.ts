@@ -1,14 +1,14 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { previewRouter } from './routes/preview';
-import { sseRouter } from './routes/sse';
+import { previewRouter } from './routes/preview.js';
+import { sseRouter } from './routes/sse.js';
 
 import https from 'https';
-import { WebSocketHandler } from './ws';
+import { WebSocketHandler } from './ws/index.js';
 import { existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
-import { appRouter } from './trpc';
+import { appRouter } from './trpc/index.js';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 
 dotenv.config();

@@ -1,7 +1,7 @@
-import { QwenProvider } from './qwen';
-import { MistralProvider } from './mistral';
-import { IProvider } from '../types';
-import { getProviderConfig } from '../../trpc/routers/providers';
+import { QwenProvider } from './qwen.js';
+import { MistralProvider } from './mistral.js';
+import { IProvider } from '../types.js';
+import { getProviderConfig } from '../../trpc/routers/providers.js';
 
 export type LLMProvider = QwenProvider | MistralProvider;
 
