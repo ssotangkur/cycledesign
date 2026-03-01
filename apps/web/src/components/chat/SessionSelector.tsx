@@ -13,17 +13,23 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { useSession } from '../../hooks/useSession';
+import type { Session } from '../../api/client';
+import { useSessions, useCreateSession, useDeleteSession, useGetSession } from '../../hooks/useSession';
+import { useCurrentSessionId } from '../../hooks/useSession';
 
 function SessionSelector() {
-  const { sessions, currentSession, loadSession, createSession, deleteSession, sessionLabelsMap } =
-    useSession();
+  const { sessions, sessionLabelsMap } = useSessions();
+  const { createSession } = useCreateSession();
+  const { deleteSession } = useDeleteSession();
+  const { getSessionById } = useGetSession();
+  const { currentSessionId, setCurrentSessionId } = useCurrentSessionId();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
 
   const handleCreateSession = async () => {
     try {
-      await createSession();
+      const session = await createSession();
+      setCurrentSessionId(session.id);
     } catch (error) {
       console.error('Failed to create session:', error);
     }
@@ -33,10 +39,20 @@ function SessionSelector() {
     if (!sessionToDelete) return;
     try {
       await deleteSession(sessionToDelete);
+      if (currentSessionId === sessionToDelete) {
+        setCurrentSessionId(null);
+      }
       setDeleteDialogOpen(false);
       setSessionToDelete(null);
     } catch (error) {
       console.error('Failed to delete session:', error);
+    }
+  };
+
+  const loadSession = async (id: string) => {
+    const session = await getSessionById(id);
+    if (session) {
+      setCurrentSessionId(session.id);
     }
   };
 
@@ -51,12 +67,12 @@ function SessionSelector() {
       <TextField
         select
         label="Session"
-        value={currentSession?.id || ''}
+        value={currentSessionId || ''}
         onChange={(e) => loadSession(e.target.value)}
         sx={{ flex: 1 }}
         size="small"
       >
-        {sessions.map((session) => (
+        {sessions.map((session: Session) => (
           <MenuItem key={session.id} value={session.id}>
             {sessionLabelsMap[session.id] || session.id.slice(-8)}
           </MenuItem>
@@ -67,9 +83,9 @@ function SessionSelector() {
           <AddIcon />
         </IconButton>
       </Tooltip>
-      {currentSession && (
+      {currentSessionId && (
         <Tooltip title="Delete">
-          <IconButton onClick={(e) => openDeleteDialog(e, currentSession.id)} color="error">
+          <IconButton onClick={(e) => openDeleteDialog(e, currentSessionId)} color="error">
             <DeleteIcon />
           </IconButton>
         </Tooltip>
