@@ -27,8 +27,12 @@ export function useCurrentSessionId() {
 export function useIsHydrated() {
   const [isHydrated, setIsHydrated] = useState(false);
 
+  // Use requestAnimationFrame to avoid setState in effect
   useEffect(() => {
-    setIsHydrated(true);
+    const frameId = requestAnimationFrame(() => {
+      setIsHydrated(true);
+    });
+    return () => cancelAnimationFrame(frameId);
   }, []);
 
   return isHydrated;
