@@ -1,22 +1,20 @@
 import { Box, CircularProgress } from '@mui/material';
 import { useRef, useEffect } from 'react';
-import { Message } from '../../api/client';
 import MessageItem from './MessageItem';
+import { useCurrentSessionId, useIsHydrated } from '../../hooks/useSession';
+import { useMessageListState } from '../../hooks/useMessageListState';
 
-interface MessageListProps {
-  messages: Message[];
-  isLoading?: boolean;
-  isStreaming?: boolean;
-}
-
-function MessageList({ messages, isLoading, isStreaming }: MessageListProps) {
+function MessageList() {
+  const { currentSessionId } = useCurrentSessionId();
+  const isHydrated = useIsHydrated();
+  const { messages, isStreaming } = useMessageListState(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  if (isLoading && messages.length === 0) {
+  if (!isHydrated) {
     return (
       <Box
         sx={{
@@ -27,6 +25,22 @@ function MessageList({ messages, isLoading, isStreaming }: MessageListProps) {
         }}
       >
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!currentSessionId) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          flex: 1,
+          color: 'text.secondary',
+        }}
+      >
+        Select or create a session to start chatting
       </Box>
     );
   }

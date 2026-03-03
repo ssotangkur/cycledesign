@@ -9,8 +9,6 @@ import PreviewFrame from '../components/preview/PreviewFrame';
 import PreviewServerStatus, { type ServerState } from '../components/preview/PreviewServerStatus';
 import PreviewLogViewer, { type LogEntry } from '../components/preview/PreviewLogViewer';
 import Divider from '../components/layout/Divider';
-import { useSession } from '../hooks/useSession';
-import { useMessageListState } from '../hooks/useMessageListState';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -25,11 +23,6 @@ function MainLayout() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [leftPaneWidth, setLeftPaneWidth] = useState<number | null>(null);
-
-  const { currentSession } = useSession();
-  const { messages, isConnected, isStreaming, sendMessage } = useMessageListState(
-    currentSession?.id || null
-  );
 
   const [serverState, setServerState] = useState<ServerState>('STOPPED');
   const [serverPort, setServerPort] = useState<number | undefined>();
@@ -154,9 +147,9 @@ function MainLayout() {
           }}
         >
           <SessionSelector />
-          <MessageList messages={messages} isStreaming={isStreaming} />
-          <PromptInput onSend={sendMessage} disabled={!isConnected} />
-          <ConnectionStatus isConnected={isConnected} />
+          <MessageList />
+          <PromptInput />
+          <ConnectionStatus />
         </Box>
 
         <Divider

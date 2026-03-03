@@ -1,19 +1,27 @@
 import { useState } from 'react';
 import { Box, TextField, IconButton } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
+import { useCurrentSessionId, useIsHydrated, useInvalidateSessions } from '../../hooks/useSession';
+import { useMessageListState } from '../../hooks/useMessageListState';
 
-interface PromptInputProps {
-  onSend: (content: string) => void;
-  disabled?: boolean;
-}
-
-function PromptInput({ onSend, disabled }: PromptInputProps) {
+function PromptInput() {
+  const { currentSessionId } = useCurrentSessionId();
+  const isHydrated = useIsHydrated();
+  const { invalidateSessions } = useInvalidateSessions();
+  const { sendMessage, isStreaming, isConnected, messages } = useMessageListState(currentSessionId);
   const [input, setInput] = useState('');
 
-  const handleSubmit = () => {
+  const disabled = !isHydrated || !currentSessionId || !isConnected || isStreaming;
+
+  const handleSubmit = async () => {
     if (input.trim() && !disabled) {
-      onSend(input.trim());
+      const isFirstMessage = messages.length === 0;
+      sendMessage(input.trim());
       setInput('');
+      // Invalidate sessions list after first message to update the session label
+      if (isFirstMessage) {
+        invalidateSessions();
+      }
     }
   };
 
