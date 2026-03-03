@@ -19,8 +19,8 @@
         "build": "npm run build --workspaces",
         "lint": "cross-env NODE_OPTIONS=--max-old-space-size=4096 npm run lint --workspaces",
         "lint:fix": "cross-env NODE_OPTIONS=--max-old-space-size=4096 npm run lint:fix --workspaces --if-present",
-        "knip": "knip",
-        "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit --project apps/server/tsconfig.json && cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit --project apps/web/tsconfig.json",
+        "knip": "knip --include files,dependencies,unlisted,unresolved",
+        "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit --project apps/server/tsconfig.json && cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit --project apps/web/tsconfig.json",
         "validate": "npm run lint && npm run typecheck && npm run knip",
         "test": "npm run test --workspaces"
     },

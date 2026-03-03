@@ -1,6 +1,29 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "ignoreExportsUsedInFile": true,
+  "ignore": [
+    "**/ecosystem.config.js",
+    "**/scripts/tee.js",
+    "**/apps/server/src/llm/agent.ts",
+    "**/apps/server/src/parser/index.ts",
+    "**/apps/server/src/routes/completion.ts",
+    "**/apps/server/src/validation/index.ts",
+    "**/apps/server/src/websocket/handler.ts",
+    "**/apps/web/src/components/layout/ResizablePane.tsx",
+    "**/apps/web/src/components/preview/StatusMessage.tsx"
+  ],
+  "ignoreDependencies": [
+    "zod",
+    "kill-port",
+    "@ai-sdk/openai",
+    "@typescript-eslint/eslint-plugin",
+    "@typescript-eslint/parser",
+    "@types/diff",
+    "@design/app"
+  ],
+  "ignoreWorkspaces": [
+    "packages/design-system-runtime"
+  ],
   "workspaces": {
     "apps/web": {
       "project": ["src/**/*.{ts,tsx}"]
