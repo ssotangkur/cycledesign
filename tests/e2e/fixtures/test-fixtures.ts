@@ -1,0 +1,46 @@
+import { test as base, expect, type Page } from '@playwright/test';
+
+/**
+ * Extended test fixtures for CycleDesign E2E tests
+ */
+type TestFixtures = {
+  authenticatedPage: Page;
+  createSession: () => Promise<void>;
+};
+
+export const test = base.extend<TestFixtures>({
+  /**
+   * Authenticated page fixture - ensures the app is loaded and ready
+   * For now, we assume OAuth is either completed or not required for basic UI tests
+   */
+  authenticatedPage: async ({ page }, use) => {
+    // Navigate to the app
+    await page.goto('/');
+    
+    // Wait for the app to be hydrated (check for main elements)
+    await page.waitForSelector('[data-testid="app-layout"]', { timeout: 15000 });
+    
+    await use(page);
+  },
+
+  /**
+   * Helper to create a session
+   * Note: This app manages sessions via localStorage, not URL routing
+   */
+  createSession: async ({ authenticatedPage }, use) => {
+    const createSession = async (): Promise<void> => {
+      // Click creates session directly (no dialog in original behavior)
+      await authenticatedPage.getByTestId('new-session-button').click();
+      
+      // Wait for session select to have a value (session was created and selected)
+      await authenticatedPage.waitForFunction(() => {
+        const select = document.querySelector('[data-testid="session-select"]') as HTMLSelectElement;
+        return select && select.value !== '';
+      }, { timeout: 5000 });
+    };
+    
+    await use(createSession);
+  },
+});
+
+export { expect };

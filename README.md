@@ -227,6 +227,11 @@ cycledesign/
 │           └── messages.jsonl
 │
 ├── docs/                       # Documentation
+├── tests/e2e/                  # End-to-end tests (Playwright)
+│   ├── tests/                  # Test specifications
+│   ├── fixtures/               # Test fixtures and helpers
+│   ├── playwright.config.ts    # Playwright configuration
+│   └── README.md               # E2E testing documentation
 ├── package.json                # Root workspace config (npm run dev)
 ├── tmp/                       # Log files (server.log, web.log)
 └── README.md
@@ -304,6 +309,10 @@ Sessions are stored in `.cycledesign/sessions/` as JSONL (JSON Lines):
 npm run build        # Build all apps
 npm run lint         # Lint all apps
 npm run validate     # Run ESLint + Knip validation
+npm run test         # Run all tests (unit + E2E)
+npm run test:e2e     # Run E2E tests with Playwright
+npm run test:e2e:ui  # Run E2E tests with Playwright UI
+npm run test:e2e:debug  # Run E2E tests in debug mode
 ```
 
 **Backend (`apps/server`):**
@@ -386,7 +395,46 @@ Sessions are stored in `.cycledesign/sessions/`. If data seems lost:
 - npm scripts (npm run dev)
 - tsx for TypeScript execution
 - nodemon for server auto-restart
+- Playwright for E2E testing
 - Chrome DevTools MCP for testing
+
+## E2E Testing
+
+CycleDesign uses Playwright for end-to-end browser testing. Tests verify UI functionality without relying on LLM responses.
+
+### Setup
+
+```bash
+# Install Playwright browsers
+npm run install:e2e:browsers
+```
+
+### Running Tests
+
+```bash
+# Run all tests (headless)
+npm run test:e2e
+
+# Run with UI for interactive exploration
+npm run test:e2e:ui
+
+# Run in debug mode with visible browser
+npm run test:e2e:debug
+```
+
+### Test Coverage
+
+- **Session Management** - Create, rename, delete sessions
+- **Layout & Navigation** - Responsive panes, resizing, navigation
+- **Chat Panel** - Message sending, loading states, connection status
+
+### Writing Tests
+
+See [apps/e2e/README.md](apps/e2e/README.md) for detailed documentation on writing and running E2E tests.
+
+### CI/CD
+
+E2E tests run automatically on pull requests to `main` via GitHub Actions. Test reports and screenshots are uploaded as artifacts on failure.
 
 
 

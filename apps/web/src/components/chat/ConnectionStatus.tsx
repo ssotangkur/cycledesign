@@ -17,6 +17,7 @@ function ConnectionStatus() {
   return (
     <Tooltip title={isConnected ? 'Connected' : 'Disconnected'} placement="bottom">
       <Box
+        data-testid="connection-status"
         sx={{
           display: 'flex',
           alignItems: 'center',

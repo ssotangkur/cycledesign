@@ -120,13 +120,13 @@ function MainLayout() {
   const previewUrl = serverState === 'RUNNING' ? `http://localhost:${serverPort || 3002}` : undefined;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <Box data-testid="app-layout" sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <AppBar position="static" sx={{ width: '100%', flexShrink: 0 }}>
         <Toolbar>
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             CycleDesign
           </Typography>
-          <IconButton color="inherit" onClick={() => navigate('/settings')}>
+          <IconButton data-testid="settings-button" color="inherit" onClick={() => navigate('/settings')}>
             <SettingsIcon />
           </IconButton>
         </Toolbar>
@@ -137,6 +137,7 @@ function MainLayout() {
         sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}
       >
         <Box
+          data-testid="chat-panel"
           sx={{
             width: leftPaneWidth ?? `${DEFAULT_LEFT_PANE_PERCENT * 100}%`,
             minWidth: `${MIN_LEFT_PANE_WIDTH}px`,
@@ -161,6 +162,7 @@ function MainLayout() {
         />
 
         <Box
+          data-testid="preview-panel"
           sx={{
             flex: 1,
             display: 'flex',

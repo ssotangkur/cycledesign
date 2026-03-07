@@ -27,6 +27,7 @@ function MessageItem({ message }: MessageItemProps) {
 
   return (
     <Box
+      data-testid={isUser ? 'message-user' : 'message-assistant'}
       sx={{
         display: 'flex',
         flexDirection: isUser ? 'row-reverse' : 'row',
@@ -35,6 +36,7 @@ function MessageItem({ message }: MessageItemProps) {
       }}
     >
       <Avatar
+        data-testid={isUser ? 'avatar-user' : 'avatar-assistant'}
         sx={{
           bgcolor: isUser ? 'primary.main' : 'secondary.main',
           width: 36,

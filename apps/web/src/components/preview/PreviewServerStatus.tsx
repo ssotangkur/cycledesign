@@ -65,6 +65,7 @@ function PreviewServerStatus({ state, port, onStart, onStop }: PreviewServerStat
 
   return (
     <Box
+      data-testid="preview-server-status"
       sx={{
         display: 'flex',
         alignItems: 'center',
@@ -75,6 +76,7 @@ function PreviewServerStatus({ state, port, onStart, onStop }: PreviewServerStat
       }}
     >
       <Chip
+        data-testid="server-state-chip"
         label={getLabel()}
         color={getColor()}
         size="small"
@@ -91,6 +93,7 @@ function PreviewServerStatus({ state, port, onStart, onStop }: PreviewServerStat
 
       {showStartButton && (
         <Button
+          data-testid="start-preview-button"
           variant="contained"
           size="small"
           onClick={onStart}
@@ -103,6 +106,7 @@ function PreviewServerStatus({ state, port, onStart, onStop }: PreviewServerStat
         <>
           {!isConfirmingStop ? (
             <Button
+              data-testid="stop-preview-button"
               variant="outlined"
               size="small"
               color="error"
@@ -113,6 +117,7 @@ function PreviewServerStatus({ state, port, onStart, onStop }: PreviewServerStat
           ) : (
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Button
+                data-testid="confirm-stop-preview-button"
                 variant="contained"
                 size="small"
                 color="error"
@@ -121,6 +126,7 @@ function PreviewServerStatus({ state, port, onStart, onStop }: PreviewServerStat
                 Confirm
               </Button>
               <Button
+                data-testid="cancel-stop-preview-button"
                 variant="outlined"
                 size="small"
                 onClick={handleCancelStop}
