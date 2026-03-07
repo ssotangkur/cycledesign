@@ -181,3 +181,4 @@ Tests verify preview panel states but don't validate rendered content because:
 - Code generation depends on LLM responses
 
 **Future:** Mock code generation for preview testing.
+""  
