@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { previewRouter } from './routes/preview.js';
 import { sseRouter } from './routes/sse.js';
+import { previewManager } from './preview/preview-manager.js';
 
 import https from 'https';
 import { WebSocketHandler } from './ws/index.js';
@@ -49,6 +50,19 @@ if (!existsSync(appTsXPath) && existsSync(templatePath)) {
   copyFileSync(templatePath, appTsXPath);
   console.log('[BOOTSTRAP] Created placeholder app.tsx from template');
 }
+
+// Auto-start preview server
+(async () => {
+  try {
+    console.log('[BOOTSTRAP] Starting preview server...');
+    await previewManager.start();
+    const status = previewManager.getStatus();
+    console.log('[BOOTSTRAP] Preview server started successfully on port', status.port);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[BOOTSTRAP] Failed to start preview server:', errorMessage);
+  }
+})();
 
 const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
