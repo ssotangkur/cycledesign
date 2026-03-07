@@ -1,8 +1,8 @@
 import { generateText, streamText, type ToolSet, type ModelMessage } from 'ai';
-import { createMistral } from '@ai-sdk/mistral';
+import { createMistral, MistralProvider as AISDKMistralProvider } from '@ai-sdk/mistral';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { IProvider, IProviderConfig, LLMResponse } from '../types';
+import { IProvider, IProviderConfig, LLMResponse } from '../types.js';
 
 const CONFIG_DIR = join(process.cwd(), '.cycledesign');
 const MISTRAL_CONFIG_FILE = join(CONFIG_DIR, 'mistral.json');
@@ -43,7 +43,7 @@ export class MistralProvider implements IProvider {
   readonly name = 'mistral' as const;
   private apiKey: string;
   private model: string;
-  private client: MistralProvider;
+  private client: AISDKMistralProvider;
 
   constructor(apiKey?: string, model?: string) {
     const config = loadConfig();

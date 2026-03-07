@@ -66,6 +66,7 @@ For React state changes, verify:
 - `apps/web/` - React frontend (Vite + MUI)
 - `apps/server/` - Node.js backend (Express + Vercel AI SDK)
 - `.opencode/agents/` - Custom agent definitions
+- `.cline/skills/` - Cline skills for project-specific guidance
 - `docs/` - Project documentation
 
 ## Tech Stack

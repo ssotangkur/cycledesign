@@ -1,4 +1,4 @@
-import { statusBroadcaster } from '../websocket/status-broadcaster';
+import { statusBroadcaster } from '../websocket/status-broadcaster.js';
 import {
   executeCreateFile,
   executeEditFile,
@@ -7,7 +7,7 @@ import {
   executeAddDependency,
   executeSubmitWork,
   executeAskUser,
-} from './tools/index';
+} from './tools/index.js';
 import {
   createFileSchema,
   editFileSchema,
@@ -16,11 +16,11 @@ import {
   addDependencySchema,
   submitWorkSchema,
   askUserSchema,
-} from './tools/index';
-import { ValidationPipeline } from '../validation/pipeline';
-import { injectIds } from '../parser/id-injector';
-import { previewManager } from '../preview/preview-manager';
-import { getPendingWork, clearPendingWork } from './work-tracker';
+} from './tools/index.js';
+import { ValidationPipeline } from '../validation/pipeline.js';
+import { injectIds } from '../parser/id-injector.js';
+import { previewManager } from '../preview/preview-manager.js';
+import { getPendingWork, clearPendingWork } from './work-tracker.js';
 import { join, resolve } from 'path';
 import { promises as fs } from 'fs';
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { RateLimitError, AuthError, ProviderError } from './errors';
+import { RateLimitError, AuthError, ProviderError } from './errors.js';
 
 describe('Custom Errors', () => {
   describe('RateLimitError', () => {

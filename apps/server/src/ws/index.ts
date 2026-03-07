@@ -2,14 +2,13 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { IncomingMessage } from 'http';
 import { parse as parseUrl } from 'url';
-import { getMessages, addMessage, generateMessageId } from '../sessions/storage';
-import { StoredMessage } from '../llm/types';
-import { SYSTEM_PROMPT } from '../llm/system-prompt';
-import { executeToolCalls } from '../llm/tool-executor';
-import { allTools } from '../llm/tools';
-import { CoreMessage } from 'ai';
-import { getLLMProvider } from '../llm/providers/provider-factory';
-import { getProviderConfig } from '../trpc/routers/providers';
+import { getMessages, addMessage, generateMessageId } from '../sessions/storage.js';
+import { StoredMessage } from '../llm/types.js';
+import { SYSTEM_PROMPT } from '../llm/system-prompt.js';
+import { executeToolCalls } from '../llm/tool-executor.js';
+import { allTools } from '../llm/tools/index.js';
+import { getLLMProvider } from '../llm/providers/provider-factory.js';
+import { getProviderConfig } from '../trpc/routers/providers.js';
 
 interface SessionConnection {
   ws: WebSocket;
@@ -313,7 +312,8 @@ export class WebSocketHandler {
       console.log('[WS] Retrieved', messages.length, 'messages from storage');
       console.log('[WS] Messages:', messages.map(m => ({ role: m.role, content: m.content?.substring(0, 50) })));
 
-      let currentMessages: CoreMessage[] = [
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let currentMessages: any[] = [
         { role: 'system', content: [{ type: 'text', text: SYSTEM_PROMPT }] },
         ...messages.map(msg => ({
           role: msg.role as 'user' | 'assistant',
@@ -408,10 +408,10 @@ export class WebSocketHandler {
           hasToolCalls = true;
 
           const toolCallArray = toolCalls.map(tc => ({
-            id: tc.toolCallId ?? tc.id,
+            id: tc.toolCallId,
             type: 'function' as const,
             function: {
-              name: tc.toolName ?? tc.name,
+              name: tc.toolName,
               arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}),
             },
           }));
@@ -420,10 +420,18 @@ export class WebSocketHandler {
           await executeToolCalls(toolCallArray, messageId);
           console.log('[TOOL] All tool calls completed for message:', messageId);
 
-          const newMessages: CoreMessage[] = [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const newMessages: any[] = [];
 
           if (fullContent.trim()) {
             newMessages.push({ role: 'assistant', content: [{ type: 'text', text: fullContent }] });
+          }
+
+          for (const toolCall of toolCallArray) {
+            newMessages.push({
+              role: 'tool',
+              content: [{ type: 'tool-result', toolCallId: toolCall.id, result: { success: true } }],
+            });
           }
 
           for (let i = 0; i < toolCalls.length; i++) {

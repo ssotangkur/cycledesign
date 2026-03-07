@@ -1,5 +1,5 @@
 import { Project, SyntaxKind, type JsxAttributeLike, type JsxElement, type JsxSelfClosingElement } from 'ts-morph';
-import type { InjectIdsResult, InjectionResult } from './types';
+import type { InjectIdsResult, InjectionResult } from './types.js';
 
 function isJsxElement(
   element: JsxElement | JsxSelfClosingElement

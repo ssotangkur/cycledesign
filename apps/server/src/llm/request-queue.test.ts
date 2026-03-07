@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { RequestQueue } from './request-queue';
+import { RequestQueue } from './request-queue.js';
 
 describe('RequestQueue', () => {
   let queue: RequestQueue;

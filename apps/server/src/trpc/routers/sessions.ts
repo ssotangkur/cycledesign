@@ -1,11 +1,11 @@
-import { router, publicProcedure } from '../init';
+import { router, publicProcedure } from '../init.js';
 import { z } from 'zod';
 import {
   listSessions,
   createSession,
   getSession,
   deleteSession,
-} from '../../sessions/storage';
+} from '../../sessions/storage.js';
 
 export const sessionsRouter = router({
   // GET /api/sessions - List all sessions

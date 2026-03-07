@@ -6,6 +6,7 @@ node_modules/
 # Build outputs
 apps/server/dist/
 apps/web/dist/
+apps/preview/dist/
 build/
 *.tsbuildinfo
 

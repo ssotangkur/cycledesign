@@ -24,13 +24,13 @@ export default function SettingsPage() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
 
-  const { data: providersData, isLoading: loadingProviders } = trpc.providers.list.useQuery();
-  const { data: configData, isLoading: loadingConfig, refetch: refetchConfig } = trpc.providers.getConfig.useQuery();
-  const { data: modelsData, isLoading: loadingModels } = trpc.providers.listModels.useQuery(undefined, {
+  const { data: providersData, isLoading: loadingProviders } = trpc.providerConfig.list.useQuery();
+  const { data: configData, isLoading: loadingConfig, refetch: refetchConfig } = trpc.providerConfig.getConfig.useQuery();
+  const { data: modelsData, isLoading: loadingModels } = trpc.providerConfig.listModels.useQuery(undefined, {
     enabled: !!configData?.hasApiKey,
   });
 
-  const updateConfigMutation = trpc.providers.updateConfig.useMutation({
+  const updateConfigMutation = trpc.providerConfig.updateConfig.useMutation({
     onSuccess: () => {
       refetchConfig();
       setApiKeyInput(API_KEY_PLACEHOLDER);

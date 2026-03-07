@@ -5,7 +5,6 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { theme } from './theme';
-import { SessionProvider } from './context/SessionContext';
 import { TRPCProvider } from './components/TRPCProvider';
 
 window.addEventListener('error', (event) => {
@@ -24,9 +23,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <BrowserRouter>
-          <SessionProvider>
-            <App />
-          </SessionProvider>
+          <App />
         </BrowserRouter>
       </ThemeProvider>
     </TRPCProvider>

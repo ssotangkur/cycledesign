@@ -1,6 +1,6 @@
 import { initTRPC } from '@trpc/server';
-import { providersRouter } from './routers/providers';
-import { sessionsRouter } from './routers/sessions';
+import { providersRouter } from './routers/providers.js';
+import { sessionsRouter } from './routers/sessions.js';
 
 const t = initTRPC.create();
 
@@ -8,7 +8,7 @@ export const router = t.router;
 export const publicProcedure = t.procedure;
 
 export const appRouter = router({
-  providers: providersRouter,
+  providerConfig: providersRouter,
   sessions: sessionsRouter,
 });
 

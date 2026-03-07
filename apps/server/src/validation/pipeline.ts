@@ -1,7 +1,7 @@
-import { ValidationError, ValidationResult } from './types';
-import { validateTypeScript } from './typescript';
-import { validateESLint } from './eslint';
-import { validateKnip } from './knip';
+import { ValidationError, ValidationResult } from './types.js';
+import { validateTypeScript } from './typescript.js';
+import { validateESLint } from './eslint.js';
+import { validateKnip } from './knip.js';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 

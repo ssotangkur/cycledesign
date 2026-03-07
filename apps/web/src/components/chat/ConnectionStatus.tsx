@@ -1,86 +1,21 @@
-import { Box, Typography, Tooltip, CircularProgress } from '@mui/material';
+import { Box, Typography, Tooltip } from '@mui/material';
+import { useIsHydrated, useCurrentSessionId } from '../../hooks/useSession';
+import { useMessageListState } from '../../hooks/useMessageListState';
 
-interface ConnectionStatusProps {
-  isConnected: boolean;
-  isReconnecting?: boolean;
-  reconnectAttempt?: number;
-  maxReconnectAttempts?: number;
-}
+function ConnectionStatus() {
+  const isHydrated = useIsHydrated();
+  const { currentSessionId } = useCurrentSessionId();
+  const { isConnected } = useMessageListState(currentSessionId);
 
-function ConnectionStatus({
-  isConnected,
-  isReconnecting = false,
-  reconnectAttempt = 0,
-  maxReconnectAttempts = 5,
-}: ConnectionStatusProps) {
-  const getStatusText = () => {
-    if (isConnected) {
-      return 'Connected';
-    }
-    if (isReconnecting) {
-      return `Reconnecting... (${reconnectAttempt}/${maxReconnectAttempts})`;
-    }
-    if (reconnectAttempt >= maxReconnectAttempts) {
-      return 'Offline';
-    }
-    return 'Connecting...';
-  };
-
-  const getStatusColor = () => {
-    if (isConnected) {
-      return 'success.main';
-    }
-    if (isReconnecting) {
-      return 'warning.main';
-    }
-    if (reconnectAttempt >= maxReconnectAttempts) {
-      return 'error.main';
-    }
-    return 'text.secondary';
-  };
-
-  const getIndicatorContent = () => {
-    if (isConnected) {
-      return (
-        <Box
-          sx={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            bgcolor: 'success.main',
-          }}
-        />
-      );
-    }
-    if (isReconnecting || !isConnected) {
-      return (
-        <CircularProgress
-          size={16}
-          thickness={6}
-          sx={{
-            color: getStatusColor(),
-          }}
-        />
-      );
-    }
+  if (!isHydrated) {
     return null;
-  };
+  }
 
-  const getTooltipTitle = () => {
-    if (isConnected) {
-      return 'WebSocket connection established';
-    }
-    if (isReconnecting) {
-      return `Attempting to reconnect... (Attempt ${reconnectAttempt} of ${maxReconnectAttempts})`;
-    }
-    if (reconnectAttempt >= maxReconnectAttempts) {
-      return 'Connection failed. Please refresh the page.';
-    }
-    return 'Establishing WebSocket connection...';
-  };
+  const statusText = isConnected ? 'Connected' : 'Disconnected';
+  const statusColor = isConnected ? 'success.main' : 'error.main';
 
   return (
-    <Tooltip title={getTooltipTitle()} placement="bottom">
+    <Tooltip title={isConnected ? 'Connected' : 'Disconnected'} placement="bottom">
       <Box
         sx={{
           display: 'flex',
@@ -94,9 +29,16 @@ function ConnectionStatus({
           borderColor: 'divider',
         }}
       >
-        {getIndicatorContent()}
-        <Typography variant="caption" color={getStatusColor()} sx={{ lineHeight: 1 }}>
-          {getStatusText()}
+        <Box
+          sx={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            bgcolor: statusColor,
+          }}
+        />
+        <Typography variant="caption" color={statusColor} sx={{ lineHeight: 1 }}>
+          {statusText}
         </Typography>
       </Box>
     </Tooltip>

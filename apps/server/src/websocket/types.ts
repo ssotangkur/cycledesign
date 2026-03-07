@@ -4,6 +4,9 @@ export interface StatusMessage {
   type: 'status';
   messageId: string;
   status:
+    | 'generation_start'
+    | 'generation_thinking'
+    | 'generation_complete'
     | 'tool_call_start'
     | 'tool_call_complete'
     | 'tool_call_error'

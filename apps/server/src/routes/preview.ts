@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { previewManager } from '../preview/preview-manager';
+import { previewManager } from '../preview/preview-manager.js';
 
 export const previewRouter = Router();
 
