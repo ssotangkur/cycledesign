@@ -15,7 +15,6 @@
   "ignoreDependencies": [
     "zod",
     "kill-port",
-    "@ai-sdk/openai",
     "@typescript-eslint/eslint-plugin",
     "@typescript-eslint/parser",
     "@types/diff",

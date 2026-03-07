@@ -214,7 +214,7 @@ export function createAgent(messageId: string) {
     // Called when all agent steps are finished
     onFinish: (_event) => {
       console.log('[AGENT] Agent finished for message:', messageId);
-      statusBroadcaster.sendGenerationComplete(messageId, _event.response.text);
+      statusBroadcaster.sendGenerationComplete(messageId, _event.text);
     },
   });
 }

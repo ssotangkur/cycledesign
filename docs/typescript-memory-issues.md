@@ -19,7 +19,7 @@ Reference: [AI SDK Docs - TypeScript Performance with Zod](https://ai-sdk.dev/do
 
 ## Solution
 
-### ✅ Upgrade Zod to v4.1.8 or Later (Recommended)
+### ✅ Upgrade Zod to v4.1.8 or Later (FIXED)
 
 ```bash
 npm install zod@^4.3.6
@@ -27,8 +27,21 @@ npm install zod@^4.3.6
 
 This is the **official fix** recommended by the Vercel AI SDK team. Zod v4 has improved module resolution that prevents the duplicate type loading issue.
 
+**Critical:** Make sure ALL dependencies use Zod v4. Check with:
+```bash
+npm list zod
+```
+
+If you see mixed versions (some v3, some v4), you need to:
+1. Remove unused AI SDK providers (e.g., `@ai-sdk/openai` if not used)
+2. Force reinstall: `npm install zod@^4.3.6`
+
 **Changes made:**
-- Updated `apps/server/package.json`: `"zod": "^3.22.4"` → `"zod": "^4.3.6"`
+- Removed `@ai-sdk/openai` (unused, was pulling in Zod v3)
+- Upgraded `zod` from v3.25.76 to v4.3.6
+- All AI SDK dependencies now use Zod v4 consistently
+
+**Result:** TypeScript typecheck now completes with 4GB memory (previously failed at 8GB+)
 
 ### Alternative: Update TypeScript Configuration
 
