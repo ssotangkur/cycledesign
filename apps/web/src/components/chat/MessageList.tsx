@@ -47,6 +47,7 @@ function MessageList() {
 
   return (
     <Box
+      data-testid="message-list"
       sx={{
         flex: 1,
         overflowY: 'auto',
@@ -60,7 +61,7 @@ function MessageList() {
         <MessageItem key={message.id} message={message} />
       ))}
       {isStreaming && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+        <Box data-testid="loading-indicator" sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
           <CircularProgress size={24} />
         </Box>
       )}

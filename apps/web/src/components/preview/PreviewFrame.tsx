@@ -43,6 +43,7 @@ function PreviewFrame({ url, isLoading = false, error = null, onComponentSelecte
   if (error) {
     return (
       <Box
+        data-testid="preview-error"
         sx={{
           width: '100%',
           height: '100%',
@@ -67,6 +68,7 @@ function PreviewFrame({ url, isLoading = false, error = null, onComponentSelecte
   if (isLoading) {
     return (
       <Box
+        data-testid="preview-loading"
         sx={{
           width: '100%',
           height: '100%',
@@ -88,6 +90,7 @@ function PreviewFrame({ url, isLoading = false, error = null, onComponentSelecte
   if (!url) {
     return (
       <Box
+        data-testid="preview-empty"
         sx={{
           width: '100%',
           height: '100%',
@@ -111,6 +114,7 @@ function PreviewFrame({ url, isLoading = false, error = null, onComponentSelecte
 
   return (
     <Box
+      data-testid="preview-frame"
       sx={{
         width: '100%',
         height: '100%',

@@ -80,7 +80,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <Box sx={{ maxWidth: 800, margin: '0 auto' }}>
+    <Box data-testid="settings-page" sx={{ maxWidth: 800, margin: '0 auto' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
         <IconButton onClick={() => navigate('/')} sx={{ mr: 1 }}>
           <ArrowBackIcon />

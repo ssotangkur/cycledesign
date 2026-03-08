@@ -63,7 +63,7 @@ function SessionSelector() {
   };
 
   return (
-    <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1 }}>
+    <Box data-testid="session-selector" sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1 }}>
       <TextField
         select
         label="Session"
@@ -71,35 +71,36 @@ function SessionSelector() {
         onChange={(e) => loadSession(e.target.value)}
         sx={{ flex: 1 }}
         size="small"
+        data-testid="session-select"
       >
         {sessions.map((session: Session) => (
-          <MenuItem key={session.id} value={session.id}>
+          <MenuItem key={session.id} value={session.id} data-testid="session-option">
             {sessionLabelsMap[session.id] || session.id.slice(-8)}
           </MenuItem>
         ))}
       </TextField>
       <Tooltip title="New Session">
-        <IconButton onClick={handleCreateSession} color="primary">
+        <IconButton data-testid="new-session-button" onClick={handleCreateSession} color="primary">
           <AddIcon />
         </IconButton>
       </Tooltip>
       {currentSessionId && (
         <Tooltip title="Delete">
-          <IconButton onClick={(e) => openDeleteDialog(e, currentSessionId)} color="error">
+          <IconButton data-testid="delete-session-button" onClick={(e) => openDeleteDialog(e, currentSessionId)} color="error">
             <DeleteIcon />
           </IconButton>
         </Tooltip>
       )}
 
       {/* Delete Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} data-testid="delete-dialog">
         <DialogTitle>Delete Session</DialogTitle>
         <DialogContent>
           Are you sure you want to delete this session? This action cannot be undone.
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleDeleteSession} variant="contained" color="error">
+          <Button onClick={() => setDeleteDialogOpen(false)} data-testid="cancel-delete-button">Cancel</Button>
+          <Button onClick={handleDeleteSession} variant="contained" color="error" data-testid="confirm-delete-button">
             Delete
           </Button>
         </DialogActions>

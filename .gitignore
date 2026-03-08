@@ -26,6 +26,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Test outputs
+tests/e2e/playwright-report/
+tests/e2e/test-results/
+
 # Runtime data
 pids
 *.pid

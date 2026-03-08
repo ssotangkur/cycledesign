@@ -40,6 +40,7 @@ function Divider({ onDrag, currentWidth, containerWidth, minWidth, maxWidthPerce
 
   return (
     <Box
+      data-testid="resize-divider"
       sx={{
         width: '8px',
         cursor: 'col-resize',

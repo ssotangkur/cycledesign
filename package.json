@@ -4,7 +4,8 @@
     "private": true,
     "workspaces": [
         "apps/*",
-        "packages/*"
+        "packages/*",
+        "tests/*"
     ],
     "scripts": {
         "dev": "npm run dev:kill && concurrently --kill-others \"npm run dev:server:log\" \"npm run dev:web:log\"",
@@ -22,9 +23,14 @@
         "knip": "knip --include files,dependencies,unlisted,unresolved",
         "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit --project apps/server/tsconfig.json && cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit --project apps/web/tsconfig.json",
         "validate": "npm run lint && npm run typecheck && npm run knip",
-        "test": "npm run test --workspaces"
+        "test": "npm run test --workspaces",
+        "test:e2e": "npm run test:e2e --workspace=@cycledesign/e2e",
+        "test:e2e:ui": "npm run test:e2e:ui --workspace=@cycledesign/e2e",
+        "test:e2e:debug": "npm run test:e2e:debug --workspace=@cycledesign/e2e",
+        "install:e2e:browsers": "npm run install:browsers --workspace=@cycledesign/e2e"
     },
     "devDependencies": {
+        "@playwright/test": "^1.50.0",
         "concurrently": "^9.2.1",
         "cross-env": "^7.0.3",
         "kill-port": "^2.0.1",

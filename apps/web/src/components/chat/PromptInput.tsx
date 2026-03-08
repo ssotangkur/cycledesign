@@ -55,6 +55,7 @@ function PromptInput() {
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
         disabled={disabled}
+        inputProps={{ 'data-testid': 'prompt-input' }}
         sx={{
           '& .MuiOutlinedInput-root': {
             borderRadius: 2,
@@ -62,6 +63,7 @@ function PromptInput() {
         }}
       />
       <IconButton
+        data-testid="send-button"
         color="primary"
         onClick={handleSubmit}
         disabled={!input.trim() || disabled}
