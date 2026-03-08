@@ -6,7 +6,7 @@ import { getMessages, addMessage, generateMessageId } from '../sessions/storage.
 import { StoredMessage } from '../llm/types.js';
 import { SYSTEM_PROMPT } from '../llm/system-prompt.js';
 import { executeToolCalls } from '../llm/tool-executor.js';
-import { allTools } from '../llm/tools/index.js';
+import { allTools } from '../llm/tools/tools.js';
 import { getLLMProvider } from '../llm/providers/provider-factory.js';
 import { getProviderConfig } from '../trpc/routers/providers.js';
 
