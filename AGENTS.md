@@ -9,6 +9,18 @@
 5. **Fix issues** based on feedback
 6. **Repeat** until verified
 
+---
+
+## PR Validation Rule
+
+**Always use the `gh` CLI to verify PR check status** - do not rely on local test results or agent reports alone.
+
+```bash
+gh pr checks <PR_NUMBER> --repo ssotangkur/cycledesign
+```
+
+This ensures you're checking the actual GitHub Actions status, not just local validation.
+
 ### Dev Server Commands
 
 - `npm run dev` - Start all servers with logging
