@@ -38,6 +38,9 @@
         "typescript": "^5.9.3",
         "vite": "^7.3.1"
     },
+    "optionalDependencies": {
+        "@rollup/rollup-linux-x64-gnu": "4.59.0"
+    },
     "dependencies": {
         "@tanstack/react-query": "^5.90.21",
         "@trpc/client": "11.10.0",
