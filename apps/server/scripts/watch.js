@@ -2,7 +2,7 @@ const { spawn } = require('child_process');
 const killPort = require('kill-port');
 
 const PORT = process.env.PORT || 3001;
-const script = 'src/index.ts';
+const script = 'src/server.ts';
 
 let child = null;
 let restarting = false;

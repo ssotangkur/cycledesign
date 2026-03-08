@@ -1,6 +1,6 @@
 import { ToolLoopAgent, stepCountIs, type Tool } from 'ai';
 import { createMistral } from '@ai-sdk/mistral';
-import { allTools } from './tools/index.js';
+import { allTools } from './tools/tools.js';
 import { SYSTEM_PROMPT } from './system-prompt.js';
 import { statusBroadcaster } from '../websocket/status-broadcaster.js';
 import { getPendingWork, clearPendingWork } from './work-tracker.js';

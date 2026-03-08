@@ -7,7 +7,7 @@ import {
   executeAddDependency,
   executeSubmitWork,
   executeAskUser,
-} from './tools/index.js';
+} from './tools/tools.js';
 import {
   createFileSchema,
   editFileSchema,
@@ -16,7 +16,7 @@ import {
   addDependencySchema,
   submitWorkSchema,
   askUserSchema,
-} from './tools/index.js';
+} from './tools/tools.js';
 import { ValidationPipeline } from '../validation/pipeline.js';
 import { injectIds } from '../parser/id-injector.js';
 import { previewManager } from '../preview/preview-manager.js';

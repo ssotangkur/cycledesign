@@ -6,10 +6,10 @@ import { sseRouter } from './routes/sse.js';
 import { previewManager } from './preview/preview-manager.js';
 
 import https from 'https';
-import { WebSocketHandler } from './ws/index.js';
+import { WebSocketHandler } from './ws/ws.js';
 import { existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
-import { appRouter } from './trpc/index.js';
+import { appRouter } from './trpc/trpc.js';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 
 dotenv.config();
