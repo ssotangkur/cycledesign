@@ -13,18 +13,21 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import ClearAllIcon from '@mui/icons-material/ClearAll';
 import type { Session } from '../../api/client';
-import { useSessions, useCreateSession, useDeleteSession, useGetSession } from '../../hooks/useSession';
+import { useSessions, useCreateSession, useDeleteSession, useGetSession, useDeleteAllSessions } from '../../hooks/useSession';
 import { useCurrentSessionId } from '../../hooks/useSession';
 
 function SessionSelector() {
   const { sessions, sessionLabelsMap } = useSessions();
   const { createSession } = useCreateSession();
   const { deleteSession } = useDeleteSession();
+  const { deleteAllSessions } = useDeleteAllSessions();
   const { getSessionById } = useGetSession();
   const { currentSessionId, setCurrentSessionId } = useCurrentSessionId();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [deleteAllDialogOpen, setDeleteAllDialogOpen] = useState(false);
 
   const handleCreateSession = async () => {
     try {
@@ -46,6 +49,16 @@ function SessionSelector() {
       setSessionToDelete(null);
     } catch (error) {
       console.error('Failed to delete session:', error);
+    }
+  };
+
+  const handleDeleteAllSessions = async () => {
+    try {
+      await deleteAllSessions();
+      setCurrentSessionId(null);
+      setDeleteAllDialogOpen(false);
+    } catch (error) {
+      console.error('Failed to delete all sessions:', error);
     }
   };
 
@@ -91,6 +104,11 @@ function SessionSelector() {
           </IconButton>
         </Tooltip>
       )}
+      <Tooltip title="Delete All Sessions">
+        <IconButton data-testid="delete-all-sessions-button" onClick={() => setDeleteAllDialogOpen(true)} color="error">
+          <ClearAllIcon />
+        </IconButton>
+      </Tooltip>
 
       {/* Delete Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} data-testid="delete-dialog">
@@ -102,6 +120,20 @@ function SessionSelector() {
           <Button onClick={() => setDeleteDialogOpen(false)} data-testid="cancel-delete-button">Cancel</Button>
           <Button onClick={handleDeleteSession} variant="contained" color="error" data-testid="confirm-delete-button">
             Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete All Dialog */}
+      <Dialog open={deleteAllDialogOpen} onClose={() => setDeleteAllDialogOpen(false)} data-testid="delete-all-dialog">
+        <DialogTitle>Delete All Sessions</DialogTitle>
+        <DialogContent>
+          Are you sure you want to delete all sessions? This action cannot be undone.
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteAllDialogOpen(false)} data-testid="cancel-delete-all-button">Cancel</Button>
+          <Button onClick={handleDeleteAllSessions} variant="contained" color="error" data-testid="confirm-delete-all-button">
+            Delete All
           </Button>
         </DialogActions>
       </Dialog>

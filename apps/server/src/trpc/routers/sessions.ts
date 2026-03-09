@@ -5,6 +5,7 @@ import {
   createSession,
   getSession,
   deleteSession,
+  deleteAllSessions,
 } from '../../sessions/storage.js';
 
 export const sessionsRouter = router({
@@ -41,4 +42,10 @@ export const sessionsRouter = router({
       }
       return { success: true };
     }),
+
+  // DELETE /api/sessions/all - Delete all sessions
+  deleteAll: publicProcedure.mutation(async () => {
+    await deleteAllSessions();
+    return { success: true };
+  }),
 });

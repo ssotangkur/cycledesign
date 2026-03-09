@@ -121,6 +121,18 @@ export async function deleteSession(id: string): Promise<boolean> {
   }
 }
 
+export async function deleteAllSessions(): Promise<void> {
+  await ensureSessionsDir();
+  const entries = await fs.readdir(SESSIONS_DIR, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const sessionDir = join(SESSIONS_DIR, entry.name);
+      await fs.rm(sessionDir, { recursive: true, force: true });
+    }
+  }
+}
+
 export async function addMessage(sessionId: string, message: StoredMessage): Promise<void> {
   const sessionDir = join(SESSIONS_DIR, sessionId);
   const messagesPath = join(sessionDir, 'messages.jsonl');
