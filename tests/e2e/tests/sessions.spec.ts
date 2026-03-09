@@ -85,26 +85,78 @@ test.describe('Session Management', () => {
     await createSession();
     await authenticatedPage.waitForTimeout(500);
     await createSession();
-    
+
     // Get the session select element
     const sessionSelect = authenticatedPage.getByTestId('session-select');
-    
+
     // Get the current session value
     const currentSessionId = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
-    
+
     // Get all session options
     const options = sessionSelect.locator('option');
     const optionCount = await options.count();
-    
+
     // If there are multiple sessions, try to select a different one
     if (optionCount > 1) {
       // Select the first option
       await sessionSelect.selectOption({ index: 0 });
       await authenticatedPage.waitForTimeout(500);
-      
+
       // Verify the selection changed
       const newSessionId = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
       expect(newSessionId).not.toBe(currentSessionId);
     }
+  });
+
+  test('should delete all sessions', async ({ authenticatedPage, createSession }) => {
+    // Create multiple sessions
+    await createSession();
+    await createSession();
+
+    // Wait for delete all button to be visible
+    await expect(authenticatedPage.getByTestId('delete-all-sessions-button')).toBeVisible();
+
+    // Click delete all button
+    await authenticatedPage.getByTestId('delete-all-sessions-button').click();
+
+    // Confirm deletion in dialog
+    await expect(authenticatedPage.getByTestId('delete-all-dialog')).toBeVisible();
+    await authenticatedPage.getByTestId('confirm-delete-all-button').click();
+
+    // Verify delete all dialog is closed
+    await expect(authenticatedPage.getByTestId('delete-all-dialog')).not.toBeVisible();
+
+    // Verify all sessions are deleted (select should be empty or have no options)
+    const sessionSelect = authenticatedPage.getByTestId('session-select');
+    const optionsAfter = sessionSelect.locator('option');
+    const optionCountAfter = await optionsAfter.count();
+    expect(optionCountAfter).toBe(0);
+  });
+
+  test('should cancel delete all sessions', async ({ authenticatedPage, createSession }) => {
+    // Create multiple sessions
+    await createSession();
+    await createSession();
+
+    // Wait for delete all button to be visible
+    await expect(authenticatedPage.getByTestId('delete-all-sessions-button')).toBeVisible();
+
+    // Get initial session count before opening dialog
+    const sessionSelect = authenticatedPage.getByTestId('session-select');
+    const optionsBefore = sessionSelect.locator('option');
+    const optionCountBefore = await optionsBefore.count();
+
+    // Click delete all button
+    await authenticatedPage.getByTestId('delete-all-sessions-button').click();
+
+    // Cancel deletion
+    await authenticatedPage.getByTestId('cancel-delete-all-button').click();
+
+    // Verify delete all dialog is closed but sessions still exist
+    await expect(authenticatedPage.getByTestId('delete-all-dialog')).not.toBeVisible();
+
+    const optionsAfter = sessionSelect.locator('option');
+    const optionCountAfter = await optionsAfter.count();
+    expect(optionCountAfter).toBe(optionCountBefore);
   });
 });

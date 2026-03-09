@@ -136,6 +136,30 @@ export function useDeleteSession() {
 }
 
 /**
+ * Hook to delete all sessions.
+ * Automatically invalidates the sessions list on success.
+ */
+export function useDeleteAllSessions() {
+  const utils = trpc.useUtils();
+
+  const mutation = trpc.sessions.deleteAll.useMutation({
+    onSuccess: () => {
+      utils.sessions.list.invalidate();
+    },
+  });
+
+  const deleteAllSessions = useCallback(async () => {
+    return mutation.mutateAsync();
+  }, [mutation]);
+
+  return {
+    deleteAllSessions,
+    isDeletingAll: mutation.isPending,
+    error: mutation.error,
+  };
+}
+
+/**
  * Hook to get a session by ID.
  * Uses tRPC utility to fetch without caching.
  */
