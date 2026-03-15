@@ -1006,10 +1006,612 @@ Each tool file should export:
 
 ---
 
+## Architecture Overview
+
+### Directory Structure
+
+```
+apps/server/src/
+├── transport/
+│   └── ws/
+│       └── WebSocketHandler.ts    # Connection, session, rate limiting
+│
+├── features/
+│   └── status/
+│       ├── types.ts               # StatusMessage, StatusType
+│       ├── StatusBroadcaster.ts   # Pub/sub core
+│       └── WebSocketBridge.ts     # Bridge status→WebSocket
+│
+├── llm/
+│   ├── agent.ts                   # ToolLoopAgent
+│   ├── tool-executor.ts           # Manual tool execution
+│   └── providers/
+│       ├── mock.ts                # Mock provider for testing
+│       ├── mistral.ts
+│       └── qwen.ts
+│
+└── validation/
+    └── validation-service.ts      # Shared validation logic
+```
+
+### Responsibility Boundaries
+
+| Layer | Directory | Responsibilities |
+|-------|-----------|------------------|
+| Transport | `transport/ws/` | WebSocket protocol, connections, sessions |
+| Application | `features/status/` | Status broadcasting, WebSocket bridge |
+| Domain | `llm/`, `validation/` | LLM orchestration, validation |
+
+## Status Message Protocol
+
+### Status Types
+
+| Status Type | When Sent | Payload |
+|-------------|-----------|---------|
+| `generation_start` | Agent begins processing | `messageId, details` |
+| `generation_thinking` | LLM step starts | `messageId, details` |
+| `generation_complete` | All steps complete | `messageId, details, text` |
+| `tool_call_start` | Before tool execute | `messageId, tool, details` |
+| `tool_call_complete` | After tool success | `messageId, tool, details` |
+| `tool_call_error` | After tool failure | `messageId, tool, details` |
+| `validation_start` | Validation stage begins | `messageId, details` |
+| `validation_complete` | All validations passed | `messageId, details` |
+| `preview_start` | Starting preview server | `messageId, details` |
+| `preview_ready` | Preview server running | `messageId, details, port` |
+
+### WebSocket Message Format
+
+```typescript
+interface StatusMessage {
+  type: 'status';
+  messageId: string;
+  status: StatusType;
+  tool?: string;
+  details: string;
+  timestamp: number;
+}
+```
+
+### Client-Side Handling
+
+Status messages are received via the WebSocket connection and handled by the `SessionWebSocket.onStatus` callback:
+
+```typescript
+instance.ws.onStatus = (status) => {
+  // Update UI state with status message
+  instance!.currentStatus = status;
+  instance!.subscribers.forEach(fn => fn());
+};
+```
+
+## Mock Provider
+
+### Enabling Mock Provider
+
+Set environment variable:
+
+```bash
+ENABLE_MOCK_PROVIDER=true
+```
+
+### Using in Tests
+
+```typescript
+import { useMockProvider } from '../fixtures/test-fixtures';
+
+test('should work with mock provider', async ({ useMockProvider }) => {
+  await useMockProvider();
+  // ... test code
+});
+```
+
+### Mock Provider Behavior
+
+The MockProvider provides deterministic responses for testing:
+
+- **File creation prompts** (`create file`, `create_file`): Returns a `create_file` tool call with test.tsx
+- **Edit prompts** (`edit`, `update`): Returns an `edit_file` tool call
+- **Default**: Returns a text response with no tool calls
+
+### Writing Deterministic Tests
+
+When writing E2E tests with the MockProvider:
+
+1. Enable the mock provider via environment variable or fixture
+2. Use specific prompt patterns to trigger known tool calls
+3. Assert on deterministic outcomes (no flaky timing)
+4. Verify status messages are broadcast correctly
+
+Example:
+
+```typescript
+test('should create file with mock provider', async ({
+  authenticatedPage,
+  useMockProvider,
+}) => {
+  await useMockProvider();
+  
+  await promptInput.fill('Create file test.tsx');
+  await promptInput.press('Enter');
+  
+  // Verify tool call status appears
+  await expect(page.getByText('create_file')).toBeVisible();
+  
+  // Verify file creation status
+  await expect(page.getByText('test.tsx')).toBeVisible();
+});
+```
+
+---
+
+## Architecture Overview
+
+### Complete Directory Structure
+
+```
+apps/server/src/
+├── transport/
+│   └── ws/
+│       └── WebSocketHandler.ts    # WebSocket connections, sessions, rate limiting
+│
+├── features/
+│   └── status/
+│       ├── types.ts               # StatusMessage, StatusType, WebSocketStatusMessage
+│       ├── StatusBroadcaster.ts   # Pub/sub core for status events
+│       └── WebSocketBridge.ts     # Bridge: application status → WebSocket transport
+│
+├── llm/
+│   ├── agent.ts                   # ToolLoopAgent with streaming
+│   ├── tool-executor.ts           # Manual tool execution (legacy)
+│   ├── tools/                     # Tool definitions (create_file, edit_file, etc.)
+│   ├── providers/
+│   │   ├── mock.ts                # Mock provider for testing
+│   │   ├── mistral.ts
+│   │   └── qwen.ts
+│   └── work-tracker.ts            # Tracks pending work per messageId
+│
+├── validation/
+│   ├── validation-service.ts      # Shared validation logic
+│   ├── pipeline.ts                # ValidationPipeline class
+│   ├── typescript.ts              # TypeScript compilation checks
+│   ├── eslint.ts                  # ESLint validation
+│   └── id-injector.ts             # ID injection for testing
+│
+└── preview/
+    └── preview-manager.ts         # Vite preview server management
+```
+
+### Responsibility Boundaries
+
+| Layer | Directory | Responsibilities | Should Not |
+|-------|-----------|------------------|------------|
+| **Transport** | `transport/ws/` | WebSocket protocol, TCP connections, session tracking, rate limiting, message routing | Know about LLM, tools, or validation |
+| **Application** | `features/status/` | Status message types, pub/sub broadcasting, WebSocket bridge | Implement business logic |
+| **Domain** | `llm/`, `validation/`, `preview/` | LLM orchestration, tool execution, validation logic, preview management | Directly manage WebSocket connections |
+
+### Architectural Principle
+
+```
+┌─────────────────────────────────────────┐
+│         Application Layer               │
+│  (ToolLoopAgent, Validation, Preview)   │
+│              ↓ uses                     │
+│     StatusBroadcaster (pub/sub)         │
+└─────────────────────────────────────────┘
+              ↓ broadcasts to
+┌─────────────────────────────────────────┐
+│        Transport Layer                  │
+│  WebSocketBridge → WebSocketHandler     │
+│         (sends via WS connection)       │
+└─────────────────────────────────────────┘
+```
+
+### Data Flow Diagram
+
+```
+User Message (WebSocket)
+         ↓
+┌─────────────────────────┐
+│  WebSocketHandler       │
+│  - Receives message     │
+│  - Creates session      │
+│  - Registers in Bridge  │
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│  ToolLoopAgent          │
+│  - Processes prompt     │
+│  - Calls tools          │
+│  - Streams response     │
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│  StatusBroadcaster      │
+│  - Publishes status     │
+│  - Notifies subscribers │
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│  WebSocketBridge        │
+│  - Maps messageId→sessId│
+│  - Forwards to WS       │
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│  WebSocketHandler       │
+│  - Sends to client      │
+└─────────────────────────┘
+```
+
+---
+
+## Status Message Protocol
+
+For a complete reference of all status message types, see [Status Messages Reference](./STATUS-MESSAGES.md).
+
+### Quick Reference
+
+| Category | Status Types |
+|----------|--------------|
+| **Generation** | `generation_start`, `generation_thinking`, `generation_complete` |
+| **Tool Calls** | `tool_call_start`, `tool_call_complete`, `tool_call_error` |
+| **Validation** | `validation_start`, `validation_complete`, `validation_error` |
+| **Preview** | `preview_start`, `preview_ready`, `preview_error` |
+
+### WebSocket Message Format
+
+```typescript
+interface StatusMessage {
+  type: 'status';
+  messageId: string;         // Links status to original user message
+  status: StatusType;        // One of the status types above
+  tool?: string;             // Tool name (for tool_call_* statuses)
+  details: string;           // Human-readable description
+  timestamp: number;         // Unix timestamp (ms)
+}
+```
+
+### Client-Side Handling
+
+Status messages are received via the WebSocket connection:
+
+```typescript
+// apps/web/src/api/websocket.ts
+export class SessionWebSocket {
+  onStatus?: (status: StatusMessage) => void;
+
+  private handleMessage(event: MessageEvent): void {
+    const data = JSON.parse(event.data) as WebSocketMessage;
+
+    switch (data.type) {
+      case 'status':
+        this.onStatus?.(data as StatusMessage);
+        break;
+      // ... other cases
+    }
+  }
+}
+```
+
+### React Integration
+
+```typescript
+// apps/web/src/hooks/useMessageListState.ts
+const { currentStatus } = useMessageListState(sessionId);
+
+// In component:
+{currentStatus && (
+  <StatusDisplay
+    status={currentStatus.status}
+    tool={currentStatus.tool}
+    details={currentStatus.details}
+  />
+)}
+```
+
+---
+
+## WebSocketBridge Usage
+
+### Overview
+
+`WebSocketBridge` connects the application-layer status broadcasting system to the WebSocket transport layer. It maintains a mapping of `messageId` to `sessionId` for routing status messages.
+
+### Registration
+
+Register a session when message processing starts:
+
+```typescript
+import { webSocketBridge } from './features/status/WebSocketBridge.js';
+
+// When a new message arrives
+webSocketBridge.registerSession(messageId, sessionId);
+```
+
+### Broadcasting Status
+
+Broadcast status to a specific session:
+
+```typescript
+// Method 1: Using sessionId directly
+webSocketBridge.broadcastStatus(sessionId, messageId, {
+  status: 'generation_start',
+  details: 'Starting generation...',
+  timestamp: Date.now(),
+});
+
+// Method 2: Using messageId (bridge looks up sessionId)
+const sent = webSocketBridge.broadcastStatusByMessageId(messageId, {
+  status: 'tool_call_start',
+  tool: 'create_file',
+  details: 'Creating file...',
+  timestamp: Date.now(),
+});
+
+if (!sent) {
+  console.warn('Failed to send status - sessionId not found');
+}
+```
+
+### Unregistration
+
+Clean up when message processing completes:
+
+```typescript
+webSocketBridge.unregisterSession(messageId);
+```
+
+### Complete Example
+
+```typescript
+// In server.ts or route handler
+import { webSocketBridge } from './features/status/WebSocketBridge.js';
+
+async function handleUserMessage(messageId: string, sessionId: string, content: string) {
+  // Register session
+  webSocketBridge.registerSession(messageId, sessionId);
+
+  try {
+    // Send generation start
+    webSocketBridge.broadcastStatus(sessionId, messageId, {
+      status: 'generation_start',
+      details: 'Processing your request...',
+      timestamp: Date.now(),
+    });
+
+    // Process with LLM
+    const result = await toolLoopAgent.process(content);
+
+    // Send generation complete
+    webSocketBridge.broadcastStatus(sessionId, messageId, {
+      status: 'generation_complete',
+      details: 'Generation complete',
+      timestamp: Date.now(),
+    });
+
+  } catch (error) {
+    // Send error status
+    webSocketBridge.broadcastStatus(sessionId, messageId, {
+      status: 'generation_error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: Date.now(),
+    });
+  } finally {
+    // Clean up
+    webSocketBridge.unregisterSession(messageId);
+  }
+}
+```
+
+---
+
+## Mock Provider Usage
+
+### Enabling Mock Provider
+
+**Development:**
+```bash
+# In apps/server/.env or .env.local
+ENABLE_MOCK_PROVIDER=true
+```
+
+**Testing:**
+```typescript
+// In E2E test fixture
+await page.evaluate(() => {
+  localStorage.setItem('cycledesign:provider', 'mock');
+});
+await page.reload();
+```
+
+### When to Use
+
+| Scenario | Use Mock Provider? | Reason |
+|----------|-------------------|--------|
+| **Unit Tests** | ✅ Yes | Fast, deterministic, no API costs |
+| **E2E Flow Tests** | ✅ Yes | Test UI flow without LLM variability |
+| **Integration Tests** | ⚠️ Sometimes | Depends on what you're testing |
+| **Manual Development** | ⚠️ Sometimes | Good for UI development, not for testing real LLM behavior |
+| **Production** | ❌ No | Mock provider is for testing only |
+
+### Known Limitations
+
+1. **Deterministic Responses:** Mock provider returns the same responses for the same prompts. This is good for testing but doesn't reflect real LLM behavior.
+
+2. **Limited Tool Calls:** Only responds to specific prompt patterns:
+   - `create file` / `create_file` → `create_file` tool call
+   - `edit` / `update` → `edit_file` tool call
+   - Everything else → plain text response
+
+3. **No Streaming Delays:** Simulates streaming with fixed 50ms delays, not real token generation timing.
+
+4. **No Context Awareness:** Doesn't maintain conversation context or remember previous messages.
+
+5. **Simplified Errors:** Doesn't simulate complex error scenarios like rate limiting or API failures.
+
+### Configuring Mock Responses
+
+```typescript
+// apps/server/src/llm/providers/mock.ts
+export class MockProvider {
+  async complete(messages: Message[], options: CompletionOptions) {
+    const lastMessage = messages[messages.length - 1];
+    const prompt = lastMessage.content;
+
+    // Customize responses based on prompt patterns
+    if (prompt.includes('dashboard')) {
+      return {
+        stream: this.generateChunks('Creating a dashboard...'),
+        toolCalls: [{
+          toolCallId: 'mock-1',
+          toolName: 'create_file',
+          args: {
+            filename: 'dashboard.tsx',
+            code: 'export default function Dashboard() { ... }',
+          },
+        }],
+      };
+    }
+
+    // Default response
+    return {
+      stream: this.generateChunks('Mock response'),
+    };
+  }
+}
+```
+
+### Writing Tests with Mock Provider
+
+```typescript
+// tests/e2e/tests/chat-mock.spec.ts
+import { test, expect } from '../fixtures/test-fixtures';
+
+test.describe('Chat Flow with Mock Provider', () => {
+  test('should complete full chat flow', async ({
+    authenticatedPage,
+    createSession,
+    useMockProvider,
+  }) => {
+    await useMockProvider();
+    await createSession();
+
+    const promptInput = authenticatedPage.getByTestId('prompt-input');
+    await promptInput.fill('Create file test.tsx');
+    await promptInput.press('Enter');
+
+    // Verify deterministic outcomes
+    await expect(authenticatedPage.getByText('create_file')).toBeVisible();
+    await expect(authenticatedPage.getByText('test.tsx')).toBeVisible();
+  });
+
+  test('should show status messages', async ({
+    authenticatedPage,
+    useMockProvider,
+  }) => {
+    await useMockProvider();
+
+    // ... trigger generation
+
+    // Verify status messages appear
+    await expect(authenticatedPage.getByTestId('status-tool_call_start')).toBeVisible();
+    await expect(authenticatedPage.getByTestId('status-tool_call_complete')).toBeVisible();
+  });
+});
+```
+
+---
+
+## Testing Guide
+
+### Running E2E Tests
+
+```bash
+# Run all E2E tests
+npm run test:e2e
+
+# Run with UI (headed mode)
+npm run test:e2e:ui
+
+# Run in debug mode (Playwright Inspector)
+npm run test:e2e:debug
+
+# Run specific test file
+npx playwright test tests/e2e/tests/chat.spec.ts
+
+# Run tests matching a pattern
+npx playwright test -g "Chat Flow"
+```
+
+### Writing Deterministic Tests
+
+**Do:**
+- Use the MockProvider for flow testing
+- Assert on visible UI states, not internal timing
+- Use `data-testid` attributes for reliable selectors
+- Test one behavior per test case
+
+**Don't:**
+- Rely on `setTimeout()` or fixed delays
+- Test LLM response quality (use mock for flow, not content)
+- Make assumptions about message order beyond what's guaranteed
+- Skip cleanup (close sessions, unregister bridges)
+
+### Debugging Test Failures
+
+1. **Run in UI mode:** `npm run test:e2e:ui` to see what's happening
+2. **Check console logs:** Browser console shows WebSocket messages
+3. **Use Playwright Inspector:** `npm run test:e2e:debug` for step-through
+4. **Enable verbose logging:** Set `DEBUG=pw:webchat` for WebSocket logs
+5. **Check network tab:** Verify WebSocket connection and messages
+
+### Common Test Patterns
+
+```typescript
+// Pattern 1: Basic chat flow
+test('should send and receive messages', async ({ authenticatedPage }) => {
+  const promptInput = authenticatedPage.getByTestId('prompt-input');
+  await promptInput.fill('Hello');
+  await promptInput.press('Enter');
+  
+  // Verify user message appears
+  await expect(authenticatedPage.getByText('Hello')).toBeVisible();
+  
+  // Verify response appears
+  await expect(authenticatedPage.getByText('Response')).toBeVisible();
+});
+
+// Pattern 2: Tool execution flow
+test('should execute tools', async ({ authenticatedPage, useMockProvider }) => {
+  await useMockProvider();
+  
+  await promptInput.fill('Create file test.tsx');
+  await promptInput.press('Enter');
+  
+  // Verify tool call status
+  await expect(authenticatedPage.getByText('create_file')).toBeVisible();
+});
+
+// Pattern 3: Error handling
+test('should handle errors gracefully', async ({ authenticatedPage }) => {
+  // Trigger an error condition
+  await promptInput.fill('');
+  await promptInput.press('Enter');
+  
+  // Verify error message
+  await expect(authenticatedPage.getByText('Message cannot be empty')).toBeVisible();
+});
+```
+
+---
+
 ## Cross-References
 
 - **Preview Server Management**: See `docs/Phase3.md` section "Backend-Managed Preview Server Lifecycle"
 - **Validation Pipeline**: See `docs/Phase3.md` section "Validation Pipeline"
+- **Status Messages Reference**: See `docs/STATUS-MESSAGES.md` for complete status type documentation
+- **WebSocket Migration Plan**: See `docs/WEBSOCKET-MIGRATION.md` for architecture details
 - **ID Injection**: See `docs/Phase3.md` section "ID Injection System"
 - **WebSocket Protocol**: See `docs/Phase3.md` section "Code Generation Flow (WebSocket-Based)"
 - **UI Layout**: See `docs/Phase3.md` section "UI Layout Architecture"
+- **WebSocket Migration**: See `docs/WEBSOCKET-MIGRATION.md` for the complete migration plan
