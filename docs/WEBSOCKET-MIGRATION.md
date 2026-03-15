@@ -4,6 +4,61 @@
 **Created:** March 9, 2026
 **Last Updated:** March 11, 2026
 
+## Next Migration: Channel-Based Transport
+
+**Status:** Planned (Q2 2026)
+
+The WebSocket-based architecture described in this document will be replaced by a **type-safe channel transport** system. See [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) for the complete specification.
+
+### Key Differences
+
+| Aspect | Current (WebSocket) | Target (Channels) |
+|--------|---------------------|-------------------|
+| **Abstraction** | Raw WebSocket messages | Type-safe channel instances |
+| **Type Safety** | Runtime validation | Compile-time enforcement |
+| **Event Direction** | Bidirectional (untyped) | Separated client→server and server→client |
+| **Session Management** | sessionId in URL query | Per-channel instances, auto-managed |
+| **Message Format** | `{ type, content, ... }` | `TransportEnvelope` with channelId |
+| **Handler Registration** | Callback-based | `registerHandlers()` - type-enforced |
+| **Reconnection** | Exponential backoff | Not supported (create new client) |
+
+### Migration Benefits
+
+1. **Type Safety**: All events and payloads enforced at compile-time
+2. **Per-Session Channels**: Independent channel instances per client subscription
+3. **Pure Application Services**: Application logic has no transport knowledge
+4. **Closure-Based State**: Handlers capture state via closures
+5. **No Race Conditions**: Server-side queuing eliminates subscribe-ack needs
+
+### Current Architecture (WebSocket)
+
+The current implementation uses WebSocket transport as described in the phases below. All phases 1-7 are complete and working.
+
+### Target Architecture (Channels)
+
+```
+apps/server/src/
+├── transport/
+│   └── ws/
+│       └── WebSocketHandler.ts    # Low-level WebSocket handling
+│
+├── protocol/                       # NEW: Channel protocol layer
+│   ├── server/
+│   │   └── ProtocolServer.ts      # Channel subscription management
+│   └── client/
+│       └── ProtocolClient.ts      # Channel instance management
+│
+├── features/
+│   └── status/
+│       ├── types.ts               # StatusMessage, StatusType
+│       ├── StatusBroadcaster.ts   # Pub/sub core
+│       └── WebSocketBridge.ts     # Bridge status→WebSocket
+│
+└── ...
+```
+
+**Migration Tracking:** See [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) for complete API specification and implementation details.
+
 ## Migration Status
 
 - [x] Phase 1: Deduplicate Validation - COMPLETE
@@ -49,15 +104,20 @@ apps/server/src/
     └── preview-manager.ts         # Vite preview server management
 ```
 
+**Note:** This architecture describes the current WebSocket-based implementation. The target channel-based transport will add a `protocol/` layer between `transport/ws/` and application features. See [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) for details.
+
 ### Responsibility Boundaries
 
-| Layer | Directory | Responsibilities |
-|-------|-----------|------------------|
-| **Transport** | `transport/ws/` | WebSocket protocol, TCP connections, session tracking, rate limiting, message routing |
-| **Application** | `features/status/` | Status message types, pub/sub broadcasting, WebSocket bridge |
-| **Domain** | `llm/`, `validation/`, `preview/` | LLM orchestration, tool execution, validation logic, preview management |
+| Layer | Directory | Responsibilities | Status |
+|-------|-----------|------------------|--------|
+| **Protocol** | `protocol/` | Channel instances, type-safe routing, subscription management | **Planned** |
+| **Transport** | `transport/ws/` | WebSocket protocol, TCP connections, session tracking, rate limiting, message routing | ✅ Current |
+| **Application** | `features/status/` | Status message types, pub/sub broadcasting, WebSocket bridge | ✅ Current |
+| **Domain** | `llm/`, `validation/`, `preview/` | LLM orchestration, tool execution, validation logic, preview management | ✅ Current |
 
 ### Data Flow
+
+#### Current Data Flow (WebSocket)
 
 ```
 User Message (WebSocket)
@@ -85,6 +145,32 @@ User Message (WebSocket)
 ┌─────────────────────────┐
 │  WebSocketHandler       │  Transport Layer
 │  (sends to client)      │
+└─────────────────────────┘
+```
+
+#### Target Data Flow (Channels)
+
+```
+Client channel.publish()
+         ↓
+┌─────────────────────────┐
+│  ProtocolClient         │  Protocol Layer
+│  (creates channel msg)  │
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│  WebSocketHandler       │  Transport Layer
+│  (sends via WebSocket)  │
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│  ProtocolServer         │  Protocol Layer
+│  (routes to channel)    │
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│  onChannelSubscribe     │  Application Layer
+│  (handler callback)     │
 └─────────────────────────┘
 ```
 

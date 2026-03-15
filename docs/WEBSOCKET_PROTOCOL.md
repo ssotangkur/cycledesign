@@ -1,8 +1,23 @@
 # WebSocket Protocol Specification
 
-**Phase:** 2a  
-**Version:** 1.0  
+**Phase:** 2a
+**Version:** 1.0
 **Last Updated:** 2026-02-21
+
+> **⚠️ Deprecation Notice**
+>
+> This WebSocket protocol specification describes the **current implementation** (Phase 2a, Version 1.0).
+>
+> **Target Architecture:** The protocol will be replaced by a **type-safe channel transport** system. See [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) for the complete specification.
+>
+> **Timeline:** Migration planned for Q2 2026.
+>
+> **Why the Change?**
+> - Compile-time type safety vs. runtime validation
+> - Per-session channel instances vs. raw message routing
+> - Directional event separation (client→server vs server→client)
+> - Type-enforced handler registration
+> - Simpler client API (auto-connect, no manual reconnection)
 
 This document specifies the WebSocket-based real-time messaging protocol used in CycleDesign for bidirectional communication between client and server.
 
@@ -24,9 +39,20 @@ This document specifies the WebSocket-based real-time messaging protocol used in
 
 ### 1.1 Endpoint
 
+**Current Implementation:**
 ```
 ws://localhost:3001/ws?sessionId=<session_id>
 ```
+
+**Target (Channel Transport):**
+```
+ws://localhost:3001/
+// No sessionId in URL - managed by ProtocolClient
+// Client creates channels: client.channel('chat')
+// Server generates channel IDs: 'channel-1', 'channel-2', ...
+```
+
+See [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) Section "Connection and Subscription Protocol" for details.
 
 **Parameters:**
 
@@ -58,6 +84,16 @@ ws://localhost:3001/ws?sessionId=<session_id>
 ---
 
 ## 2. Message Formats
+
+### Message Format Comparison
+
+| Aspect | Current (WebSocket) | Target (Channels) |
+|--------|---------------------|-------------------|
+| **Envelope** | `{ type, id, content, timestamp }` | `TransportEnvelope` with channelId, channelType, messageId |
+| **Control Messages** | `connected`, `history`, `ack`, `content`, `done` | `subscribe`, `subscribe-response`, `unsubscribe` |
+| **Application Messages** | `{ type: "message", ... }` | `{ channelId, channelType, payload: { event, data } }` |
+| **ID Generation** | Client generates message IDs | Server generates channelIds, sender generates messageIds |
+| **Direction** | Untyped bidirectional | Separated client→server and server→client |
 
 ### 2.1 Client → Server Messages
 
@@ -402,6 +438,14 @@ try {
 
 ## 5. Reconnection Strategy
 
+**Current Implementation:** Exponential backoff with message queuing
+
+**Target (Channel Transport):** No automatic reconnection
+
+> **Note:** The channel-based transport does not support automatic reconnection by design. Applications should create a new `ProtocolClient` instance to reconnect. This simplifies the protocol and removes state management complexity.
+>
+> See [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) FAQ: "How do I handle reconnection?"
+
 ### 5.1 Exponential Backoff
 
 Reconnection attempts use exponential backoff with a maximum delay:
@@ -531,6 +575,80 @@ class SessionWebSocket {
   }
 }
 ```
+
+---
+
+## Migration to Channel Transport
+
+### What Changes
+
+1. **Client API:**
+   ```typescript
+   // Current
+   const ws = new SessionWebSocket(sessionId, callbacks);
+   ws.send({ type: 'message', content: 'Hello' });
+   
+   // Target
+   const client = new ProtocolClient('ws://localhost:3001');
+   const channel = client.channel('chat');
+   channel.publish('message', { content: 'Hello' });
+   ```
+
+2. **Server API:**
+   ```typescript
+   // Current
+   ws.on('message', (data) => {
+     const msg = JSON.parse(data);
+     if (msg.type === 'message') { ... }
+   });
+   
+   // Target
+   server.onChannelSubscribe('chat', (channel) => {
+     return {
+       handlers: {
+         message: (payload) => { ... }
+       },
+       unsubscribe: () => { ... }
+     };
+   });
+   ```
+
+3. **Type Safety:**
+   ```typescript
+   // Target - Compile-time enforcement
+   interface ChannelTypes {
+     'chat': {
+       client: { 'message': { content: string } };
+       server: { 'message': { content: string; userId: string } };
+     };
+   }
+   
+   // Missing handlers = TYPE ERROR
+   server.onChannelSubscribe('chat', (channel) => {
+     return {
+       handlers: {
+         message: handler  // ❌ Missing 'typing' handler
+       }
+     };
+   });
+   ```
+
+### Migration Phases
+
+1. **Phase 1:** Implement `ProtocolServer` and `ProtocolClient`
+2. **Phase 2:** Migrate status messages to channel transport
+3. **Phase 3:** Migrate chat messages to channel transport
+4. **Phase 4:** Deprecate raw WebSocket API
+5. **Phase 5:** Remove WebSocket protocol layer
+
+### Backward Compatibility
+
+During migration, both protocols will coexist:
+- New clients use channel transport
+- Existing clients continue with WebSocket protocol
+- Gradual migration path with feature flags
+
+See [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) for complete migration guide.
 
 ---
 
