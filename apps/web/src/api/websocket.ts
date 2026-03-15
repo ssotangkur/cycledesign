@@ -2,8 +2,22 @@ import type { Message } from './client';
 
 const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
 
+export type StatusType =
+  | 'generation_start'
+  | 'generation_thinking'
+  | 'generation_complete'
+  | 'tool_call_start'
+  | 'tool_call_complete'
+  | 'tool_call_error'
+  | 'validation_start'
+  | 'validation_complete'
+  | 'validation_error'
+  | 'preview_start'
+  | 'preview_ready'
+  | 'preview_error';
+
 export interface WebSocketMessage {
-  type: 'message' | 'ping' | 'connected' | 'history' | 'ack' | 'content' | 'done' | 'error' | 'pong';
+  type: 'message' | 'ping' | 'connected' | 'history' | 'ack' | 'content' | 'done' | 'error' | 'pong' | 'status';
   id?: string;
   content?: string;
   timestamp?: number;
@@ -12,6 +26,10 @@ export interface WebSocketMessage {
   messages?: Message[];
   error?: string;
   retryAfter?: number;
+  // Status message fields
+  status?: StatusType;
+  tool?: string;
+  details?: string;
 }
 
 export interface DisplayMessage extends Message {
@@ -43,6 +61,7 @@ export class SessionWebSocket {
   onDone?: (messageId: string) => void;
   onError?: (error: string) => void;
   onConnectionChange?: (connected: boolean) => void;
+  onStatus?: (status: WebSocketMessage & { type: 'status' }) => void;
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
@@ -98,6 +117,10 @@ export class SessionWebSocket {
 
         case 'error':
           this.onError?.(data.error || 'Unknown error');
+          break;
+
+        case 'status':
+          this.onStatus?.(data as WebSocketMessage & { type: 'status' });
           break;
 
         case 'pong':

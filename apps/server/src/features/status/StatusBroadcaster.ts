@@ -1,8 +1,11 @@
 import { WebSocket } from 'ws';
 import { StatusMessage } from './types.js';
 
+type StatusEventHandler = (status: StatusMessage) => void;
+
 export class StatusBroadcaster {
   private clients: Set<WebSocket>;
+  private subscribers: Set<StatusEventHandler> = new Set();
 
   constructor() {
     this.clients = new Set();
@@ -16,7 +19,21 @@ export class StatusBroadcaster {
     this.clients.delete(ws);
   }
 
+  /**
+   * Subscribe to status events.
+   * @param handler - Function to call when a status is broadcast
+   * @returns Unsubscribe function
+   */
+  subscribe(handler: StatusEventHandler): () => void {
+    this.subscribers.add(handler);
+    return () => this.subscribers.delete(handler);
+  }
+
   broadcastStatus(status: StatusMessage) {
+    // Notify subscribers first (for WebSocketBridge)
+    this.subscribers.forEach(handler => handler(status));
+    
+    // Also send to WebSocket clients (legacy pattern - can be removed later)
     const message = JSON.stringify(status);
     this.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {

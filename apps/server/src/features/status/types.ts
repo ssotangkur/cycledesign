@@ -21,4 +21,17 @@ export interface StatusMessage {
   timestamp: number;
 }
 
+/**
+ * WebSocket protocol message type for status updates.
+ * This is the format sent over the WebSocket connection.
+ */
+export interface WebSocketStatusMessage {
+  type: 'status';
+  status: StatusMessage['status'];
+  messageId: string;
+  tool?: string;
+  details: string;
+  timestamp: number;
+}
+
 export { WebSocket };

@@ -6,6 +6,14 @@
 
 CycleDesign is a full-stack application that provides a chat-based interface for interacting with Qwen's code-focused LLM. The LLM generates React/TypeScript code using Material-UI components, which is then validated and rendered in a live preview.
 
+## Architecture
+
+As of March 2026, the server uses a unified ToolLoopAgent-based architecture with:
+- Clear separation between transport (`transport/ws/`) and application layers (`features/status/`)
+- WebSocketBridge for session-aware status message routing
+- MockProvider for deterministic E2E testing
+- Shared ValidationService for deduplicated validation logic
+
 ### Features
 
 - **Qwen LLM Integration** via OAuth Device Flow (RFC 8628)

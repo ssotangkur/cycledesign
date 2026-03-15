@@ -6,7 +6,8 @@ import { sseRouter } from './routes/sse.js';
 import { previewManager } from './preview/preview-manager.js';
 
 import https from 'https';
-import { WebSocketHandler } from './ws/ws.js';
+import { WebSocketHandler } from './transport/ws/WebSocketHandler.js';
+import { WebSocketBridge } from './features/status/WebSocketBridge.js';
 import { existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { appRouter } from './trpc/trpc.js';
@@ -69,7 +70,11 @@ const server = app.listen(PORT, () => {
   console.log(`Health check: http://localhost:${PORT}/health`);
 });
 
-new WebSocketHandler(server);
+const wsHandler = new WebSocketHandler(server);
+const wsBridge = new WebSocketBridge(wsHandler);
+
+// Export wsBridge for use in other modules (e.g., agent.ts, tool-executor.ts)
+export { wsHandler, wsBridge };
 
 // Graceful shutdown handlers
 function gracefulShutdown(signal: string) {

@@ -2,13 +2,14 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { IncomingMessage } from 'http';
 import { parse as parseUrl } from 'url';
-import { getMessages, addMessage, generateMessageId } from '../sessions/storage.js';
-import { StoredMessage } from '../llm/types.js';
-import { SYSTEM_PROMPT } from '../llm/system-prompt.js';
-import { executeToolCalls } from '../llm/tool-executor.js';
-import { allTools } from '../llm/tools/tools.js';
-import { getLLMProvider } from '../llm/providers/provider-factory.js';
-import { getProviderConfig } from '../trpc/routers/providers.js';
+import { getMessages, addMessage, generateMessageId } from '../../sessions/storage.js';
+import { StoredMessage } from '../../llm/types.js';
+import { SYSTEM_PROMPT } from '../../llm/system-prompt.js';
+import { executeToolCalls } from '../../llm/tool-executor.js';
+import { allTools } from '../../llm/tools/tools.js';
+import { getLLMProvider } from '../../llm/providers/provider-factory.js';
+import { getProviderConfig } from '../../trpc/routers/providers.js';
+import { wsBridge } from '../../server.js';
 
 interface SessionConnection {
   ws: WebSocket;
@@ -417,6 +418,8 @@ export class WebSocketHandler {
           }));
 
           console.log('[TOOL] Executing', toolCallArray.length, 'tool calls for message:', messageId);
+          // Register session for WebSocket routing before executing tools
+          wsBridge.registerSession(messageId, sessionId);
           await executeToolCalls(toolCallArray, messageId);
           console.log('[TOOL] All tool calls completed for message:', messageId);
 
@@ -494,10 +497,14 @@ export class WebSocketHandler {
           const lastUserMsg = messages.filter(m => m.role === 'user').pop();
           const autoMessageId = lastUserMsg?.id || generateMessageId();
 
+          // Register session for WebSocket routing before validation
+          wsBridge.registerSession(autoMessageId, sessionId);
+
           // Trigger validation pipeline
           try {
-            const { handleValidationAndPreview } = await import('../llm/tool-executor.js');
-            await handleValidationAndPreview(autoMessageId);
+            const { ValidationService } = await import('../../validation/validation-service.js');
+            const validationService = new ValidationService();
+            await validationService.validateAndPreparePreview(autoMessageId);
             console.log('[WS] Automatic validation completed successfully');
           } catch (error) {
             console.error('[WS] Automatic validation failed:', (error as Error).message);

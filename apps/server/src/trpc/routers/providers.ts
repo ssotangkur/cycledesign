@@ -2,6 +2,7 @@ import { router, publicProcedure } from '../init.js';
 import { z } from 'zod';
 import { MistralProvider } from '../../llm/providers/mistral.js';
 import { QwenProvider } from '../../llm/providers/qwen.js';
+import { MockProvider } from '../../llm/providers/mock.js';
 import { IProvider, IProviderClass, IProviderConfig } from '../../llm/types.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -18,7 +19,11 @@ export function getProviderConfig(): { provider: string } {
 const CONFIG_DIR = join(process.cwd(), '.cycledesign');
 const CONFIG_FILE = join(CONFIG_DIR, 'provider-config.json');
 
-const providers: IProviderClass[] = [QwenProvider, MistralProvider];
+const providers: IProviderClass[] = [
+  QwenProvider,
+  MistralProvider,
+  ...(process.env.ENABLE_MOCK_PROVIDER === 'true' ? [MockProvider] : []),
+];
 const providerMap = new Map(providers.map((p) => [p.name(), p]));
 
 let cachedProviderInstance: IProvider | null = null;

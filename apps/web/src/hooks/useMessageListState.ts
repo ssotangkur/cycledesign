@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { SessionWebSocket, DisplayMessage } from '../api/websocket';
+import { SessionWebSocket, DisplayMessage, WebSocketMessage } from '../api/websocket';
 
 export interface MessageListState {
   messages: DisplayMessage[];
+  currentStatus: (WebSocketMessage & { type: 'status' }) | null;
   isConnected: boolean;
   isStreaming: boolean;
   error: string | null;
@@ -16,6 +17,7 @@ const wsInstances = new Map<string, {
   ws: SessionWebSocket;
   refCount: number;
   messages: DisplayMessage[];
+  currentStatus: (WebSocketMessage & { type: 'status' }) | null;
   isConnected: boolean;
   isStreaming: boolean;
   error: string | null;
@@ -30,6 +32,7 @@ function getOrCreateWebSocket(sessionId: string) {
       ws,
       refCount: 0,
       messages: [],
+      currentStatus: null,
       isConnected: false,
       isStreaming: false,
       error: null,
@@ -54,11 +57,13 @@ function cleanupWebSocket(sessionId: string) {
 export function useMessageListState(sessionId: string | null): MessageListState {
   const [state, setState] = useState<{
     messages: DisplayMessage[];
+    currentStatus: (WebSocketMessage & { type: 'status' }) | null;
     isConnected: boolean;
     isStreaming: boolean;
     error: string | null;
   }>({
     messages: [],
+    currentStatus: null,
     isConnected: false,
     isStreaming: false,
     error: null,
@@ -76,6 +81,7 @@ export function useMessageListState(sessionId: string | null): MessageListState 
     const subscribe = () => {
       setState({
         messages: [...instance!.messages],
+        currentStatus: instance!.currentStatus,
         isConnected: instance!.isConnected,
         isStreaming: instance!.isStreaming,
         error: instance!.error,
@@ -111,8 +117,14 @@ export function useMessageListState(sessionId: string | null): MessageListState 
         instance!.subscribers.forEach(fn => fn());
       };
 
+      instance.ws.onStatus = (status) => {
+        instance!.currentStatus = status;
+        instance!.subscribers.forEach(fn => fn());
+      };
+
       instance.ws.onDone = () => {
         instance!.isStreaming = false;
+        instance!.currentStatus = null;
         instance!.subscribers.forEach(fn => fn());
       };
 
@@ -175,6 +187,7 @@ export function useMessageListState(sessionId: string | null): MessageListState 
 
   return {
     messages: state.messages,
+    currentStatus: state.currentStatus,
     isConnected: state.isConnected,
     isStreaming: state.isStreaming,
     error: state.error,
