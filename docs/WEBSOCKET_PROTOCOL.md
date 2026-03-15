@@ -1150,3 +1150,248 @@ The WebSocket protocol does not use custom status codes. Standard WebSocket clos
 | 1001 | Going away        |
 | 1006 | Abnormal closure  |
 | 1011 | Server error      |
+
+---
+
+## Appendix C: WebSocket Migration History (Completed March 2026)
+
+This appendix documents the completed migration from dual WebSocket implementations to a unified WebSocket architecture. This work is **complete** and provides the foundation for the upcoming channel transport migration.
+
+For the future channel migration plan, see [WEBSOCKET-MIGRATION.md](./WEBSOCKET-MIGRATION.md).
+
+### Migration Goals (Completed)
+
+1. **Unified WebSocket Implementations:** Merged `src/ws/ws.ts` and `src/websocket/` into single `transport/ws/`
+2. **Clear Boundaries:** Established transport/application/domain layer separation
+3. **Deduplicated Validation:** Extracted shared `ValidationService`
+4. **Status Message Integration:** Server broadcasts status, client receives and displays
+5. **Deterministic E2E Tests:** Mock LLM provider enables reliable testing
+
+### Phases Completed
+
+#### Phase 1: Deduplicate Validation Logic
+
+**Goal:** Eliminate duplicate `handleValidationAndPreview()` functions in `agent.ts` and `tool-executor.ts`.
+
+**Changes:**
+- Created `ValidationService` in `validation/validation-service.ts`
+- Refactored `agent.ts` and `tool-executor.ts` to use shared service
+- Extracted common validation logic (TypeScript, ESLint, preview management)
+
+**Files Created:**
+- `apps/server/src/validation/validation-service.ts`
+
+**Files Modified:**
+- `apps/server/src/llm/agent.ts`
+- `apps/server/src/llm/tool-executor.ts`
+
+---
+
+#### Phase 2: Restructure Directories
+
+**Goal:** Establish clear architectural boundaries between transport and application layers.
+
+**Changes:**
+- Created `transport/ws/` for WebSocket transport layer
+- Created `features/status/` for status broadcasting feature
+- Moved `ws/ws.ts` → `transport/ws/WebSocketHandler.ts`
+- Moved `websocket/types.ts` → `features/status/types.ts`
+- Moved `websocket/status-broadcaster.ts` → `features/status/StatusBroadcaster.ts`
+- Deleted unused `websocket/handler.ts`
+
+**Files Created:**
+- `apps/server/src/transport/ws/` (directory)
+- `apps/server/src/features/status/` (directory)
+
+**Files Moved:**
+- `apps/server/src/ws/ws.ts` → `apps/server/src/transport/ws/WebSocketHandler.ts`
+- `apps/server/src/websocket/types.ts` → `apps/server/src/features/status/types.ts`
+- `apps/server/src/websocket/status-broadcaster.ts` → `apps/server/src/features/status/StatusBroadcaster.ts`
+
+**Files Deleted:**
+- `apps/server/src/websocket/handler.ts` (unused)
+
+---
+
+#### Phase 3: Create WebSocket Bridge
+
+**Goal:** Connect application-layer status events to WebSocket transport.
+
+**Changes:**
+- Created `WebSocketBridge` class to subscribe to `StatusBroadcaster` events
+- Bridge calls `WebSocketHandler.broadcastToSession()` to send via WebSocket
+- Added `status` message type to WebSocket protocol
+- Wired bridge in `server.ts`
+
+**Files Created:**
+- `apps/server/src/features/status/WebSocketBridge.ts`
+
+**Files Modified:**
+- `apps/server/src/server.ts`
+- `apps/server/src/transport/ws/WebSocketHandler.ts`
+
+**Message Format Added:**
+```typescript
+{
+  type: 'status';
+  status: StatusType;
+  messageId: string;
+  tool?: string;
+  details: string;
+  timestamp: number;
+}
+```
+
+---
+
+#### Phase 4: Create Mock Provider
+
+**Goal:** Enable deterministic E2E testing with mock LLM responses.
+
+**Changes:**
+- Created `MockProvider` class in `llm/providers/mock.ts`
+- Added `ENABLE_MOCK_PROVIDER` environment variable
+- Integrated mock provider into provider router
+- Configured deterministic responses for known prompts
+
+**Files Created:**
+- `apps/server/src/llm/providers/mock.ts`
+
+**Files Modified:**
+- `apps/server/src/trpc/routers/providers.ts`
+- `apps/server/.env.example`
+
+**Features:**
+- Deterministic text responses for known prompts
+- Configurable tool call responses
+- No external API calls
+- Works offline
+- Simulates streaming with delays
+
+---
+
+#### Phase 5: Client-Side Integration
+
+**Goal:** Display real-time status messages in the client UI.
+
+**Changes:**
+- Added status message handling to `SessionWebSocket` class
+- Updated `useMessageListState` hook with `currentStatus` state
+- Created `StatusDisplay` component
+- Integrated status display into `ChatPage`
+
+**Files Modified:**
+- `apps/web/src/api/websocket.ts`
+- `apps/web/src/hooks/useMessageListState.ts`
+
+**Files Created:**
+- `apps/web/src/components/status/StatusDisplay.tsx`
+
+**Status Types Displayed:**
+- `generation_start` / `generation_complete`
+- `tool_call_start` / `tool_call_complete` / `tool_call_error`
+- `validation_start` / `validation_complete` / `validation_error`
+- `preview_start` / `preview_ready` / `preview_error`
+
+---
+
+#### Phase 6: E2E Testing with Mock Provider
+
+**Goal:** Enable reliable, deterministic end-to-end tests.
+
+**Changes:**
+- Created mock provider E2E fixture (`useMockProvider`)
+- Wrote deterministic chat flow test (`chat-mock.spec.ts`)
+- Wrote status message test (`status-messages.spec.ts`)
+
+**Files Created:**
+- `tests/e2e/tests/chat-mock.spec.ts`
+- `tests/e2e/tests/status-messages.spec.ts`
+
+**Files Modified:**
+- `tests/e2e/fixtures/test-fixtures.ts`
+
+**Test Coverage:**
+- Full chat flow with mock provider
+- Tool call execution and status display
+- Validation pipeline status messages
+- Error state handling
+
+---
+
+#### Phase 7: Cleanup and Documentation
+
+**Goal:** Finalize migration with documentation and cleanup.
+
+**Changes:**
+- Removed old directory structures
+- Updated all imports to new paths
+- Created comprehensive documentation
+- Verified all tests pass
+
+**Files Created:**
+- `docs/WEBSOCKET-MIGRATION.md` (original version)
+- `docs/WEBSOCKET_PROTOCOL.md` (this document)
+
+**Files Deleted:**
+- `apps/server/src/ws/` (after successful move)
+- `apps/server/src/websocket/` (after successful move)
+
+**Documentation Added:**
+- Architecture overview with responsibility boundaries
+- Status message protocol reference
+- Mock provider usage guide
+- E2E testing guide
+
+---
+
+### Legacy Code Status
+
+All code from this migration is **production-ready** and will be replaced by the channel transport in Q2 2026.
+
+### Architecture Achieved
+
+```
+apps/server/src/
+├── transport/
+│   └── ws/
+│       └── WebSocketHandler.ts    # WebSocket connections, sessions, rate limiting
+│
+├── features/
+│   └── status/
+│       ├── types.ts               # StatusMessage, StatusType
+│       ├── StatusBroadcaster.ts   # Pub/sub core
+│       └── WebSocketBridge.ts     # Bridge: application status → WebSocket
+│
+├── llm/
+│   ├── agent.ts                   # ToolLoopAgent with streaming
+│   ├── tool-executor.ts           # Manual tool execution (legacy)
+│   ├── tools/                     # Tool definitions
+│   ├── providers/
+│   │   ├── mock.ts                # Mock provider for testing
+│   │   ├── mistral.ts
+│   │   └── qwen.ts
+│   └── work-tracker.ts            # Tracks pending work per messageId
+│
+├── validation/
+│   ├── validation-service.ts      # Shared validation logic
+│   ├── pipeline.ts                # ValidationPipeline class
+│   ├── typescript.ts              # TypeScript compilation checks
+│   ├── eslint.ts                  # ESLint validation
+│   └── id-injector.ts             # ID injection for testing
+│
+└── preview/
+    └── preview-manager.ts         # Vite preview server management
+```
+
+### Responsibility Boundaries Achieved
+
+| Layer | Directory | Responsibilities | Status |
+|-------|-----------|------------------|--------|
+| **Transport** | `transport/ws/` | WebSocket protocol, TCP connections, session tracking, rate limiting, message routing | ✅ Complete |
+| **Application** | `features/status/` | Status message types, pub/sub broadcasting, WebSocket bridge | ✅ Complete |
+| **Domain** | `llm/`, `validation/`, `preview/` | LLM orchestration, tool execution, validation logic, preview management | ✅ Complete |
+
+### Next Steps
+
+The next phase of evolution is the **channel transport migration** described in [WEBSOCKET-MIGRATION.md](./WEBSOCKET-MIGRATION.md). This will add a type-safe protocol layer on top of the WebSocket transport.
