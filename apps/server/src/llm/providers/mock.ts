@@ -50,8 +50,9 @@ export class MockProvider implements IProvider {
     const lowerPrompt = prompt.toLowerCase();
 
     // Deterministic responses based on prompt patterns
-    if (lowerPrompt.includes('create file') || lowerPrompt.includes('create_file')) {
-      console.log('[MockProvider] Matching "create file" pattern - returning tool call');
+    if (lowerPrompt.includes('create file') || lowerPrompt.includes('create_file') ||
+        lowerPrompt.includes('hello world') || lowerPrompt.includes('create app')) {
+      console.log('[MockProvider] Matching "create file/hello world" pattern - returning tool call');
       return {
         content: 'I will create a file for you.',
         stream: this.generateChunks('I will create a file for you.'),
