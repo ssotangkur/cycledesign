@@ -140,6 +140,7 @@ export class ProtocolClient {
   private nextChannelId = 1;
   private disposed = false;
   private pendingControlMessages: ControlMessage[] = []; // Queue for messages before connection is open
+  private pendingTransportMessages = new Map<string, TransportEnvelope[]>(); // Queue for transport messages before channel is confirmed
 
   /**
    * Create ProtocolClient instance
@@ -270,6 +271,15 @@ export class ProtocolClient {
 
       // Re-register with the real channel ID
       this.channels.set(channelId, channel);
+
+      // Flush any pending transport messages for this channel
+      const pending = this.pendingTransportMessages.get(channelId);
+      if (pending) {
+        for (const envelope of pending) {
+          channel._handleMessage(envelope);
+        }
+        this.pendingTransportMessages.delete(channelId);
+      }
     }
   }
 
@@ -280,6 +290,15 @@ export class ProtocolClient {
     const channel = this.channels.get(envelope.channelId);
     if (channel) {
       channel._handleMessage(envelope);
+    } else {
+      // Channel not found - message may have arrived before channel was confirmed
+      // Queue it for later delivery
+      let pending = this.pendingTransportMessages.get(envelope.channelId);
+      if (!pending) {
+        pending = [];
+        this.pendingTransportMessages.set(envelope.channelId, pending);
+      }
+      pending.push(envelope);
     }
   }
 
