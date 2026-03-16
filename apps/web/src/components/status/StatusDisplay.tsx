@@ -31,6 +31,7 @@ export function StatusDisplay({ sessionId }: StatusDisplayProps) {
     channel: statusChannel,
     event: 'generation_start',
     handler: isActive ? (payload) => {
+      console.log('[StatusDisplay] Received generation_start:', payload);
       setStatus({
         visible: true,
         message: `Starting AI generation: ${payload.details}`,
