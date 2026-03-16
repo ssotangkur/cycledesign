@@ -19,10 +19,10 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
-
-      - name: Build common-protocol
-        run: npm run build --workspace=@cycledesign/common-protocol
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
+          npm run build --workspace=@cycledesign/common-protocol
 
       - name: Run validations
         run: npm run validate
