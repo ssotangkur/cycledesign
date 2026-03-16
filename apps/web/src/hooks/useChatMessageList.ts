@@ -41,8 +41,13 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
   useEffect(() => {
     if (!sessionId) return;
 
-    // Subscribe to history
+    let historyReceived = false;
+
+    // Subscribe to history - only set once on initial load
     const unsubscribeHistory = chatChannel.subscribe('history', (payload) => {
+      if (historyReceived) return; // Ignore subsequent history messages
+      historyReceived = true;
+      
       setMessages(payload.messages.map((msg: ChatMessage) => ({
         ...msg,
         role: 'assistant' as const,  // Messages from history are from assistant

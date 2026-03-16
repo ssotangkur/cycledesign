@@ -41,7 +41,7 @@ export class StatusBroadcaster {
   }
 
   sendGenerationStart(messageId: string, details: string) {
-    this.broadcast({ event: 'generation_start', data: { messageId, details } });
+    this.broadcast({ event: 'generation_start', data: { messageId, details: details || 'Processing your message' } });
   }
 
   sendGenerationThinking(messageId: string, details: string) {
@@ -53,11 +53,11 @@ export class StatusBroadcaster {
   }
 
   sendToolCallStart(messageId: string, tool: string, details: string) {
-    this.broadcast({ event: 'tool_call_start', data: { messageId, tool, details } });
+    this.broadcast({ event: 'tool_call_start', data: { messageId, tool, details: details || `${tool} tool execution started` } });
   }
 
   sendToolCallComplete(messageId: string, tool: string, details: string) {
-    this.broadcast({ event: 'tool_call_complete', data: { messageId, tool, details } });
+    this.broadcast({ event: 'tool_call_complete', data: { messageId, tool, details: details || `${tool} created successfully` } });
   }
 
   sendToolCallError(messageId: string, tool: string, error: string) {
@@ -65,11 +65,11 @@ export class StatusBroadcaster {
   }
 
   sendValidationStart(messageId: string, details: string) {
-    this.broadcast({ event: 'validation_start', data: { messageId, details } });
+    this.broadcast({ event: 'validation_start', data: { messageId, details: details || 'code validation' } });
   }
 
   sendValidationComplete(messageId: string, details: string) {
-    this.broadcast({ event: 'validation_complete', data: { messageId, details } });
+    this.broadcast({ event: 'validation_complete', data: { messageId, details: details || 'Validation passed' } });
   }
 
   sendPreviewStart(messageId: string, details: string) {

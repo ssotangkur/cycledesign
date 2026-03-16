@@ -33,7 +33,7 @@ export function StatusDisplay({ sessionId }: StatusDisplayProps) {
     handler: isActive ? (payload) => {
       setStatus({
         visible: true,
-        message: `Generation started: ${payload.details}`,
+        message: `Starting AI generation: ${payload.details}`,
         type: 'info',
       });
     } : noopHandler,
@@ -69,7 +69,7 @@ export function StatusDisplay({ sessionId }: StatusDisplayProps) {
     handler: isActive ? (payload) => {
       setStatus({
         visible: true,
-        message: `Calling ${payload.tool}: ${payload.details}`,
+        message: `${payload.tool}: ${payload.details}`,
         type: 'info',
       });
     } : noopHandler,
@@ -105,7 +105,7 @@ export function StatusDisplay({ sessionId }: StatusDisplayProps) {
     handler: isActive ? (payload) => {
       setStatus({
         visible: true,
-        message: `Validation started: ${payload.details}`,
+        message: `Validating: ${payload.details}`,
         type: 'info',
       });
     } : noopHandler,
@@ -117,7 +117,7 @@ export function StatusDisplay({ sessionId }: StatusDisplayProps) {
     handler: isActive ? (payload) => {
       setStatus({
         visible: true,
-        message: payload.details,
+        message: `Validation complete: ${payload.details}`,
         type: 'success',
       });
     } : noopHandler,
@@ -129,7 +129,7 @@ export function StatusDisplay({ sessionId }: StatusDisplayProps) {
     handler: isActive ? (payload) => {
       setStatus({
         visible: true,
-        message: `Preview starting: ${payload.details}`,
+        message: `Preview: ${payload.details}`,
         type: 'info',
       });
     } : noopHandler,
@@ -141,7 +141,7 @@ export function StatusDisplay({ sessionId }: StatusDisplayProps) {
     handler: isActive ? (payload) => {
       setStatus({
         visible: true,
-        message: `Preview ready at http://localhost:${payload.port}`,
+        message: `Preview ready at http://localhost:${payload.port}: ${payload.details}`,
         type: 'success',
       });
     } : noopHandler,
