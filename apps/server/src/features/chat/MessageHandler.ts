@@ -157,7 +157,7 @@ export class MessageHandler {
           tools: allTools,
         }) as unknown as {
           stream: AsyncIterable<string>;
-          toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>;
+          toolCalls?: Array<{ id: string; name: string; args: Record<string, unknown> }>;
         };
 
         console.log('[MessageHandler] Provider.complete returned');
@@ -212,10 +212,10 @@ export class MessageHandler {
           console.log('[MessageHandler] Detected', toolCalls.length, 'tool calls');
 
           const toolCallArray = toolCalls.map(tc => ({
-            id: tc.toolCallId,
+            id: tc.id,
             type: 'function' as const,
             function: {
-              name: tc.toolName,
+              name: tc.name,
               arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}),
             },
           }));

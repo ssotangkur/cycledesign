@@ -57,8 +57,8 @@ export class MockProvider implements IProvider {
         content: 'I will create a file for you.',
         stream: this.generateChunks('I will create a file for you.'),
         toolCalls: [{
-          toolCallId: 'mock-tool-1',
-          toolName: 'create_file',
+          id: 'mock-tool-1',
+          name: 'create_file',
           args: {
             filename: 'test.tsx',
             code: 'export default function Test() { return <div>Hello</div>; }',
@@ -73,8 +73,8 @@ export class MockProvider implements IProvider {
         content: 'I will edit the file.',
         stream: this.generateChunks('I will edit the file.'),
         toolCalls: [{
-          toolCallId: 'mock-tool-1',
-          toolName: 'edit_file',
+          id: 'mock-tool-1',
+          name: 'edit_file',
           args: {
             filename: 'test.tsx',
             code: 'export default function Updated() { return <div>Updated</div>; }',
