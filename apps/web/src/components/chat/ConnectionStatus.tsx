@@ -1,21 +1,24 @@
 import { Box, Typography, Tooltip } from '@mui/material';
 import { useIsHydrated, useCurrentSessionId } from '../../hooks/useSession';
-import { useMessageListState } from '../../hooks/useMessageListState';
+import { useProtocolClient } from '../../hooks/useProtocolClient';
 
 function ConnectionStatus() {
   const isHydrated = useIsHydrated();
   const { currentSessionId } = useCurrentSessionId();
-  const { isConnected } = useMessageListState(currentSessionId);
+  const { isConnected } = useProtocolClient();
+
+  // Consider connected only if we have a session
+  const isActive = isConnected && currentSessionId !== null;
 
   if (!isHydrated) {
     return null;
   }
 
-  const statusText = isConnected ? 'Connected' : 'Disconnected';
-  const statusColor = isConnected ? 'success.main' : 'error.main';
+  const statusText = isActive ? 'Connected' : 'Disconnected';
+  const statusColor = isActive ? 'success.main' : 'error.main';
 
   return (
-    <Tooltip title={isConnected ? 'Connected' : 'Disconnected'} placement="bottom">
+    <Tooltip title={isActive ? 'Connected' : 'Disconnected'} placement="bottom">
       <Box
         data-testid="connection-status"
         sx={{

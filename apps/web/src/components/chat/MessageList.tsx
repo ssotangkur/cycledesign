@@ -2,12 +2,12 @@ import { Box, CircularProgress } from '@mui/material';
 import { useRef, useEffect } from 'react';
 import MessageItem from './MessageItem';
 import { useCurrentSessionId, useIsHydrated } from '../../hooks/useSession';
-import { useMessageListState } from '../../hooks/useMessageListState';
+import { useChatMessageList } from '../../hooks/useChatMessageList';
 
 function MessageList() {
   const { currentSessionId } = useCurrentSessionId();
   const isHydrated = useIsHydrated();
-  const { messages, isStreaming } = useMessageListState(currentSessionId);
+  const { messages, isStreaming } = useChatMessageList(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

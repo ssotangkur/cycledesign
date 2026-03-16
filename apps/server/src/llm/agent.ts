@@ -2,7 +2,7 @@ import { ToolLoopAgent, stepCountIs, type Tool } from 'ai';
 import { createMistral } from '@ai-sdk/mistral';
 import { allTools } from './tools/tools.js';
 import { SYSTEM_PROMPT } from './system-prompt.js';
-import { wsBridge } from '../server.js';
+import { statusBroadcaster } from '../features/status/StatusBroadcaster.js';
 import { ValidationService } from '../validation/validation-service.js';
 
 // Create Mistral provider
@@ -69,13 +69,10 @@ function getToolCompleteMessage(toolName: string, result: unknown): string {
 }
 
 // Create the agent with ToolLoopAgent
-export function createAgent(messageId: string, sessionId: string) {
+export function createAgent(messageId: string, _sessionId: string) {
   const model = mistral('codestral-2508');
 
   const validationService = new ValidationService();
-
-  // Register session for WebSocket routing
-  wsBridge.registerSession(messageId, sessionId);
 
   return new ToolLoopAgent({
     model,
@@ -86,21 +83,13 @@ export function createAgent(messageId: string, sessionId: string) {
     // Called when the agent operation begins
     experimental_onStart: (_event) => {
       console.log('[AGENT] Starting agent for message:', messageId);
-      wsBridge.broadcastStatusByMessageId(messageId, {
-        status: 'generation_start',
-        details: 'Starting AI generation...',
-        timestamp: Date.now(),
-      });
+      statusBroadcaster.sendGenerationStart(messageId, 'Starting AI generation...');
     },
 
     // Called when each step (LLM call) begins
     experimental_onStepStart: (_event) => {
       console.log('[AGENT] Step', _event.stepNumber, 'starting for message:', messageId);
-      wsBridge.broadcastStatusByMessageId(messageId, {
-        status: 'generation_thinking',
-        details: 'AI is thinking...',
-        timestamp: Date.now(),
-      });
+      statusBroadcaster.sendGenerationThinking(messageId, 'AI is thinking...');
     },
 
     // Called right before a tool's execute function runs
@@ -108,12 +97,7 @@ export function createAgent(messageId: string, sessionId: string) {
       const toolName = event.toolCall.toolName;
       const args = event.toolCall.input as Record<string, unknown>;
       console.log('[AGENT] Tool starting:', toolName);
-      wsBridge.broadcastStatusByMessageId(messageId, {
-        status: 'tool_call_start',
-        tool: toolName,
-        details: getToolStartMessage(toolName, args),
-        timestamp: Date.now(),
-      });
+      statusBroadcaster.sendToolCallStart(messageId, toolName, getToolStartMessage(toolName, args));
     },
 
     // Called right after a tool's execute function completes
@@ -125,12 +109,7 @@ export function createAgent(messageId: string, sessionId: string) {
         ? getToolCompleteMessage(toolName, event.output)
         : `Tool error: ${event.error}`;
 
-      wsBridge.broadcastStatusByMessageId(messageId, {
-        status: 'tool_call_complete',
-        tool: toolName,
-        details: message,
-        timestamp: Date.now(),
-      });
+      statusBroadcaster.sendToolCallComplete(messageId, toolName, message);
 
       // Handle submit_work - run validation
       if (toolName === 'submit_work' && event.success) {
@@ -141,11 +120,7 @@ export function createAgent(messageId: string, sessionId: string) {
             throw new Error(`Validation failed: ${errorMessages}`);
           }
         } catch (error) {
-          wsBridge.broadcastStatusByMessageId(messageId, {
-            status: 'validation_start',
-            details: 'failed',
-            timestamp: Date.now(),
-          });
+          statusBroadcaster.sendValidationStart(messageId, 'failed');
           throw error;
         }
       }
@@ -159,11 +134,7 @@ export function createAgent(messageId: string, sessionId: string) {
     // Called when all agent steps are finished
     onFinish: (_event) => {
       console.log('[AGENT] Agent finished for message:', messageId);
-      wsBridge.broadcastStatusByMessageId(messageId, {
-        status: 'generation_complete',
-        details: _event.text,
-        timestamp: Date.now(),
-      });
+      statusBroadcaster.sendGenerationComplete(messageId, _event.text);
     },
   });
 }

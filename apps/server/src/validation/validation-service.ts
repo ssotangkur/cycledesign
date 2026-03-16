@@ -58,13 +58,13 @@ export class ValidationService {
       await fs.mkdir(join(workspaceDir, 'designs'), { recursive: true });
       await fs.writeFile(filePath, injectedCode.code, 'utf-8');
 
-      statusBroadcaster.sendValidationComplete(messageId);
+      statusBroadcaster.sendValidationComplete(messageId, 'Validation completed successfully');
 
-      statusBroadcaster.sendPreviewStart(messageId);
+      statusBroadcaster.sendPreviewStart(messageId, 'Starting preview server');
       await previewManager.start({ designName: filename.replace('.tsx', '') });
       const status = previewManager.getStatus();
       if (status.port) {
-        statusBroadcaster.sendPreviewReady(messageId, status.port);
+        statusBroadcaster.sendPreviewReady(messageId, status.port, 'Preview server is ready');
       }
     }
 

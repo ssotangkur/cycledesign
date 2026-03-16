@@ -1,4 +1,4 @@
-import { wsBridge } from '../server.js';
+import { statusBroadcaster } from '../features/status/StatusBroadcaster.js';
 import {
   executeCreateFile,
   executeEditFile,
@@ -178,23 +178,13 @@ export async function executeToolCalls(
     const toolName = toolCall.function.name;
     console.log('[TOOL] Executing tool:', toolName, 'with args:', toolCall.function.arguments);
 
-    wsBridge.broadcastStatusByMessageId(messageId, {
-      status: 'tool_call_start',
-      tool: toolName,
-      details: getToolStartMessage(toolName, toolCall.function.arguments),
-      timestamp: Date.now(),
-    });
+    statusBroadcaster.sendToolCallStart(messageId, toolName, getToolStartMessage(toolName, toolCall.function.arguments));
 
     try {
       const result = await executeTool(toolCall, messageId);
       console.log('[TOOL] Tool', toolName, 'completed successfully, result:', JSON.stringify(result).substring(0, 200));
 
-      wsBridge.broadcastStatusByMessageId(messageId, {
-        status: 'tool_call_complete',
-        tool: toolName,
-        details: getToolCompleteMessage(toolName, result),
-        timestamp: Date.now(),
-      });
+      statusBroadcaster.sendToolCallComplete(messageId, toolName, getToolCompleteMessage(toolName, result));
 
       results.push({
         toolCallId: toolCall.id,
@@ -210,12 +200,7 @@ export async function executeToolCalls(
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('[TOOL] Tool', toolName, 'failed:', errorMessage);
 
-      wsBridge.broadcastStatusByMessageId(messageId, {
-        status: 'tool_call_error',
-        tool: toolName,
-        details: errorMessage,
-        timestamp: Date.now(),
-      });
+      statusBroadcaster.sendToolCallError(messageId, toolName, errorMessage);
 
       results.push({
         toolCallId: toolCall.id,
@@ -239,11 +224,7 @@ export async function executeToolCalls(
       console.log('[TOOL] Validation completed successfully');
     } catch (error) {
       console.error('[TOOL] Validation error:', (error as Error).message);
-      wsBridge.broadcastStatusByMessageId(messageId, {
-        status: 'validation_start',
-        details: 'failed',
-        timestamp: Date.now(),
-      });
+      statusBroadcaster.sendValidationStart(messageId, 'failed');
       throw error;
     }
   }

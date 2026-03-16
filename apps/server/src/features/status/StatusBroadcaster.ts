@@ -1,23 +1,27 @@
-import { WebSocket } from 'ws';
-import { StatusMessage } from './types.js';
+import type { ChannelTypes } from '@cycledesign/common-protocol';
 
-type StatusEventHandler = (status: StatusMessage) => void;
+/**
+ * Status server event type - union of all status channel server events
+ * Derived from ChannelTypes for type safety
+ */
+type StatusServerEvent = {
+  [K in keyof ChannelTypes['status']['server']]: {
+    event: K;
+    data: ChannelTypes['status']['server'][K];
+  }
+}[keyof ChannelTypes['status']['server']];
 
+type StatusEventHandler = (status: StatusServerEvent) => void;
+
+/**
+ * StatusBroadcaster - Application service for broadcasting status events.
+ * 
+ * This is a pure application service with NO transport knowledge.
+ * It uses an event emitter pattern for internal broadcasting.
+ * The ProtocolServer subscribes to events and forwards them to channels.
+ */
 export class StatusBroadcaster {
-  private clients: Set<WebSocket>;
-  private subscribers: Set<StatusEventHandler> = new Set();
-
-  constructor() {
-    this.clients = new Set();
-  }
-
-  addClient(ws: WebSocket) {
-    this.clients.add(ws);
-  }
-
-  removeClient(ws: WebSocket) {
-    this.clients.delete(ws);
-  }
+  private handlers = new Set<StatusEventHandler>();
 
   /**
    * Subscribe to status events.
@@ -25,125 +29,63 @@ export class StatusBroadcaster {
    * @returns Unsubscribe function
    */
   subscribe(handler: StatusEventHandler): () => void {
-    this.subscribers.add(handler);
-    return () => this.subscribers.delete(handler);
+    this.handlers.add(handler);
+    return () => this.handlers.delete(handler);
   }
 
-  broadcastStatus(status: StatusMessage) {
-    // Notify subscribers first (for WebSocketBridge)
-    this.subscribers.forEach(handler => handler(status));
-    
-    // Also send to WebSocket clients (legacy pattern - can be removed later)
-    const message = JSON.stringify(status);
-    this.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
-    });
+  /**
+   * Broadcast a status event to all subscribers.
+   */
+  private broadcast(status: StatusServerEvent) {
+    this.handlers.forEach(handler => handler(status));
+  }
+
+  sendGenerationStart(messageId: string, details: string) {
+    this.broadcast({ event: 'generation_start', data: { messageId, details } });
+  }
+
+  sendGenerationThinking(messageId: string, details: string) {
+    this.broadcast({ event: 'generation_thinking', data: { messageId, details } });
+  }
+
+  sendGenerationComplete(messageId: string, details: string) {
+    this.broadcast({ event: 'generation_complete', data: { messageId, details } });
   }
 
   sendToolCallStart(messageId: string, tool: string, details: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'tool_call_start',
-      tool,
-      details,
-      timestamp: Date.now(),
-    });
+    this.broadcast({ event: 'tool_call_start', data: { messageId, tool, details } });
   }
 
   sendToolCallComplete(messageId: string, tool: string, details: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'tool_call_complete',
-      tool,
-      details,
-      timestamp: Date.now(),
-    });
+    this.broadcast({ event: 'tool_call_complete', data: { messageId, tool, details } });
   }
 
   sendToolCallError(messageId: string, tool: string, error: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'tool_call_error',
-      tool,
-      details: error,
-      timestamp: Date.now(),
-    });
+    this.broadcast({ event: 'tool_call_error', data: { messageId, tool, details: error } });
   }
 
-  sendValidationStart(messageId: string, stage: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'validation_start',
-      details: `Running ${stage}...`,
-      timestamp: Date.now(),
-    });
+  sendValidationStart(messageId: string, details: string) {
+    this.broadcast({ event: 'validation_start', data: { messageId, details } });
   }
 
-  sendValidationComplete(messageId: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'validation_complete',
-      details: 'All validations passed',
-      timestamp: Date.now(),
-    });
+  sendValidationComplete(messageId: string, details: string) {
+    this.broadcast({ event: 'validation_complete', data: { messageId, details } });
   }
 
-  sendPreviewStart(messageId: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'preview_start',
-      details: 'Starting preview server...',
-      timestamp: Date.now(),
-    });
+  sendPreviewStart(messageId: string, details: string) {
+    this.broadcast({ event: 'preview_start', data: { messageId, details } });
   }
 
-  sendPreviewReady(messageId: string, port: number) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'preview_ready',
-      details: `Preview ready at http://localhost:${port}`,
-      timestamp: Date.now(),
-    });
+  sendPreviewReady(messageId: string, port: number, details: string) {
+    this.broadcast({ event: 'preview_ready', data: { messageId, port, details } });
   }
 
-  sendGenerationStart(messageId: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'generation_start',
-      details: 'Starting AI generation...',
-      timestamp: Date.now(),
-    });
-  }
-
-  sendGenerationThinking(messageId: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'generation_thinking',
-      details: 'AI is thinking...',
-      timestamp: Date.now(),
-    });
-  }
-
-  sendGenerationComplete(messageId: string, text: string) {
-    this.broadcastStatus({
-      type: 'status',
-      messageId,
-      status: 'generation_complete',
-      details: text,
-      timestamp: Date.now(),
-    });
+  sendPreviewError(messageId: string, details: string) {
+    this.broadcast({ event: 'preview_error', data: { messageId, details } });
   }
 }
 
+/**
+ * Singleton instance for application-wide use
+ */
 export const statusBroadcaster = new StatusBroadcaster();

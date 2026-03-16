@@ -1,8 +1,8 @@
 # Channel Transport Migration Plan
 
-**Status:** Planned (Q2 2026)
+**Status:** In Progress (Q2 2026)
 **Created:** March 14, 2026
-**Last Updated:** March 14, 2026
+**Last Updated:** March 15, 2026
 
 **Source of Truth:** See [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) for complete channel specification.
 
@@ -40,18 +40,20 @@ The following foundational work is complete:
 **Goal:** Create `ProtocolServer` and `ProtocolClient` classes
 
 **Tasks:**
-- [ ] Create `packages/protocol/src/types.ts` with `ChannelTypes` interface
+- [ ] Create `apps/common/protocol/src/types.ts` with `ChannelTypes` interface
 - [ ] Implement `ProtocolServer` class with `onChannelSubscribe()` method
 - [ ] Implement `ProtocolClient` class with `channel()` method
 - [ ] Implement message serialization/deserialization
 - [ ] Implement server-side channel instance management
 - [ ] Implement client-side auto-connect/disconnect
+- [ ] Create mock channel types for E2E testing
 
 **Files to Create:**
-- `packages/protocol/src/types.ts`
-- `packages/protocol/src/server/ProtocolServer.ts`
-- `packages/protocol/src/client/ProtocolClient.ts`
-- `packages/protocol/src/utils/serialization.ts`
+- `apps/common/protocol/package.json` (workspace package: `@cycledesign/common-protocol`)
+- `apps/common/protocol/src/types.ts`
+- `apps/common/protocol/src/server/ProtocolServer.ts`
+- `apps/common/protocol/src/client/ProtocolClient.ts`
+- `apps/common/protocol/src/utils/serialization.ts`
 
 **Acceptance Criteria:**
 - TypeScript compilation passes
@@ -68,25 +70,32 @@ The following foundational work is complete:
 
 ### Phase 2: Migrate Status Messages to Channels
 
-**Goal:** Move status:updates channel to channel transport
+**Goal:** Move `status` channel to channel transport
 
 **Tasks:**
-- [ ] Add `status:updates` to `ChannelTypes` interface
-- [ ] Update `StatusBroadcaster` to use `ProtocolServer`
-- [ ] Update `WebSocketBridge` to work with channels
-- [ ] Update client `StatusDisplay` component to use `ProtocolClient`
-- [ ] Keep existing WebSocket as fallback
+- [ ] Add `status` to `ChannelTypes` interface (server-to-client only)
+- [ ] Migrate `StatusMessage` type to `apps/common/protocol/src/types.ts`
+- [ ] Update `StatusBroadcaster` to use `ProtocolServer` (becomes application service)
+- [ ] Create `useChannelSubscription()` generic React hook for client-side broadcasting
+- [ ] Update client `StatusDisplay` component to use `ProtocolClient` + hook
+- [ ] Remove `WebSocketBridge` status routing
+
+**Files to Create:**
+- `apps/web/src/hooks/useChannelSubscription.ts` (generic hook for channel subscriptions)
 
 **Files to Modify:**
-- `apps/server/src/features/status/types.ts`
-- `apps/server/src/features/status/StatusBroadcaster.ts`
-- `apps/server/src/features/status/WebSocketBridge.ts`
+- `apps/common/protocol/src/types.ts` (add `status` channel type)
+- `apps/server/src/features/status/StatusBroadcaster.ts` (convert to application service)
 - `apps/web/src/components/status/StatusDisplay.tsx`
+
+**Files to Delete:**
+- `apps/server/src/features/status/WebSocketBridge.ts` (no longer needed)
 
 **Acceptance Criteria:**
 - Status messages flow through channel transport
-- Existing WebSocket clients still work
-- E2E tests pass for both protocols
+- Status is fire-and-forget (no history replay)
+- E2E tests pass for status channel
+- TypeScript compilation passes with no errors
 
 **Reference:** [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) "Examples: Status Updates"
 
@@ -94,10 +103,11 @@ The following foundational work is complete:
 
 ### Phase 3: Migrate Chat Messages to Channels
 
-**Goal:** Move chat channel to channel transport
+**Goal:** Move `chat` channel to channel transport
 
 **Tasks:**
 - [ ] Add `chat` to `ChannelTypes` interface
+- [ ] Migrate chat message types to `apps/common/protocol/src/types.ts`
 - [ ] Create `ChatRoom` application service (pure, no transport knowledge)
 - [ ] Update server to use `onChannelSubscribe('chat', ...)`
 - [ ] Update client to use `client.channel('chat')`
@@ -107,59 +117,41 @@ The following foundational work is complete:
 - `apps/server/src/features/chat/ChatRoom.ts`
 
 **Files to Modify:**
+- `apps/common/protocol/src/types.ts` (add `chat` channel type)
 - `apps/server/src/llm/agent.ts`
-- `apps/web/src/api/websocket.ts`
+- `apps/web/src/api/websocket.ts` (or replace entirely)
 - `apps/web/src/hooks/useMessageListState.ts`
 - `apps/web/src/pages/ChatPage.tsx`
 
 **Acceptance Criteria:**
 - Chat messages flow through channel transport
 - Type-safe message payloads
-- Backward compatible with WebSocket clients
+- E2E tests pass for chat channel
+- Client and server migrated together (end-to-end verification)
 
 **Reference:** [CHANNEL-SUBSCRIPTION-DESIGN.md](./CHANNEL-SUBSCRIPTION-DESIGN.md) "Examples: Chat Channel"
 
 ---
 
-### Phase 4: Deprecate WebSocket API
-
-**Goal:** Mark WebSocket transport as deprecated
-
-**Tasks:**
-- [ ] Add deprecation warnings to WebSocket endpoints
-- [ ] Update documentation to recommend channel transport
-- [ ] Add migration guide for clients
-- [ ] Set deprecation timeline
-
-**Files to Modify:**
-- `apps/server/src/transport/ws/WebSocketHandler.ts`
-- `docs/WEBSOCKET_PROTOCOL.md`
-
-**Acceptance Criteria:**
-- Deprecation notices visible in logs
-- Documentation updated
-- Migration path documented
-
----
-
-### Phase 5: Remove WebSocket Protocol Layer
+### Phase 4: Remove WebSocket Protocol Layer
 
 **Goal:** Remove legacy WebSocket transport
 
 **Tasks:**
 - [ ] Remove WebSocket message handling code
-- [ ] Remove SessionWebSocket class from client
+- [ ] Remove `SessionWebSocket` class from client
 - [ ] Remove WebSocket-specific types
 - [ ] Clean up unused dependencies
 
 **Files to Delete:**
-- `apps/server/src/transport/ws/WebSocketHandler.ts` (if no longer needed)
+- `apps/server/src/transport/ws/WebSocketHandler.ts`
 - `apps/web/src/api/websocket.ts` (if fully replaced)
 
 **Acceptance Criteria:**
 - All functionality works via channel transport
 - No references to legacy WebSocket API
-- Bundle size reduced
+- `npm run build` passes for all apps
+- `npm run test:e2e` passes
 
 ---
 
@@ -229,7 +221,7 @@ For details on the previous WebSocket architecture migration (Phases 1-7, comple
 | Aspect | Current (WebSocket) | Target (Channels) |
 |--------|---------------------|-------------------|
 | **Abstraction** | Raw WebSocket messages | Type-safe channel instances |
-| **Type Safety** | Runtime validation | Compile-time enforcement |
+| **Type Safety** | Runtime validation | Compile-time enforcement (TODO: add Zod) |
 | **Event Direction** | Bidirectional (untyped) | Separated client→server and server→client |
 | **Session Management** | sessionId in URL query | Per-channel instances, auto-managed |
 | **Message Format** | `{ type, content, ... }` | `TransportEnvelope` with channelId |
@@ -242,28 +234,29 @@ For details on the previous WebSocket architecture migration (Phases 1-7, comple
 
 ```
 Phase 1: Implement Protocol Layer
+├─ Create apps/common/protocol/ package
 ├─ Create ProtocolServer and ProtocolClient
 ├─ Implement type-safe channel registry
+├─ Create mock channel types for testing
 └─ Write unit tests
 
 Phase 2: Migrate Status Messages
-├─ Add status:updates to ChannelTypes
-├─ Update StatusBroadcaster
-├─ Update WebSocketBridge
-└─ Update client StatusDisplay
+├─ Add 'status' channel to ChannelTypes
+├─ Migrate StatusMessage types to protocol package
+├─ Update StatusBroadcaster to use ProtocolServer
+├─ Create useChannelSubscription() React hook
+├─ Update client StatusDisplay
+└─ Remove WebSocketBridge
 
 Phase 3: Migrate Chat Messages
-├─ Add chat to ChannelTypes
+├─ Add 'chat' channel to ChannelTypes
+├─ Migrate chat types to protocol package
 ├─ Create ChatRoom service
 ├─ Update server agent
-└─ Update client hooks and pages
+├─ Update client hooks and pages
+└─ Verify E2E chat flow
 
-Phase 4: Deprecate WebSocket API
-├─ Add deprecation warnings
-├─ Update documentation
-└─ Set deprecation timeline
-
-Phase 5: Remove WebSocket Protocol
+Phase 4: Remove WebSocket Protocol
 ├─ Remove WebSocket handlers
 ├─ Remove client SessionWebSocket
 └─ Clean up dependencies
@@ -271,40 +264,42 @@ Phase 5: Remove WebSocket Protocol
 
 ---
 
-## Risk Mitigation
+## Migration Strategy
 
-| Risk | Mitigation |
-|------|------------|
-| Breaking changes to client API | Keep WebSocket as fallback during Phases 2-3 |
-| Type registry complexity | Start with minimal channels (status, chat) |
-| Client migration coordination | Use feature flags for gradual rollout |
-| Performance regression | Benchmark channel overhead vs raw WebSocket |
+### Key Principles
 
----
+1. **No Fallback**: Focus on making the new system work. Do not maintain WebSocket fallback during migration.
 
-## Rollback Plan
+2. **End-to-End Migration**: Migrate client and server together per channel type. Verify each channel works end-to-end before moving to the next.
 
-If migration encounters critical issues:
+3. **Breakage is Expected**: The system may break during transition. Document what is expected to break and when functionality will be restored.
 
-1. **Phase 1:** Protocol layer is additive - no rollback needed
-2. **Phase 2-3:** Keep WebSocket fallback functional
-3. **Phase 4:** Deprecation is documentation-only - no rollback needed
-4. **Phase 5:** Revert removal if critical bugs found
+4. **Singleton Pattern is Application-Layer**: The protocol framework does not enforce singleton channels. Application code (e.g., React hooks) manages singleton instances as needed.
 
-**Rollback Command:**
-```bash
-git revert <commit-hash>
-# Or restore from backup
-```
+5. **Validation Strategy**: Rely on TypeScript compile-time checks for now. Add `// TODO: Add Zod runtime validation` comments for future enhancement.
+
+6. **Error Handling**: 
+   - Transport-level errors: handled via try/catch in handlers
+   - Application-level errors: defined as channel events (e.g., `tool_call_error` in status channel)
+
+7. **Status Messages**: Fire-and-forget. No history replay on reconnect.
+
+### Testing Strategy
+
+- Migrate tests as channels are implemented
+- Remove obsolete tests (e.g., WebSocket-specific tests)
+- No backward compatibility tests needed
+- No benchmarking required
 
 ---
 
 ## Success Criteria
 
 - [ ] **Architecture:**
-  - Protocol layer implemented with type-safe channels
+  - Protocol layer implemented in `apps/common/protocol/`
   - Application services have no transport knowledge
-  - Clear separation: protocol/ vs transport/ vs features/
+  - Clear separation: `common/protocol/` vs `transport/` vs `features/`
+  - All channel types defined in protocol package
 
 - [ ] **Functionality:**
   - Status messages flow through channel transport
@@ -312,14 +307,13 @@ git revert <commit-hash>
   - Type-safe payloads enforced at compile-time
 
 - [ ] **Testing:**
-  - Unit tests for ProtocolServer and ProtocolClient
-  - E2E tests pass for channel transport
-  - Backward compatibility tests pass for WebSocket fallback
+  - Unit tests for ProtocolServer and ProtocolClient pass
+  - E2E tests pass for all migrated channels
+  - No obsolete tests remaining
 
 - [ ] **Documentation:**
   - Channel API documented
-  - Migration guide complete
-  - Deprecation notices in place
+  - Migration guide complete (this document)
 
 - [ ] **Code Quality:**
   - `npm run build` passes for all apps

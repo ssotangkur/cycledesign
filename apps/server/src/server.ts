@@ -6,12 +6,13 @@ import { sseRouter } from './routes/sse.js';
 import { previewManager } from './preview/preview-manager.js';
 
 import https from 'https';
-import { WebSocketHandler } from './transport/ws/WebSocketHandler.js';
-import { WebSocketBridge } from './features/status/WebSocketBridge.js';
 import { existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { appRouter } from './trpc/trpc.js';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
+import { ProtocolServer } from '@cycledesign/common-protocol';
+import { statusBroadcaster } from './features/status/StatusBroadcaster.js';
+import { MessageHandler } from './features/chat/MessageHandler.js';
 
 dotenv.config();
 
@@ -70,11 +71,50 @@ const server = app.listen(PORT, () => {
   console.log(`Health check: http://localhost:${PORT}/health`);
 });
 
-const wsHandler = new WebSocketHandler(server);
-const wsBridge = new WebSocketBridge(wsHandler);
+// Create ProtocolServer for channel-based transport
+const protocolServer = new ProtocolServer({ server });
 
-// Export wsBridge for use in other modules (e.g., agent.ts, tool-executor.ts)
-export { wsHandler, wsBridge };
+// Register status channel handler
+protocolServer.onChannelSubscribe('status', (channel) => {
+  // Subscribe to status events and forward to this channel
+  const unsubscribe = statusBroadcaster.subscribe((status) => {
+    channel.send(status.event, status.data);
+  });
+
+  return {
+    handlers: {},  // No client events for status channel
+    unsubscribe
+  };
+});
+
+// Create MessageHandler for LLM streaming
+const messageHandler = new MessageHandler();
+
+// Register chat channel handler
+protocolServer.onChannelSubscribe('chat', (channel) => {
+  // Send history on subscribe
+  const history = messageHandler.getHistory();
+  channel.send('history', { messages: history });
+
+  // Subscribe to new messages and broadcast to this channel
+  const unsubscribe = messageHandler.onMessage((msg) => {
+    // Don't echo back to sender
+    if (msg.userId !== channel.id) {
+      channel.send('message', msg);
+    }
+  });
+
+  // Use MessageHandler for processing user messages
+  const handlers = messageHandler.createChatChannelHandler(channel);
+
+  return {
+    handlers,
+    unsubscribe
+  };
+});
+
+// Export protocolServer for use in other modules
+export { protocolServer };
 
 // Graceful shutdown handlers
 function gracefulShutdown(signal: string) {
