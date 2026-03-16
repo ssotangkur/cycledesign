@@ -43,10 +43,15 @@ export class MockProvider implements IProvider {
         ? lastMessage.content.map(c => 'text' in c && typeof c.text === 'string' ? c.text : '').join('')
         : '';
 
+    console.log('[MockProvider] Received prompt:', prompt);
+    console.log('[MockProvider] Prompt length:', prompt.length);
+    console.log('[MockProvider] Lower prompt:', prompt.toLowerCase());
+
     const lowerPrompt = prompt.toLowerCase();
 
     // Deterministic responses based on prompt patterns
     if (lowerPrompt.includes('create file') || lowerPrompt.includes('create_file')) {
+      console.log('[MockProvider] Matching "create file" pattern - returning tool call');
       return {
         content: 'I will create a file for you.',
         stream: this.generateChunks('I will create a file for you.'),
@@ -62,6 +67,7 @@ export class MockProvider implements IProvider {
     }
 
     if (lowerPrompt.includes('edit') || lowerPrompt.includes('update')) {
+      console.log('[MockProvider] Matching "edit/update" pattern - returning tool call');
       return {
         content: 'I will edit the file.',
         stream: this.generateChunks('I will edit the file.'),
@@ -76,6 +82,7 @@ export class MockProvider implements IProvider {
       };
     }
 
+    console.log('[MockProvider] No pattern matched - returning default response');
     // Default response - no tool calls
     return {
       content: 'This is a mock response from the MockProvider. How can I help you today?',
