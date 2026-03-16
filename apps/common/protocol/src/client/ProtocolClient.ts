@@ -110,7 +110,7 @@ class ChannelImpl<T extends { client: Record<string, Record<string, unknown>>; s
       for (const handler of handlerSet) {
         try {
           handler(payload.data);
-        } catch (error) {
+        } catch {
           // Handler errors are silently ignored to prevent one bad handler from breaking others
           // Application should handle errors in their handlers
         }
@@ -134,7 +134,7 @@ class ChannelImpl<T extends { client: Record<string, Record<string, unknown>>; s
  */
 export class ProtocolClient {
   private ws: WebSocket | null = null;
-  private channels = new Map<string, ChannelImpl<any>>(); // channelId → channel (key is temp ID until server assigns real ID)
+  private channels = new Map<string, ChannelImpl<ChannelTypes[keyof ChannelTypes]>>(); // channelId → channel (key is temp ID until server assigns real ID)
   private url: string;
   private options?: ProtocolClientOptions;
   private nextChannelId = 1;

@@ -16,7 +16,6 @@
   "dependencies": {
     "@ai-sdk/mistral": "^3.0.20",
     "@cycledesign/common-protocol": "file:../common/protocol",
-    "@types/ws": "^8.18.1",
     "ai": "^6.0.97",
     "cors": "^2.8.5",
     "diff": "^8.0.3",
@@ -26,7 +25,6 @@
     "qwen-ai-provider-v5": "^2.1.0",
     "ts-morph": "^27.0.2",
     "uuid": "^9.0.0",
-    "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

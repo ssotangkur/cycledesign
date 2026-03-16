@@ -113,7 +113,7 @@ export class ProtocolServer {
   private wsServer: WebSocketServer;
   private channels = new Map<string, ServerChannelInfo>(); // channelId → info
   private pendingMessages = new Map<string, TransportEnvelope[]>(); // channelId → pending messages
-  private onSubscribeCallbacks = new Map<string, (channel: ServerChannel<any>) => ChannelSubscription<any> | void>();
+  private onSubscribeCallbacks = new Map<string, (channel: ServerChannel<ChannelTypes[keyof ChannelTypes]>) => ChannelSubscription<ChannelTypes[keyof ChannelTypes]> | void>();
   private nextChannelId = 1;
   private onError?: (error: Error) => void;
 
@@ -163,7 +163,7 @@ export class ProtocolServer {
     channelType: K,
     onSubscribe: (channel: ServerChannel<ChannelTypes[K]>) => ChannelSubscription<ChannelTypes[K]> | void
   ): void {
-    this.onSubscribeCallbacks.set(channelType as string, onSubscribe as (channel: ServerChannel<any>) => ChannelSubscription<any> | void);
+    this.onSubscribeCallbacks.set(channelType as string, onSubscribe as (channel: ServerChannel<ChannelTypes[keyof ChannelTypes]>) => ChannelSubscription<ChannelTypes[keyof ChannelTypes]> | void);
   }
 
   /**
@@ -267,7 +267,7 @@ export class ProtocolServer {
     const callback = this.onSubscribeCallbacks.get(channelType);
     if (callback) {
       try {
-        const subscription = callback(channel as ServerChannel<any>);
+        const subscription = callback(channel as ServerChannel<ChannelTypes[keyof ChannelTypes]>);
         info.subscription = subscription as ChannelSubscription<ChannelTypes[keyof ChannelTypes]> | undefined;
 
         // Mark handlers as registered and flush pending messages
