@@ -41,6 +41,7 @@ export class StatusBroadcaster {
   }
 
   sendGenerationStart(messageId: string, details: string) {
+    console.log('[StatusBroadcaster] sendGenerationStart:', { messageId, details });
     this.broadcast({ event: 'generation_start', data: { messageId, details: details || 'Processing your message' } });
   }
 
