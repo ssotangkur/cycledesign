@@ -59,6 +59,10 @@ function loadConfig(): ProviderConfig {
   } catch (error) {
     console.error('Failed to load provider config:', error);
   }
+  // Default to mock provider if enabled, otherwise use first available provider
+  if (process.env.ENABLE_MOCK_PROVIDER === 'true') {
+    return { provider: 'mock' };
+  }
   return { provider: providers[0].name() };
 }
 
