@@ -76,10 +76,13 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
           );
         }
 
+        // Determine role from userId
+        const role = payload.userId === 'user' ? 'user' as const : 'assistant' as const;
+        
         // New message from other user - server message doesn't have id, generate one
         const newMessage = {
           id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-          role: 'assistant' as const,  // Messages from server are from assistant
+          role,
           ...payload,
           status: 'completed' as const
         };
