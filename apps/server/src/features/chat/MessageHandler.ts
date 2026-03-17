@@ -36,6 +36,20 @@ export class MessageHandler {
   }
 
   /**
+   * Add a message to internal memory and notify subscribers
+   */
+  private addMessageToMemory(content: string, userId: string): void {
+    const message = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      content,
+      userId,
+      timestamp: Date.now(),
+    };
+    this.messages.push(message);
+    this.messageHandlers.forEach(handler => handler(message));
+  }
+
+  /**
    * Add a message and notify subscribers
    */
   private addMessage(content: string, userId: string): void {
@@ -62,7 +76,7 @@ export class MessageHandler {
 
     return {
       message: async (payload: { content: string }) => {
-        // Check if already streaming for this channel
+        // Check if already streaming
         if (isStreaming) {
           console.log('[MessageHandler] Message ignored - streaming in progress for channel:', channel.id);
           return;
@@ -92,6 +106,9 @@ export class MessageHandler {
 
           await addMessage(sessionId, userMsg);
           console.log('[MessageHandler] User message saved to session:', sessionId);
+
+          // Broadcast user message to all channels (userId 'user' won't match any channel.id)
+          this.addMessageToMemory(payload.content, 'user');
 
           // Broadcast status: generation start
           statusBroadcaster.sendGenerationStart(serverMsgId, 'Processing your message');
