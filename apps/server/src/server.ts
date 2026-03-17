@@ -92,15 +92,22 @@ const messageHandler = new MessageHandler();
 
 // Register chat channel handler
 protocolServer.onChannelSubscribe('chat', (channel) => {
+  console.log('[ProtocolServer] Chat channel subscribed:', channel.id);
+  
   // Send history on subscribe
   const history = messageHandler.getHistory();
+  console.log('[ProtocolServer] Sending history with', history.length, 'messages');
   channel.send('history', { messages: history });
 
   // Subscribe to new messages and broadcast to this channel
   const unsubscribe = messageHandler.onMessage((msg) => {
+    console.log('[ProtocolServer] MessageHandler notified, userId:', msg.userId, 'channel.id:', channel.id);
     // Don't echo back to sender
     if (msg.userId !== channel.id) {
+      console.log('[ProtocolServer] Broadcasting message to channel:', channel.id, 'content:', msg.content.substring(0, 50));
       channel.send('message', msg);
+    } else {
+      console.log('[ProtocolServer] Skipping broadcast - message is from this channel');
     }
   });
 

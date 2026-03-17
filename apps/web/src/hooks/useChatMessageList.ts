@@ -47,7 +47,8 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
     const unsubscribeHistory = chatChannel.subscribe('history', (payload) => {
       if (historyReceived) return; // Ignore subsequent history messages
       historyReceived = true;
-      
+      console.log('[useChatMessageList] Received history:', payload.messages.length, 'messages');
+
       setMessages(payload.messages.map((msg: ChatMessage) => ({
         ...msg,
         role: 'assistant' as const,  // Messages from history are from assistant
@@ -57,6 +58,7 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
 
     // Subscribe to new messages
     const unsubscribeMessage = chatChannel.subscribe('message', (payload) => {
+      console.log('[useChatMessageList] Received message:', payload);
       setMessages(prev => {
         // Check if this is a confirmed pending message
         const pendingArray = Array.from(pendingMessages.current.values());
@@ -75,12 +77,14 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
         }
 
         // New message from other user - server message doesn't have id, generate one
-        return [...prev, {
+        const newMessage = {
           id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           role: 'assistant' as const,  // Messages from server are from assistant
           ...payload,
           status: 'completed' as const
-        }];
+        };
+        console.log('[useChatMessageList] Adding new message:', newMessage);
+        return [...prev, newMessage];
       });
       setIsStreaming(false);
     });
