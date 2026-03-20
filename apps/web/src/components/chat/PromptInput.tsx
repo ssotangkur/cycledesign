@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { Box, TextField, IconButton } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import { useCurrentSessionId, useIsHydrated, useInvalidateSessions } from '../../hooks/useSession';
-import { useMessageListState } from '../../hooks/useMessageListState';
+import { useChatMessageList } from '../../hooks/useChatMessageList';
 
 function PromptInput() {
   const { currentSessionId } = useCurrentSessionId();
   const isHydrated = useIsHydrated();
   const { invalidateSessions } = useInvalidateSessions();
-  const { sendMessage, isStreaming, isConnected, messages } = useMessageListState(currentSessionId);
+  const { sendMessage, isStreaming, isConnected, messages } = useChatMessageList(currentSessionId);
   const [input, setInput] = useState('');
 
   const disabled = !isHydrated || !currentSessionId || !isConnected || isStreaming;

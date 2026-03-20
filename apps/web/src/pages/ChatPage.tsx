@@ -3,12 +3,17 @@ import SessionSelector from '../components/chat/SessionSelector';
 import MessageList from '../components/chat/MessageList';
 import PromptInput from '../components/chat/PromptInput';
 import ConnectionStatus from '../components/chat/ConnectionStatus';
+import { StatusDisplay } from '../components/status/StatusDisplay';
+import { useCurrentSessionId } from '../hooks/useSession';
 
 function ChatPage() {
+  const { currentSessionId } = useCurrentSessionId();
+
   return (
     <ChatContainer>
       <SessionSelector />
       <ConnectionStatus />
+      <StatusDisplay sessionId={currentSessionId} />
       <MessageList />
       <PromptInput />
     </ChatContainer>

@@ -2,13 +2,8 @@ import { ToolLoopAgent, stepCountIs, type Tool } from 'ai';
 import { createMistral } from '@ai-sdk/mistral';
 import { allTools } from './tools/tools.js';
 import { SYSTEM_PROMPT } from './system-prompt.js';
-import { statusBroadcaster } from '../websocket/status-broadcaster.js';
-import { getPendingWork, clearPendingWork } from './work-tracker.js';
-import { injectIds } from '../parser/id-injector.js';
-import { previewManager } from '../preview/preview-manager.js';
-import { ValidationPipeline } from '../validation/pipeline.js';
-import { join, resolve } from 'path';
-import { promises as fs } from 'fs';
+import { statusBroadcaster } from '../features/status/StatusBroadcaster.js';
+import { ValidationService } from '../validation/validation-service.js';
 
 // Create Mistral provider
 const mistral = createMistral({
@@ -73,82 +68,11 @@ function getToolCompleteMessage(toolName: string, result: unknown): string {
   }
 }
 
-// Handle validation and preview after submit_work
-async function handleValidationAndPreview(
-  messageId: string
-): Promise<{ success: boolean; errors?: Array<{ type: string; message: string }> }> {
-  const pendingWork = getPendingWork(messageId);
-
-  if (!pendingWork || pendingWork.files.size === 0) {
-    return { success: true };
-  }
-
-  for (const [filename, { code }] of pendingWork.files) {
-    statusBroadcaster.sendValidationStart(messageId, 'dependency check');
-    const dependencyErrors = await checkDependencies(code, filename);
-    if (dependencyErrors.length > 0) {
-      return { success: false, errors: dependencyErrors.map((e) => ({ type: e.type, message: e.message })) };
-    }
-
-    statusBroadcaster.sendValidationStart(messageId, 'TypeScript compilation');
-    const tsErrors = await validateTypeScript(code, filename);
-    if (tsErrors.length > 0) {
-      return { success: false, errors: tsErrors.map((e) => ({ type: e.type, message: e.message })) };
-    }
-
-    statusBroadcaster.sendValidationStart(messageId, 'ESLint check');
-    const eslintErrors = await validateESLint(code, filename);
-    if (eslintErrors.length > 0) {
-      const errorErrors = eslintErrors.filter((e) => e.severity === 'error');
-      if (errorErrors.length > 0) {
-        return { success: false, errors: errorErrors.map((e) => ({ type: e.type, message: e.message })) };
-      }
-    }
-
-    statusBroadcaster.sendValidationStart(messageId, 'ID injection');
-    const injectedCode = injectIds(code, new Set(), filename.replace('.tsx', ''));
-
-    const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const filePath = join(workspaceDir, 'designs', filename);
-    await fs.mkdir(join(workspaceDir, 'designs'), { recursive: true });
-    await fs.writeFile(filePath, injectedCode.code, 'utf-8');
-
-    statusBroadcaster.sendValidationComplete(messageId);
-
-    statusBroadcaster.sendPreviewStart(messageId);
-    await previewManager.start({ designName: filename.replace('.tsx', '') });
-    const status = previewManager.getStatus();
-    if (status.port) {
-      statusBroadcaster.sendPreviewReady(messageId, status.port);
-    }
-  }
-
-  clearPendingWork(messageId);
-  return { success: true };
-}
-
-async function checkDependencies(code: string, filename: string) {
-  const pipeline = new ValidationPipeline(
-    join(process.cwd(), 'apps', 'preview'),
-    process.cwd()
-  );
-  const result = await pipeline.validate(code, filename);
-  return result.errors;
-}
-
-async function validateTypeScript(code: string, filename: string): Promise<Array<{ type: string; message: string }>> {
-  const mod = await import('../validation/typescript.js');
-  return mod.validateTypeScript(code, filename, join(process.cwd(), 'apps', 'preview'));
-}
-
-async function validateESLint(code: string, filename: string): Promise<Array<{ type: string; message: string; severity?: string }>> {
-  const mod = await import('../validation/eslint.js');
-  return mod.validateESLint(code, filename, join(process.cwd(), 'apps', 'preview'), process.cwd());
-}
-
 // Create the agent with ToolLoopAgent
-export function createAgent(messageId: string) {
+export function createAgent(messageId: string, _sessionId: string) {
   const model = mistral('codestral-2508');
+
+  const validationService = new ValidationService();
 
   return new ToolLoopAgent({
     model,
@@ -159,13 +83,13 @@ export function createAgent(messageId: string) {
     // Called when the agent operation begins
     experimental_onStart: (_event) => {
       console.log('[AGENT] Starting agent for message:', messageId);
-      statusBroadcaster.sendGenerationStart(messageId);
+      statusBroadcaster.sendGenerationStart(messageId, 'Starting AI generation...');
     },
 
     // Called when each step (LLM call) begins
     experimental_onStepStart: (_event) => {
       console.log('[AGENT] Step', _event.stepNumber, 'starting for message:', messageId);
-      statusBroadcaster.sendGenerationThinking(messageId);
+      statusBroadcaster.sendGenerationThinking(messageId, 'AI is thinking...');
     },
 
     // Called right before a tool's execute function runs
@@ -173,11 +97,7 @@ export function createAgent(messageId: string) {
       const toolName = event.toolCall.toolName;
       const args = event.toolCall.input as Record<string, unknown>;
       console.log('[AGENT] Tool starting:', toolName);
-      statusBroadcaster.sendToolCallStart(
-        messageId,
-        toolName,
-        getToolStartMessage(toolName, args)
-      );
+      statusBroadcaster.sendToolCallStart(messageId, toolName, getToolStartMessage(toolName, args));
     },
 
     // Called right after a tool's execute function completes
@@ -194,7 +114,7 @@ export function createAgent(messageId: string) {
       // Handle submit_work - run validation
       if (toolName === 'submit_work' && event.success) {
         try {
-          const validationResult = await handleValidationAndPreview(messageId);
+          const validationResult = await validationService.validateAndPreparePreview(messageId);
           if (!validationResult.success && validationResult.errors) {
             const errorMessages = validationResult.errors.map((e) => e.message).join(', ');
             throw new Error(`Validation failed: ${errorMessages}`);
@@ -220,8 +140,8 @@ export function createAgent(messageId: string) {
 }
 
 // Run agent with a prompt
-export async function runAgent(messageId: string, prompt: string) {
-  const agent = createAgent(messageId);
+export async function runAgent(messageId: string, sessionId: string, prompt: string) {
+  const agent = createAgent(messageId, sessionId);
 
   const result = await agent.generate({
     prompt,

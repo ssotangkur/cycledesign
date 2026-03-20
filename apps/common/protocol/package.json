@@ -1,0 +1,41 @@
+{
+  "name": "@cycledesign/common-protocol",
+  "version": "0.1.0",
+  "description": "Type-safe WebSocket channel protocol for CycleDesign",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./types": {
+      "import": "./dist/types.js",
+      "require": "./dist/types.js",
+      "types": "./dist/types.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src",
+    "test": "vitest",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3",
+    "vitest": "^1.0.0"
+  },
+  "files": [
+    "dist"
+  ]
+}

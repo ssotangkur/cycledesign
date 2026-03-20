@@ -6,11 +6,13 @@ import { sseRouter } from './routes/sse.js';
 import { previewManager } from './preview/preview-manager.js';
 
 import https from 'https';
-import { WebSocketHandler } from './ws/ws.js';
 import { existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { appRouter } from './trpc/trpc.js';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
+import { ProtocolServer } from '@cycledesign/common-protocol';
+import { statusBroadcaster } from './features/status/StatusBroadcaster.js';
+import { MessageHandler } from './features/chat/MessageHandler.js';
 
 dotenv.config();
 
@@ -69,7 +71,57 @@ const server = app.listen(PORT, () => {
   console.log(`Health check: http://localhost:${PORT}/health`);
 });
 
-new WebSocketHandler(server);
+// Create ProtocolServer for channel-based transport
+const protocolServer = new ProtocolServer({ server });
+
+// Register status channel handler
+protocolServer.onChannelSubscribe('status', (channel) => {
+  // Subscribe to status events and forward to this channel
+  const unsubscribe = statusBroadcaster.subscribe((status) => {
+    channel.send(status.event, status.data);
+  });
+
+  return {
+    handlers: {},  // No client events for status channel
+    unsubscribe
+  };
+});
+
+// Create MessageHandler for LLM streaming
+const messageHandler = new MessageHandler();
+
+// Register chat channel handler
+protocolServer.onChannelSubscribe('chat', (channel) => {
+  console.log('[ProtocolServer] Chat channel subscribed:', channel.id);
+  
+  // Send history on subscribe
+  const history = messageHandler.getHistory();
+  console.log('[ProtocolServer] Sending history with', history.length, 'messages');
+  channel.send('history', { messages: history });
+
+  // Subscribe to new messages and broadcast to this channel
+  const unsubscribe = messageHandler.onMessage((msg) => {
+    console.log('[ProtocolServer] MessageHandler notified, userId:', msg.userId, 'channel.id:', channel.id);
+    // Don't echo back to sender
+    if (msg.userId !== channel.id) {
+      console.log('[ProtocolServer] Broadcasting message to channel:', channel.id, 'content:', msg.content.substring(0, 50));
+      channel.send('message', msg);
+    } else {
+      console.log('[ProtocolServer] Skipping broadcast - message is from this channel');
+    }
+  });
+
+  // Use MessageHandler for processing user messages
+  const handlers = messageHandler.createChatChannelHandler(channel);
+
+  return {
+    handlers,
+    unsubscribe
+  };
+});
+
+// Export protocolServer for use in other modules
+export { protocolServer };
 
 // Graceful shutdown handlers
 function gracefulShutdown(signal: string) {
@@ -141,3 +193,4 @@ app.use('/trpc', createExpressMiddleware({ router: appRouter }));
 
 export default app;
 // change 3
+

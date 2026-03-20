@@ -1,4 +1,4 @@
-import { statusBroadcaster } from '../websocket/status-broadcaster.js';
+import { statusBroadcaster } from '../features/status/StatusBroadcaster.js';
 import {
   executeCreateFile,
   executeEditFile,
@@ -17,12 +17,7 @@ import {
   submitWorkSchema,
   askUserSchema,
 } from './tools/tools.js';
-import { ValidationPipeline } from '../validation/pipeline.js';
-import { injectIds } from '../parser/id-injector.js';
-import { previewManager } from '../preview/preview-manager.js';
-import { getPendingWork, clearPendingWork } from './work-tracker.js';
-import { join, resolve } from 'path';
-import { promises as fs } from 'fs';
+import { ValidationService } from '../validation/validation-service.js';
 
 function getToolStartMessage(tool: string, args: string): string {
   try {
@@ -84,78 +79,6 @@ function getToolCompleteMessage(tool: string, result: unknown): string {
     default:
       return `${tool} completed`;
   }
-}
-
-async function handleValidationAndPreview(
-  messageId: string
-): Promise<{ success: boolean; errors?: Array<{ type: string; message: string }> }> {
-  const pendingWork = getPendingWork(messageId);
-  
-  if (!pendingWork || pendingWork.files.size === 0) {
-    return { success: true };
-  }
-
-  for (const [filename, { code }] of pendingWork.files) {
-    statusBroadcaster.sendValidationStart(messageId, 'dependency check');
-    const dependencyErrors = await checkDependencies(code, filename);
-    if (dependencyErrors.length > 0) {
-      return { success: false, errors: dependencyErrors.map((e: { type: string; message: string }) => ({ type: e.type, message: e.message })) };
-    }
-
-    statusBroadcaster.sendValidationStart(messageId, 'TypeScript compilation');
-    const tsErrors = await validateTypeScript(code, filename);
-    if (tsErrors.length > 0) {
-      return { success: false, errors: tsErrors.map((e: { type: string; message: string }) => ({ type: e.type, message: e.message })) };
-    }
-
-    statusBroadcaster.sendValidationStart(messageId, 'ESLint check');
-    const eslintErrors = await validateESLint(code, filename);
-    if (eslintErrors.length > 0) {
-      const errorErrors = eslintErrors.filter((e: { severity: string }) => e.severity === 'error');
-      if (errorErrors.length > 0) {
-        return { success: false, errors: errorErrors.map((e: { type: string; message: string }) => ({ type: e.type, message: e.message })) };
-      }
-    }
-
-    statusBroadcaster.sendValidationStart(messageId, 'ID injection');
-    const injectedCode = injectIds(code, new Set(), filename.replace('.tsx', ''));
-    
-    const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const filePath = join(workspaceDir, 'designs', filename);
-    await fs.mkdir(join(workspaceDir, 'designs'), { recursive: true });
-    await fs.writeFile(filePath, injectedCode.code, 'utf-8');
-
-    statusBroadcaster.sendValidationComplete(messageId);
-
-    statusBroadcaster.sendPreviewStart(messageId);
-    await previewManager.start({ designName: filename.replace('.tsx', '') });
-    const status = previewManager.getStatus();
-    if (status.port) {
-      statusBroadcaster.sendPreviewReady(messageId, status.port);
-    }
-  }
-
-  clearPendingWork(messageId);
-  return { success: true };
-}
-
-async function checkDependencies(code: string, filename: string) {
-  const pipeline = new ValidationPipeline(
-    join(process.cwd(), 'apps', 'preview'),
-    process.cwd()
-  );
-  const result = await pipeline.validate(code, filename);
-  return result.errors;
-}
-
-async function validateTypeScript(code: string, filename: string) {
-  const mod = await import('../validation/typescript.js');
-  return mod.validateTypeScript(code, filename, join(process.cwd(), 'apps', 'preview'));
-}
-
-async function validateESLint(code: string, filename: string) {
-  const mod = await import('../validation/eslint.js');
-  return mod.validateESLint(code, filename, join(process.cwd(), 'apps', 'preview'), process.cwd());
 }
 
 interface ToolCall {
@@ -248,33 +171,27 @@ export async function executeToolCalls(
   console.log('[TOOL] executeToolCalls called with', toolCalls.length, 'tool calls for message:', messageId);
   const results = [];
   let shouldRunValidation = false;
-  
+
+  const validationService = new ValidationService();
+
   for (const toolCall of toolCalls) {
     const toolName = toolCall.function.name;
     console.log('[TOOL] Executing tool:', toolName, 'with args:', toolCall.function.arguments);
-    
-    statusBroadcaster.sendToolCallStart(
-      messageId,
-      toolName,
-      getToolStartMessage(toolName, toolCall.function.arguments)
-    );
-    
+
+    statusBroadcaster.sendToolCallStart(messageId, toolName, getToolStartMessage(toolName, toolCall.function.arguments));
+
     try {
       const result = await executeTool(toolCall, messageId);
       console.log('[TOOL] Tool', toolName, 'completed successfully, result:', JSON.stringify(result).substring(0, 200));
-      
-      statusBroadcaster.sendToolCallComplete(
-        messageId,
-        toolName,
-        getToolCompleteMessage(toolName, result)
-      );
-      
+
+      statusBroadcaster.sendToolCallComplete(messageId, toolName, getToolCompleteMessage(toolName, result));
+
       results.push({
         toolCallId: toolCall.id,
         result,
         success: true,
       });
-      
+
       if (toolName === 'submit_work') {
         console.log('[TOOL] submit_work detected - validation will run after all tools complete');
         shouldRunValidation = true;
@@ -282,27 +199,23 @@ export async function executeToolCalls(
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('[TOOL] Tool', toolName, 'failed:', errorMessage);
-      
-      statusBroadcaster.sendToolCallError(
-        messageId,
-        toolName,
-        errorMessage
-      );
-      
+
+      statusBroadcaster.sendToolCallError(messageId, toolName, errorMessage);
+
       results.push({
         toolCallId: toolCall.id,
         error: errorMessage,
         success: false,
       });
-      
+
       throw error;
     }
   }
-  
+
   if (shouldRunValidation) {
     console.log('[TOOL] Running validation pipeline for message:', messageId);
     try {
-      const validationResult = await handleValidationAndPreview(messageId);
+      const validationResult = await validationService.validateAndPreparePreview(messageId);
       if (!validationResult.success && validationResult.errors) {
         const errorMessages = validationResult.errors.map((e: { message: string }) => e.message).join(', ');
         console.error('[TOOL] Validation failed:', errorMessages);
@@ -315,9 +228,9 @@ export async function executeToolCalls(
       throw error;
     }
   }
-  
+
   console.log('[TOOL] All', results.length, 'tool calls processed for message:', messageId);
   return results;
 }
 
-export { executeTool, handleValidationAndPreview };
+export { executeTool };

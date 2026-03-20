@@ -2,6 +2,7 @@ import { router, publicProcedure } from '../init.js';
 import { z } from 'zod';
 import { MistralProvider } from '../../llm/providers/mistral.js';
 import { QwenProvider } from '../../llm/providers/qwen.js';
+import { MockProvider } from '../../llm/providers/mock.js';
 import { IProvider, IProviderClass, IProviderConfig } from '../../llm/types.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -18,7 +19,11 @@ export function getProviderConfig(): { provider: string } {
 const CONFIG_DIR = join(process.cwd(), '.cycledesign');
 const CONFIG_FILE = join(CONFIG_DIR, 'provider-config.json');
 
-const providers: IProviderClass[] = [QwenProvider, MistralProvider];
+const providers: IProviderClass[] = [
+  QwenProvider,
+  MistralProvider,
+  ...(process.env.ENABLE_MOCK_PROVIDER === 'true' ? [MockProvider] : []),
+];
 const providerMap = new Map(providers.map((p) => [p.name(), p]));
 
 let cachedProviderInstance: IProvider | null = null;
@@ -45,6 +50,11 @@ function ensureConfigDir(): void {
 }
 
 function loadConfig(): ProviderConfig {
+  // Force mock provider when ENABLE_MOCK_PROVIDER is set (e.g., in E2E tests)
+  if (process.env.ENABLE_MOCK_PROVIDER === 'true') {
+    return { provider: 'mock' };
+  }
+  
   try {
     if (existsSync(CONFIG_FILE)) {
       const data = readFileSync(CONFIG_FILE, 'utf-8');

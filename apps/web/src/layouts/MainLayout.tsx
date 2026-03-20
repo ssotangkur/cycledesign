@@ -1,10 +1,12 @@
 import { Box, AppBar, Toolbar, Typography, IconButton, Collapse } from '@mui/material';
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useCurrentSessionId } from '../hooks/useSession';
 import SessionSelector from '../components/chat/SessionSelector';
 import MessageList from '../components/chat/MessageList';
 import PromptInput from '../components/chat/PromptInput';
 import ConnectionStatus from '../components/chat/ConnectionStatus';
+import { StatusDisplay } from '../components/status/StatusDisplay';
 import PreviewFrame from '../components/preview/PreviewFrame';
 import PreviewServerStatus, { type ServerState } from '../components/preview/PreviewServerStatus';
 import PreviewLogViewer, { type LogEntry } from '../components/preview/PreviewLogViewer';
@@ -23,6 +25,7 @@ function MainLayout() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [leftPaneWidth, setLeftPaneWidth] = useState<number | null>(null);
+  const { currentSessionId } = useCurrentSessionId();
 
   const [serverState, setServerState] = useState<ServerState>('STOPPED');
   const [serverPort, setServerPort] = useState<number | undefined>();
@@ -148,6 +151,7 @@ function MainLayout() {
           }}
         >
           <SessionSelector />
+          <StatusDisplay sessionId={currentSessionId} />
           <MessageList />
           <PromptInput />
           <ConnectionStatus />
