@@ -216,7 +216,6 @@ export class ProtocolClient {
     this.ws.onmessage = (event) => {
       const message = deserializeMessage(event.data as string);
       if (!message) {
-        // Silently ignore malformed messages
         return;
       }
 
