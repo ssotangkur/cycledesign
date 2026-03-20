@@ -133,6 +133,7 @@ function MainLayout() {
         </Panel>
 
         <Separator
+          data-testid="resize-divider"
           className="panel-separator"
           style={{
             width: '8px',
