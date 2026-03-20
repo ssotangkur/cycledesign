@@ -1,5 +1,5 @@
 import { Box, AppBar, Toolbar, Typography, IconButton, Collapse } from '@mui/material';
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCurrentSessionId } from '../hooks/useSession';
 import SessionSelector from '../components/chat/SessionSelector';
@@ -10,43 +10,21 @@ import { StatusDisplay } from '../components/status/StatusDisplay';
 import PreviewFrame from '../components/preview/PreviewFrame';
 import PreviewServerStatus, { type ServerState } from '../components/preview/PreviewServerStatus';
 import PreviewLogViewer, { type LogEntry } from '../components/preview/PreviewLogViewer';
-import Divider from '../components/layout/Divider';
+import { Panel, Group, Separator } from 'react-resizable-panels';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsIcon from '@mui/icons-material/Settings';
 
-const MIN_LEFT_PANE_WIDTH = 350;
-const MAX_LEFT_PANE_PERCENT = 0.7;
-const DEFAULT_LEFT_PANE_PERCENT = 0.4;
 const LOG_PANEL_HEIGHT = 200;
 
 function MainLayout() {
   const navigate = useNavigate();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState<number>(0);
-  const [leftPaneWidth, setLeftPaneWidth] = useState<number | null>(null);
   const { currentSessionId } = useCurrentSessionId();
 
   const [serverState, setServerState] = useState<ServerState>('STOPPED');
   const [serverPort, setServerPort] = useState<number | undefined>();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(false);
-
-  useEffect(() => {
-    const updateContainerWidth = () => {
-      if (containerRef.current) {
-        const newWidth = containerRef.current.clientWidth;
-        setContainerWidth(newWidth);
-        if (leftPaneWidth === null && newWidth > 0) {
-          setLeftPaneWidth(newWidth * DEFAULT_LEFT_PANE_PERCENT);
-        }
-      }
-    };
-
-    updateContainerWidth();
-    window.addEventListener('resize', updateContainerWidth);
-    return () => window.removeEventListener('resize', updateContainerWidth);
-  }, [leftPaneWidth]);
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -110,16 +88,6 @@ function MainLayout() {
     console.log('Mode ready:', mode);
   }, []);
 
-  const handleDividerDrag = useCallback((newWidth: number) => {
-    const minPercent = MIN_LEFT_PANE_WIDTH / containerWidth;
-    const maxPercent = MAX_LEFT_PANE_PERCENT;
-    const newPercent = newWidth / containerWidth;
-
-    if (newPercent >= minPercent && newPercent <= maxPercent) {
-      setLeftPaneWidth(newWidth);
-    }
-  }, [containerWidth]);
-
   const previewUrl = serverState === 'RUNNING' ? `http://localhost:${serverPort || 3002}` : undefined;
 
   return (
@@ -135,71 +103,106 @@ function MainLayout() {
         </Toolbar>
       </AppBar>
 
-      <Box
-        ref={containerRef}
-        sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}
+      <Group
+        orientation="horizontal"
+        className="panel-group"
+        style={{
+          width: '100%',
+          height: '100%',
+        }}
       >
-        <Box
+        <Panel
           data-testid="chat-panel"
-          sx={{
-            width: leftPaneWidth ?? `${DEFAULT_LEFT_PANE_PERCENT * 100}%`,
-            minWidth: `${MIN_LEFT_PANE_WIDTH}px`,
-            maxWidth: `${MAX_LEFT_PANE_PERCENT * 100}%`,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
+          defaultSize="35"
+          className="chat-panel"
         >
-          <SessionSelector />
-          <StatusDisplay sessionId={currentSessionId} />
-          <MessageList />
-          <PromptInput />
-          <ConnectionStatus />
-        </Box>
-
-        <Divider
-          onDrag={handleDividerDrag}
-          currentWidth={leftPaneWidth ?? 0}
-          containerWidth={containerWidth}
-          minWidth={MIN_LEFT_PANE_WIDTH}
-          maxWidthPercent={MAX_LEFT_PANE_PERCENT}
-        />
-
-        <Box
-          data-testid="preview-panel"
-          sx={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
-        >
-          <PreviewServerStatus
-            state={serverState}
-            port={serverPort}
-            onStart={handleStartServer}
-            onStop={handleStopServer}
-          />
-          <PreviewFrame
-            url={previewUrl}
-            onComponentSelected={handleComponentSelected}
-            onModeReady={handleModeReady}
-          />
-          <Box sx={{ display: 'flex', alignItems: 'center', p: 1, bgcolor: 'background.paper' }}>
-            <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mr: 1 }}>
-              Mode:
-            </Typography>
-            <IconButton size="small" onClick={() => setShowLogs(!showLogs)}>
-              {showLogs ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            </IconButton>
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              height: '100%',
+            }}
+          >
+            <SessionSelector />
+            <StatusDisplay sessionId={currentSessionId} />
+            <MessageList />
+            <PromptInput />
+            <ConnectionStatus />
           </Box>
-          <Collapse in={showLogs}>
-            <Box sx={{ height: LOG_PANEL_HEIGHT }}>
-              <PreviewLogViewer logs={logs} onClear={handleClearLogs} />
+        </Panel>
+
+        <Separator
+          className="panel-separator"
+          style={{
+            width: '8px',
+            cursor: 'col-resize',
+            backgroundColor: '#e0e0e0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            zIndex: 1,
+            transition: 'background-color 0.2s',
+            outline: 'none',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#1976d2';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#e0e0e0';
+          }}
+        >
+          <Box
+            sx={{
+              width: '2px',
+              height: '40px',
+              backgroundColor: 'text.secondary',
+              borderRadius: '1px',
+              opacity: 0.5,
+            }}
+          />
+        </Separator>
+
+        <Panel
+          data-testid="preview-panel"
+          className="preview-panel"
+        >
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              height: '100%',
+            }}
+          >
+            <PreviewServerStatus
+              state={serverState}
+              port={serverPort}
+              onStart={handleStartServer}
+              onStop={handleStopServer}
+            />
+            <PreviewFrame
+              url={previewUrl}
+              onComponentSelected={handleComponentSelected}
+              onModeReady={handleModeReady}
+            />
+            <Box sx={{ display: 'flex', alignItems: 'center', p: 1, bgcolor: 'background.paper' }}>
+              <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mr: 1 }}>
+                Mode:
+              </Typography>
+              <IconButton size="small" onClick={() => setShowLogs(!showLogs)}>
+                {showLogs ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              </IconButton>
             </Box>
-          </Collapse>
-        </Box>
-      </Box>
+            <Collapse in={showLogs}>
+              <Box sx={{ height: LOG_PANEL_HEIGHT }}>
+                <PreviewLogViewer logs={logs} onClear={handleClearLogs} />
+              </Box>
+            </Collapse>
+          </Box>
+        </Panel>
+      </Group>
     </Box>
   );
 }
