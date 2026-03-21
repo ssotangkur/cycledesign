@@ -112,11 +112,11 @@ function MainLayout() {
         }}
       >
         <Panel
-          data-testid="chat-panel"
           defaultSize="35"
           className="chat-panel"
         >
           <Box
+            data-testid="chat-panel"
             sx={{
               display: 'flex',
               flexDirection: 'column',
@@ -166,10 +166,10 @@ function MainLayout() {
         </Separator>
 
         <Panel
-          data-testid="preview-panel"
           className="preview-panel"
         >
           <Box
+            data-testid="preview-panel"
             sx={{
               display: 'flex',
               flexDirection: 'column',
