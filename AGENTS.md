@@ -31,6 +31,17 @@ This ensures you're checking the actual GitHub Actions status, not just local va
 
 ---
 
+## Knip Configuration Rule
+
+**Do not add files to `knip.json` ignore list without explicit user permission.**
+
+When Knip reports unused files/exports:
+1. First verify if the file is actually needed (search for imports/usages)
+2. If unused, **delete the file** instead of adding it to the ignore list
+3. Only add to ignore list if the file is intentionally kept for future use or has special runtime requirements
+
+---
+
 ## Testing Workflow
 
 After making UI changes, follow this testing pattern:
