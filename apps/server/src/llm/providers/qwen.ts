@@ -1,148 +1,215 @@
-import { generateText, streamText, type ToolSet, type ModelMessage } from 'ai';
+import { type ToolSet, type ModelMessage, LanguageModel } from 'ai';
 import { createQwen } from 'qwen-ai-provider-v5';
+import { ToolLoopAgent, stepCountIs } from 'ai';
 import { QwenAuth } from '../qwen-auth.js';
 import { requestQueue } from '../request-queue.js';
 import { RateLimitError, AuthError } from '../errors.js';
-import { IProvider, IProviderConfig, LLMResponse } from '../types.js';
+import { BaseProvider, type AgentConfig } from './base-provider.js';
+import { IProviderConfig, LLMResponse } from '../types.js';
 
 const qwenAuth = new QwenAuth();
 
-export class QwenProvider implements IProvider {
+export class QwenProvider extends BaseProvider {
   readonly name = 'qwen' as const;
-  private model: ReturnType<ReturnType<typeof createQwen>> | null = null;
-  private modelPromise: Promise<ReturnType<ReturnType<typeof createQwen>>> | null = null;
+  private qwenProvider: ReturnType<typeof createQwen> | null = null;
+  private agentPromise: Promise<ToolLoopAgent> | null = null;
+  private localCachedAgent: ToolLoopAgent | null = null;
 
-  private async getModel(): Promise<ReturnType<ReturnType<typeof createQwen>>> {
-    if (this.model) return this.model;
+  protected async getModel(): Promise<LanguageModel> {
+    const token = await qwenAuth.getToken();
 
-    if (this.modelPromise) return this.modelPromise;
+    if (!token) {
+      await qwenAuth.performDeviceAuthFlow();
+    }
 
-    this.modelPromise = (async () => {
-      const token = await qwenAuth.getToken();
+    if (!this.qwenProvider) {
+      this.qwenProvider = createQwen({ apiKey: token ?? undefined });
+    }
 
-      if (!token) {
-        await qwenAuth.performDeviceAuthFlow();
-        return this.getModel();
-      }
-
-      const qwen = createQwen({
-        apiKey: token,
-      });
-
-      this.model = qwen('qwen-coder-model');
-      this.modelPromise = null;
-      return this.model;
-    })();
-
-    return this.modelPromise;
+    return this.qwenProvider('qwen-coder-model');
   }
 
-  async complete(messages: ModelMessage[], options?: {
-    stream?: boolean;
-    maxRetries?: number;
-    tools?: ToolSet;
-  }): Promise<LLMResponse> {
-    const maxRetries = options?.maxRetries ?? 3;
-    let lastError: Error | null = null;
+  protected createAgentConfig(): AgentConfig {
+    return {
+      ...super.createAgentConfig(),
+      onStepFinish: async ({ usage, toolCalls, finishReason }) => {
+        console.log(`[Qwen] Step completed: ${finishReason}`);
+        if (toolCalls?.length) {
+          console.log(`[Qwen] Tools called: ${toolCalls.map(tc => tc.toolName).join(', ')}`);
+        }
+        if (usage) {
+          console.log(`[Qwen] Tokens used: ${usage.totalTokens ?? 0}`);
+        }
+      },
+    };
+  }
 
+  // Qwen overrides getAgent to handle async initialization
+  protected async getAgentAsync(options?: { tools?: ToolSet; systemText?: string }): Promise<ToolLoopAgent> {
+    // If tools are provided, create a new scoped agent (not cached)
+    if (options?.tools) {
+      return new ToolLoopAgent({
+        model: this.qwenProvider!('qwen-coder-model'),
+        instructions: options.systemText,
+        tools: options.tools,
+        stopWhen: stepCountIs(10),
+        temperature: 0.1,
+        maxOutputTokens: 8192,
+        maxRetries: 2,
+      });
+    }
+
+    // Return cached agent for default usage
+    if (this.localCachedAgent) return this.localCachedAgent;
+
+    if (this.agentPromise) {
+      return await this.agentPromise;
+    }
+
+    this.agentPromise = (async () => {
+      const model = await this.getModel();
+
+      this.localCachedAgent = new ToolLoopAgent({
+        model,
+        instructions: 'You are a helpful coding assistant.',
+        stopWhen: stepCountIs(10),
+        temperature: 0.1,
+        maxOutputTokens: 8192,
+        maxRetries: 2,
+        onStepFinish: async ({ usage, toolCalls, finishReason }) => {
+          console.log(`[Qwen] Step completed: ${finishReason}`);
+          if (toolCalls?.length) {
+            console.log(`[Qwen] Tools called: ${toolCalls.map(tc => tc.toolName).join(', ')}`);
+          }
+          if (usage) {
+            console.log(`[Qwen] Tokens used: ${usage.totalTokens ?? 0}`);
+          }
+        },
+      });
+
+      this.agentPromise = null;
+      return this.localCachedAgent;
+    })();
+
+    return await this.agentPromise;
+  }
+
+  // Override complete to use async getAgent
+  async complete(
+    messages: ModelMessage[],
+    options?: {
+      stream?: boolean;
+      maxRetries?: number;
+      tools?: ToolSet;
+    }
+  ): Promise<LLMResponse> {
     console.log('[LLM] complete() called with', messages.length, 'messages, stream:', options?.stream ?? false);
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await requestQueue.enqueue(async () => {
-          const model = await this.getModel();
-          console.log('[LLM] Got model instance, starting', options?.stream ? 'stream' : 'completion');
+    // Wrap base implementation with request queue
+    return await requestQueue.enqueue(async () => {
+      const retryConfig = await this.beforeComplete?.();
+      const maxRetries = retryConfig?.maxRetries ?? (options?.maxRetries ?? 3);
 
-          if (options?.stream) {
-            console.log('[LLM] Creating stream with', messages.length, 'messages');
+      if (retryConfig) {
+        let lastError: Error | null = null;
 
-            // Extract system message if present
-            const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
-            const userMessages = messages.filter(m => m.role !== 'system');
-
-            // Extract text from system message content (handle both string and array formats)
-            const systemText = typeof systemMessage?.content === 'string'
-              ? systemMessage.content
-              : Array.isArray(systemMessage?.content)
-                ? systemMessage.content.map(c => c.text).join('')
-                : undefined;
-
-            const result = await streamText({
-              model,
-              messages: userMessages,
-              system: systemText,
-              tools: options.tools,
-              temperature: 0.1,
-            });
-            console.log('[LLM] Stream created successfully');
-            const toolCalls = await result.toolCalls;
-
-            return {
-              stream: result.textStream,
-              // @ts-expect-error - toolCall args type mismatch
-              toolCalls: toolCalls ? toolCalls.map((tc) => ({ id: tc.toolCallId, name: tc.toolName, args: (tc.args ?? {}) as Record<string, unknown> })) : [],
-            } as unknown as LLMResponse;
-          } else {
-            console.log('[LLM] Generating text with', messages.length, 'messages');
-
-            // Extract system message if present
-            const systemMessage = messages.find(m => m.role === 'system') as { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
-            const userMessages = messages.filter(m => m.role !== 'system');
-
-            // Extract text from system message content (handle both string and array formats)
-            const systemText = typeof systemMessage?.content === 'string'
-              ? systemMessage.content
-              : Array.isArray(systemMessage?.content)
-                ? systemMessage.content.map(c => c.text).join('')
-                : undefined;
-
-            const result = await generateText({
-              model,
-              messages: userMessages,
-              system: systemText,
-              tools: options?.tools,
-              temperature: 0.1,
-            });
-            console.log('[LLM] Generation complete, tokens used:', result.usage);
-            const toolCalls = result.toolCalls;
-            return {
-              content: result.text,
-              // @ts-expect-error - toolCall args type mismatch
-              toolCalls: toolCalls ? toolCalls.map((tc) => ({ id: tc.toolCallId, name: tc.toolName, args: (tc.args ?? {}) as Record<string, unknown> })) : [],
-              usage: result.usage,
-            } as LLMResponse;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            return await this.executeCompleteInternal(messages, options);
+          } catch (error: unknown) {
+            lastError = error as Error;
+            const shouldContinue = await retryConfig.onError?.(error, attempt);
+            if (!shouldContinue) break;
           }
-        });
-      } catch (error: unknown) {
-        lastError = error as Error;
-        console.error('[LLM] Error on attempt', attempt + 1, '/', maxRetries + 1 + ':', (error as Error).message);
+        }
+
+        throw lastError || new Error('Max retries exceeded');
+      } else {
+        return await this.executeCompleteInternal(messages, options);
+      }
+    });
+  }
+
+  private async executeCompleteInternal(
+    messages: ModelMessage[],
+    options?: { tools?: ToolSet; stream?: boolean }
+  ): Promise<LLMResponse> {
+    const systemMessage = messages.find(m => m.role === 'system') as
+      { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
+    const userMessages = messages.filter(m => m.role !== 'system');
+
+    const systemText = typeof systemMessage?.content === 'string'
+      ? systemMessage.content
+      : Array.isArray(systemMessage?.content)
+        ? systemMessage.content.map(c => c.text).join('')
+        : undefined;
+
+    const agent = await this.getAgentAsync({ tools: options?.tools, systemText });
+
+    if (options?.stream) {
+      const result = await agent.stream({ messages: userMessages });
+      const toolCalls = await result.toolCalls;
+      return {
+        stream: result.textStream,
+        content: '',
+        toolCalls: toolCalls
+          ? toolCalls.map((tc) => ({
+            id: tc.toolCallId,
+            name: tc.toolName,
+            args: (tc.input ?? {}) as Record<string, unknown>,
+          }))
+          : [],
+      };
+    } else {
+      const result = await agent.generate({ messages: userMessages });
+      return {
+        content: result.text,
+        toolCalls: result.toolCalls
+          ? result.toolCalls.map((tc) => ({
+            id: tc.toolCallId,
+            name: tc.toolName,
+            args: (tc.input ?? {}) as Record<string, unknown>,
+          }))
+          : [],
+        usage: result.usage,
+      };
+    }
+  }
+
+  protected async beforeComplete(): Promise<{
+    maxRetries: number;
+    onError: (error: unknown, attempt: number) => Promise<boolean>;
+  }> {
+    console.log('[LLM] Preparing for request with retry logic');
+
+    return {
+      maxRetries: 3,
+      onError: async (error: unknown, attempt: number): Promise<boolean> => {
+        console.error('[LLM] Error on attempt', attempt + 1);
 
         if (error instanceof AuthError || (error as { status?: number }).status === 401 || (error as { message?: string }).message?.includes('401')) {
           console.log('[LLM] Authentication error (401) - triggering device auth flow');
           await qwenAuth.performDeviceAuthFlow();
-          continue;
+          return true; // Continue retry
         }
 
         if (error instanceof RateLimitError || (error as { status?: number }).status === 429) {
           const backoff = (error as { retryAfterMs?: number }).retryAfterMs ?? Math.min(1000 * Math.pow(2, attempt), 60000);
           console.log('[LLM] Rate limited - waiting', backoff, 'ms before retry');
           await new Promise(resolve => setTimeout(resolve, backoff));
-          continue;
+          return true; // Continue retry
         }
 
-        if (attempt < maxRetries) {
+        if (attempt < 3) {
           const backoff = Math.min(1000 * Math.pow(2, attempt), 60000);
           console.log('[LLM] Retrying in', backoff, 'ms...');
           await new Promise(resolve => setTimeout(resolve, backoff));
-          continue;
+          return true; // Continue retry
         }
 
-        console.error('[LLM] Max retries exceeded, throwing error');
-        throw error;
-      }
-    }
-
-    throw lastError || new Error('Max retries exceeded');
+        return false; // Stop retrying
+      },
+    };
   }
 
   async listModels(): Promise<{ id: string; name: string }[]> {
