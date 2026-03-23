@@ -1,0 +1,13 @@
+# Git credentials (created inside container, should never exist on host)
+.git-credentials
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

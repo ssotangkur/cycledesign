@@ -1,0 +1,33 @@
+# CycleDesign Persistent Development Container
+# Long-running container with VNC, dev servers, and Chromium
+# https://github.com/jlesage/docker-baseimage-gui
+
+FROM jlesage/baseimage-gui:alpine-3.23-v4.11.3
+
+# Install dependencies
+RUN apk add --no-cache \
+    nodejs \
+    npm \
+    git \
+    python3 \
+    ripgrep \
+    chromium \
+    libc6-compat
+
+# Configure git
+RUN git config --global init.defaultBranch main && \
+    git config --global advice.detachedHead false && \
+    git config --global credential.helper store
+
+# Copy startup script (path is relative to .qwen directory)
+COPY rootfs/startapp.sh /startapp.sh
+RUN chmod +x /startapp.sh
+
+# Set application name
+RUN set-cont-env APP_NAME "CycleDesign Dev"
+
+# Expose VNC ports only (dev servers are internal)
+EXPOSE 5800 5900
+
+# Default command
+CMD ["/startapp.sh"]
