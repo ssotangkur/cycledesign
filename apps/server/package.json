@@ -16,6 +16,7 @@
   "dependencies": {
     "@ai-sdk/mistral": "^3.0.20",
     "@cycledesign/common-protocol": "file:../common/protocol",
+    "@trpc/server": "11.10.0",
     "ai": "^6.0.97",
     "cors": "^2.8.5",
     "diff": "^8.0.3",

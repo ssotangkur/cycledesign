@@ -42,12 +42,5 @@
     "optionalDependencies": {
         "@rollup/rollup-linux-x64-gnu": "4.59.0"
     },
-    "dependencies": {
-        "@tanstack/react-query": "^5.90.21",
-        "@trpc/client": "11.10.0",
-        "@trpc/react-query": "11.10.0",
-        "@trpc/server": "11.10.0",
-        "react-resizable-panels": "^4.7.3",
-        "zod": "^4.3.6"
-    }
+    "dependencies": {}
 }

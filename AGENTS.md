@@ -84,6 +84,29 @@ For React state changes, verify:
 
 ---
 
+## Screenshot & Snapshot Rule
+
+**All screenshots and snapshots from Chrome DevTools MCP or Playwright must be saved to the `tmp/` directory.**
+
+The `tmp/` directory is already in `.gitignore`, so test artifacts won't be committed.
+
+**Examples:**
+
+**Chrome DevTools MCP:**
+```
+"Take a screenshot and save it to tmp/homepage-screenshot.png"
+"Capture the current page state to tmp/login-flow-snapshot.png"
+```
+
+**Playwright:**
+```bash
+npx playwright screenshot http://localhost:3000 tmp/page-screenshot.png
+```
+
+**Never save screenshots to the project root or tracked directories.**
+
+---
+
 ## Project Structure
 
 - `apps/web/` - React frontend (Vite + MUI)

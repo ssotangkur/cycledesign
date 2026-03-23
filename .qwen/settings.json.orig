@@ -1,0 +1,11 @@
+{
+  "$schema": "https://qwenlm.github.io/qwen-code-docs/en/developers/schemas/mcp-settings.json",
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"],
+      "timeout": 60000,
+      "trust": true
+    }
+  }
+}
