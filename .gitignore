@@ -65,6 +65,9 @@ coverage/
 # Generated design files
 workspace/
 
+# Qwen Code local settings (contains tokens)
+.qwen/settings.json
+
 # Temporary files
 tmp/
 temp/

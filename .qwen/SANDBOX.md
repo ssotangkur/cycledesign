@@ -116,9 +116,38 @@ Chrome Debugging Port: 9222
 
 ## Configuration
 
+### Settings Files (Split Configuration)
+
+This project uses **split settings** to keep tokens and personal preferences out of version control:
+
+| File | Purpose | Commit to Git? |
+|------|---------|----------------|
+| `.qwen/settings.json.example` | Template with project defaults | ✅ Yes |
+| `.qwen/settings.json` | Your local settings (tokens, preferences) | ❌ No |
+| `~/.qwen/settings.json` | Global user settings (all projects) | ❌ No |
+
+**First-Time Setup:**
+
+```bash
+# 1. Copy the template
+cp .qwen/settings.json.example .qwen/settings.json
+
+# 2. Edit with your preferences
+# .qwen/settings.json is git-ignored, safe for tokens
+```
+
+**Settings Precedence** (lowest to highest):
+1. `.qwen/settings.json.example` - Project template
+2. `.qwen/settings.json` - Your local project settings
+3. `~/.qwen/settings.json` - Your global user settings
+4. Environment variables
+5. Command-line arguments
+
+---
+
 ### Sandbox Settings
 
-The settings are pre-configured in `.qwen/settings.json`:
+The sandbox configuration is pre-configured in `.qwen/settings.json`:
 
 ```json
 {
@@ -128,14 +157,85 @@ The settings are pre-configured in `.qwen/settings.json`:
       "runArgs": [
         "-p", "5900:5900",
         "-p", "6080:6080",
-        "-p", "9222:9222"
+        "-p", "9222:9222",
+        "-e", "SANDBOX_GITHUB_TOKEN"
       ]
     }
-  },
+  }
+}
+```
+
+**Key configuration:**
+- `-e SANDBOX_GITHUB_TOKEN` - Passes your GitHub token from host to container
+
+---
+
+### Personal Settings Setup
+
+**Option 1: Project-Level Settings (`.qwen/settings.json`)**
+
+For project-specific tokens and preferences:
+
+```bash
+# Copy template
+cp .qwen/settings.json.example .qwen/settings.json
+
+# Edit .qwen/settings.json - add your token to runArgs:
+{
+  "sandbox": {
+    "docker": {
+      "runArgs": [
+        "-p", "5900:5900",
+        "-p", "6080:6080", 
+        "-p", "9222:9222",
+        "-e", "SANDBOX_GITHUB_TOKEN=ghp_your_token_here"
+      ]
+    }
+  }
+}
+```
+
+**Option 2: User-Level Settings (`~/.qwen/settings.json`)**
+
+For global settings across all projects:
+
+```bash
+# Create or edit global settings
+mkdir -p ~/.qwen
+# Edit ~/.qwen/settings.json
+```
+
+```json
+{
+  "sandbox": {
+    "docker": {
+      "runArgs": [
+        "-e", "SANDBOX_GITHUB_TOKEN=ghp_your_token_here"
+      ]
+    }
+  }
+}
+```
+
+**Recommendation:**
+- Use **`.qwen/settings.json`** for project-specific config
+- Use **`~/.qwen/settings.json`** for global preferences (themes, MCP servers, etc.)
+
+---
+
+### MCP Configuration
+
+The MCP configuration is already set up in `.qwen/settings.json`:
+
+```json
+{
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"],
+      "args": [
+        "chrome-devtools-mcp@latest",
+        "--browser-url=http://127.0.0.1:9222"
+      ],
       "timeout": 60000,
       "trust": true
     }
@@ -143,13 +243,77 @@ The settings are pre-configured in `.qwen/settings.json`:
 }
 ```
 
+To customize MCP settings, add to your **`~/.qwen/settings.json`** (global) or **`.qwen/settings.json`** (project-specific).
+
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISPLAY_WIDTH` | `1920` | Virtual display width |
 | `DISPLAY_HEIGHT` | `1080` | Virtual display height |
-| `SANDBOX_GITHUB_TOKEN` | - | GitHub token for automated pushes |
+| `SANDBOX_GITHUB_TOKEN` | - | GitHub token for Git operations and PRs |
+
+### Git Configuration (First-Time Setup)
+
+**1. Create a GitHub Personal Access Token (PAT):**
+
+- Go to https://github.com/settings/tokens
+- Click "Generate new token (classic)"
+- Select scopes: **`repo`** (Full control of private repositories)
+- Copy the token (starts with `ghp_`)
+
+**2. Add Token to Settings (Choose One):**
+
+**Option A: Project Settings (`.qwen/settings.json`)**
+```bash
+# Edit .qwen/settings.json and modify runArgs:
+"-e", "SANDBOX_GITHUB_TOKEN=ghp_your_token_here"
+```
+
+**Option B: User Settings (`~/.qwen/settings.json`)**
+```bash
+# Edit ~/.qwen/settings.json
+{
+  "sandbox": {
+    "docker": {
+      "runArgs": ["-e", "SANDBOX_GITHUB_TOKEN=ghp_your_token_here"]
+    }
+  }
+}
+```
+
+**Option C: Environment Variable (per-session)**
+```powershell
+# PowerShell (token passed automatically via -e SANDBOX_GITHUB_TOKEN)
+$env:SANDBOX_GITHUB_TOKEN="ghp_your_token_here"
+```
+
+**3. Configure Git Inside the Sandbox:**
+
+When running in sandbox mode, run these once:
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "your@email.com"
+git config --global credential.helper store
+```
+
+**4. Use Git Normally:**
+
+```bash
+# Clone a repo (enter token once, persists after)
+git clone https://github.com/username/repo.git
+
+# Make changes, commit, and push
+git add .
+git commit -m "Fix bug"
+git push
+
+# Create a PR (install gh CLI first if needed)
+apt-get update && apt-get install -y gh
+echo $SANDBOX_GITHUB_TOKEN | gh auth login --with-token
+gh pr create --title "Fix bug" --body "Description"
+```
 
 ---
 
