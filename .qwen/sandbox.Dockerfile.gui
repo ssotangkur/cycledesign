@@ -6,7 +6,7 @@
 # =============================================================================
 # Stage 1: Base Qwen Sandbox Image
 # =============================================================================
-FROM ghcr.io/qwenlm/qwen-code:latest AS base
+FROM ghcr.io/qwenlm/qwen-code:0.13 AS base
 
 # =============================================================================
 # Stage 2: GUI-Enhanced Sandbox
@@ -232,11 +232,6 @@ chromium \
 CHROME_PID=$!
 echo "Chromium started (PID: $CHROME_PID)"
 
-# Forward Chrome debugging port to 0.0.0.0 for external access
-socat TCP-LISTEN:9222,reuseaddr,fork TCP:127.0.0.1:9222 &
-SOCAT_PID=$!
-echo "Chrome port forward started (PID: $SOCAT_PID)"
-
 echo ""
 echo "=== Services Started ==="
 echo "- VNC Server: localhost:$VNC_PORT"
@@ -253,7 +248,7 @@ echo "Set CHROME_DEBUGGING_PORT=$CHROME_DEBUGGING_PORT in your MCP config"
 echo ""
 
 # Keep container running and forward signals
-trap "kill -TERM $XVFB_PID $OPENBOX_PID $VNC_PID $WEBSOCKIFY_PID $NGINX_PID $CHROME_PID $SOCAT_PID 2>/dev/null; exit 0" TERM INT
+trap "kill -TERM $XVFB_PID $OPENBOX_PID $VNC_PID $WEBSOCKIFY_PID $NGINX_PID $CHROME_PID 2>/dev/null; exit 0" TERM INT
 
 # Wait for all background processes
 wait
@@ -335,9 +330,125 @@ EOF
 RUN chmod +x /usr/local/bin/test-chrome-connection
 
 # =============================================================================
+# Configure GitHub Authentication
+# =============================================================================
+# gh CLI natively checks GH_TOKEN environment variable, so we just need to ensure
+# it's available. Git HTTPS operations can also use GH_TOKEN via credential helper.
+COPY <<'EOF' /usr/local/bin/setup-github-auth
+#!/bin/sh
+if [ -n "$GH_TOKEN" ]; then
+    echo "Configuring GitHub authentication..."
+
+    # gh CLI automatically uses GH_TOKEN, but we configure git for HTTPS operations
+    git config --global credential.helper store
+
+    # Create credential file for git HTTPS operations (as root)
+    cat > /root/.git-credentials <<CRED
+https://$GH_TOKEN@github.com
+CRED
+    chmod 600 /root/.git-credentials
+    git config --global credential.helper "store --file /root/.git-credentials"
+
+    echo "GitHub authentication configured (GH_TOKEN)"
+else
+    echo "GH_TOKEN not set, GitHub operations may fail"
+fi
+EOF
+
+RUN chmod +x /usr/local/bin/setup-github-auth
+
+# =============================================================================
+# Override the entrypoint to run GitHub auth setup and GUI before any command
+# =============================================================================
+COPY <<'EOF' /usr/local/bin/docker-entrypoint.sh
+#!/bin/sh
+set -e
+
+# Fix permissions on project directory if running as root
+if [ "$(id -u)" = "0" ]; then
+    echo "Running as root, fixing permissions..."
+
+    if [ -d "/home/node/app/node_modules" ]; then
+        echo "Fixing permissions on node_modules..."
+        chown -R node:node /home/node/app/node_modules 2>/dev/null || echo "Warning: Could not fix node_modules permissions"
+    fi
+
+    if [ -d "/home/node/app/tmp" ]; then
+        chown -R node:node /home/node/app/tmp 2>/dev/null || true
+    fi
+
+    # Fix X11 directory permissions for root
+    mkdir -p /tmp/.X11-unix 2>/dev/null || true
+    chmod 1777 /tmp/.X11-unix 2>/dev/null || true
+fi
+
+# Setup GitHub authentication if token is provided
+if [ -n "$GH_TOKEN" ]; then
+    /usr/local/bin/setup-github-auth
+fi
+
+# Start GUI services if this looks like a qwen session (not a direct command)
+# Check if the first argument contains "qwen" or "node"
+if [ -z "$1" ] || echo "$*" | grep -q "qwen\|node"; then
+    echo "Starting GUI services..."
+    /usr/local/bin/start-gui &
+    GUI_PID=$!
+
+    # Wait for GUI to be ready (check if noVNC is responding)
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        if curl -s http://localhost:6080 > /dev/null 2>&1; then
+            echo "GUI services ready!"
+            break
+        fi
+        sleep 1
+    done
+
+    # Trap to cleanup GUI on exit
+    trap "kill $GUI_PID 2>/dev/null; exit 0" TERM INT
+fi
+
+# Run command with node if the first argument contains a "-" or is not a system command
+if [ "${1#-}" != "${1}" ] || [ -z "$(command -v "${1}")" ] || { [ -f "${1}" ] && ! [ -x "${1}" ]; }; then
+  set -- node "$@"
+fi
+
+exec "$@"
+EOF
+
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
+# =============================================================================
 # Set working directory and user
 # =============================================================================
-USER node
+# Create a wrapper script that runs as root to fix permissions, then switches to node
+COPY <<'EOF' /usr/local/bin/fix-permissions
+#!/bin/sh
+# Fix permissions on mounted project directory
+PROJECT_DIR="${1:-/home/node/app}"
+
+if [ -d "$PROJECT_DIR/node_modules" ]; then
+    echo "Fixing permissions on $PROJECT_DIR/node_modules..."
+    # Change ownership of node_modules to node user
+    chown -R node:node "$PROJECT_DIR/node_modules" 2>/dev/null || {
+        # If chown fails, try to at least make files writable
+        chmod -R u+w "$PROJECT_DIR/node_modules" 2>/dev/null || true
+    }
+fi
+
+# Fix ownership of tmp directory for logs
+if [ -d "$PROJECT_DIR/tmp" ]; then
+    chown -R node:node "$PROJECT_DIR/tmp" 2>/dev/null || true
+fi
+EOF
+
+RUN chmod +x /usr/local/bin/fix-permissions
+
+# =============================================================================
+# Set working directory - run as root for full permissions
+# =============================================================================
+# Don't switch to node user - stay as root for full permissions
+# The host's ~/.qwen will be mounted to /root/.qwen in the container
 WORKDIR /home/node/app
 
 # =============================================================================
