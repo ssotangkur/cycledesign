@@ -24,9 +24,10 @@ $env:QWEN_SANDBOX = "true"
 $env:QWEN_SANDBOX_IMAGE = "cycledesign-sandbox:gui"
 
 # Mount host's ~/.qwen to /root/.qwen in container for auth tokens
+# Pass GH_TOKEN into container for GitHub auth
 # Also expose ports for VNC/noVNC (Chrome DevTools runs inside container only)
 $hostQwenDir = "${env:USERPROFILE}\.qwen"
-$env:SANDBOX_FLAGS = "-p 0.0.0.0:5900:5900 -p 0.0.0.0:6080:6080 -v `"${hostQwenDir}:/root/.qwen`""
+$env:SANDBOX_FLAGS = "-p 0.0.0.0:5900:5900 -p 0.0.0.0:6080:6080 -v `"${hostQwenDir}:/root/.qwen`" -e GH_TOKEN"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
