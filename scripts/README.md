@@ -151,8 +151,9 @@ Start Docker Desktop before running the script.
 
 | File | Purpose |
 |------|---------|
-| `scripts/sandbox-start.bat` | Windows CMD launcher (wraps PowerShell) |
-| `scripts/sandbox-start.ps1` | Windows PowerShell launcher |
-| `scripts/sandbox-start.sh` | Linux/macOS launcher |
-| `.qwen/sandbox.Dockerfile.gui` | Custom sandbox Dockerfile |
-| `.qwen/settings.json` | Qwen Code settings |
+| `sandbox-start.bat` | Windows CMD launcher (wraps PowerShell) |
+| `sandbox-start.ps1` | Windows PowerShell launcher (recommended) |
+| `sandbox-start.sh` | Linux/macOS launcher |
+| `../.qwen/sandbox.Dockerfile.gui` | Custom sandbox Dockerfile |
+| `../.qwen/settings.json` | Qwen Code settings (MCP config) |
+| `../.qwen/SANDBOX.md` | Full sandbox documentation |
