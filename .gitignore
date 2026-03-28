@@ -65,10 +65,6 @@ coverage/
 # Generated design files
 workspace/
 
-# Qwen Code local settings (contains tokens)
-# Note: .qwen/settings.json is now committed (no tokens stored)
-# User-specific settings go in ~/.qwen/settings.json
-
 # Temporary files
 tmp/
 temp/
