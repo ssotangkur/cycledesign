@@ -1,86 +1,47 @@
 #!/bin/bash
-# CycleDesign Sandbox Start Script (Linux/Mac)
-# Usage: ./scripts/sandbox-start.sh
+# CycleDesign Qwen Code Sandbox Launcher
+# Usage: ./scripts/sandbox-start.sh [qwen args...]
 
 set -e
 
-# Check if SANDBOX_GITHUB_TOKEN is set
-if [ -z "$SANDBOX_GITHUB_TOKEN" ]; then
-    echo "ERROR: SANDBOX_GITHUB_TOKEN environment variable is not set."
+# Check if GH_TOKEN is set (gh CLI native env var)
+if [ -z "$GH_TOKEN" ]; then
+    echo "ERROR: GH_TOKEN environment variable is not set."
     echo ""
-    echo Please set it first:"
-    echo   export SANDBOX_GITHUB_TOKEN=your_github_token_here
+    echo "Please set it first:"
+    echo "  export GH_TOKEN=your_github_token_here"
     echo ""
     echo "Or run with token directly:"
-    echo "  SANDBOX_GITHUB_TOKEN=your_token_here ./scripts/sandbox-start.sh"
+    echo "  GH_TOKEN=your_token_here ./scripts/sandbox-start.sh"
     exit 1
 fi
 
-# Check if Docker is running
-if ! docker info > /dev/null 2>&1; then
-    echo "ERROR: Docker is not running. Please start Docker Desktop."
-    exit 1
-fi
+# Configure sandbox environment variables
+export QWEN_SANDBOX=true
+export QWEN_SANDBOX_IMAGE="cycledesign-sandbox:gui"
 
-# Check if sandbox image exists
-if ! docker images cycledesign-persistent --format "{{.Repository}}" | grep -q "cycledesign-persistent"; then
-    echo "Sandbox image not found. Building..."
-    docker build -t cycledesign-persistent -f ../.qwen/sandbox.Dockerfile.persistent ..
-    if [ $? -ne 0 ]; then
-        echo "ERROR: Failed to build sandbox image."
-        exit 1
-    fi
-fi
-
-# Stop and remove existing container if it exists
-if docker ps -a --filter "name=cycledesign-sandbox" --format "{{.Names}}" | grep -q "cycledesign-sandbox"; then
-    echo "Stopping existing sandbox container..."
-    docker stop cycledesign-sandbox > /dev/null 2>&1
-    docker rm cycledesign-sandbox > /dev/null 2>&1
-fi
-
-# Create npm cache volume if it doesn't exist
-if ! docker volume inspect cycledesign-npm_cache > /dev/null 2>&1; then
-    echo "Creating npm cache volume..."
-    docker volume create cycledesign-npm_cache > /dev/null
-fi
-
-# Get script directory for finding project root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Start the container
-echo "Starting CycleDesign sandbox..."
-docker run -d --name cycledesign-sandbox \
-    -p 5800:5800 -p 5900:5900 \
-    -e SANDBOX_GITHUB_TOKEN="$SANDBOX_GITHUB_TOKEN" \
-    -e VNC_PASSWORD="${VNC_PASSWORD:-}" \
-    -e DISPLAY_WIDTH=1920 \
-    -e DISPLAY_HEIGHT=1080 \
-    -v "$PROJECT_ROOT:/app" \
-    -v cycledesign-npm_cache:/root/.npm \
-    cycledesign-persistent
+# Mount host's ~/.qwen to /root/.qwen in container for auth tokens
+# Pass GH_TOKEN into container for GitHub auth
+# Also expose ports for VNC/noVNC (Chrome DevTools runs inside container only)
+HOST_QWEN_DIR="$HOME/.qwen"
+export SANDBOX_FLAGS="-p 0.0.0.0:5900:5900 -p 0.0.0.0:6080:6080 -v \"$HOST_QWEN_DIR:/root/.qwen\" -e GH_TOKEN"
 
 echo ""
 echo "============================================"
-echo "  CycleDesign Sandbox Started Successfully!"
+echo "  CycleDesign Qwen Sandbox"
 echo "============================================"
 echo ""
-echo "Access points:"
-echo "  VNC web:        http://localhost:5800"
-echo "  VNC client:     localhost:5900"
+echo "Image: $QWEN_SANDBOX_IMAGE"
+echo "Sandbox: enabled"
+echo "SANDBOX_FLAGS: $SANDBOX_FLAGS"
 echo ""
-echo "Dev servers (inside container only):"
-echo "  Web server:     http://localhost:3000"
-echo "  API server:     http://localhost:3001"
+echo "Access URLs:"
+echo "  - noVNC (Browser): http://localhost:6080"
+echo "  - VNC Client:      localhost:5900"
 echo ""
-echo "To use Qwen Code in the sandbox:"
-echo "  QWEN_SANDBOX=docker qwen"
+echo "Note: Chrome DevTools runs inside the container for Qwen Code"
 echo ""
-echo "To stop the sandbox:"
-echo "  ./scripts/sandbox-stop.sh"
-echo "  or: docker stop cycledesign-sandbox"
+echo "Starting qwen..."
 echo ""
-echo "To view logs:"
-echo "  docker logs cycledesign-sandbox"
-echo "============================================"
+
+qwen "$@"
