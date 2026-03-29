@@ -9,6 +9,20 @@
             ],
             "timeout": 60000,
             "trust": true
+        },
+        "github": {
+            "type": "stdio",
+            "command": "go",
+            "args": [
+                "run",
+                "github.com/github/github-mcp-server/cmd/github-mcp-server@latest",
+                "stdio"
+            ],
+            "env": {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "${input:github_token}"
+            },
+            "timeout": 60000,
+            "trust": true
         }
     }
 }
