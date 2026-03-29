@@ -84,6 +84,19 @@ For React state changes, verify:
 
 ---
 
+## Sandbox Environment
+
+When working in the sandbox, use `GH_TOKEN` for git operations:
+
+```bash
+git remote set-url origin https://$GH_TOKEN@github.com/ssotangkur/cycledesign.git
+git push -u origin branch-name
+```
+
+For details, invoke the `sandbox` skill.
+
+---
+
 ## Screenshot & Snapshot Rule
 
 **All screenshots and snapshots from Chrome DevTools MCP or Playwright must be saved to the `tmp/` directory.**
