@@ -16,17 +16,12 @@ Delegate to @pr-creator:
 
 ## What It Does
 
-The `pr-creator` subagent will:
-1. Analyze net changes (branch vs. main)
-2. Understand the overall intent
-3. Create structured PR description with:
-   - **Summary** (Background & Change Overview)
-   - **Change Description** (grouped by related changes)
-   - **Impact table** (before/after comparison)
-   - **Testing checklist**
-   - **Related files** table
-4. Use `gh api` to update the PR
-5. Verify the update was successful
+The `pr-creator` subagent handles:
+- Analyzing net changes and understanding intent
+- Writing comprehensive PR descriptions
+- Updating the PR via `gh api`
+
+You don't need to craft descriptions or run gh commands manually.
 
 ## When to Use
 
