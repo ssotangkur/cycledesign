@@ -23,6 +23,10 @@ export QWEN_SANDBOX_IMAGE="cycledesign-sandbox:gui"
 # Mount host's ~/.qwen to /root/.qwen in container for auth tokens
 # Pass GH_TOKEN into container for GitHub auth
 # Also expose ports for VNC/noVNC (Chrome DevTools runs inside container only)
+# 
+# CRITICAL: Container runs as root to avoid permission changes on host files
+# The host's ~/.qwen is mounted to /root/.qwen (root's home in container)
+# No chown/chmod operations are performed on node_modules
 HOST_QWEN_DIR="$HOME/.qwen"
 export SANDBOX_FLAGS="-p 0.0.0.0:5900:5900 -p 0.0.0.0:6080:6080 -v \"$HOST_QWEN_DIR:/root/.qwen\" -e GH_TOKEN"
 

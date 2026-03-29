@@ -364,23 +364,8 @@ COPY <<'EOF' /usr/local/bin/docker-entrypoint.sh
 #!/bin/sh
 set -e
 
-# Fix permissions on project directory if running as root
-if [ "$(id -u)" = "0" ]; then
-    echo "Running as root, fixing permissions..."
-
-    if [ -d "/home/node/app/node_modules" ]; then
-        echo "Fixing permissions on node_modules..."
-        chown -R node:node /home/node/app/node_modules 2>/dev/null || echo "Warning: Could not fix node_modules permissions"
-    fi
-
-    if [ -d "/home/node/app/tmp" ]; then
-        chown -R node:node /home/node/app/tmp 2>/dev/null || true
-    fi
-
-    # Fix X11 directory permissions for root
-    mkdir -p /tmp/.X11-unix 2>/dev/null || true
-    chmod 1777 /tmp/.X11-unix 2>/dev/null || true
-fi
+# Running as root - no permission fixes needed
+# The container runs as root to avoid permission conflicts with host files
 
 # Setup GitHub authentication if token is provided
 if [ -n "$GH_TOKEN" ]; then
@@ -419,35 +404,9 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # =============================================================================
-# Set working directory and user
-# =============================================================================
-# Create a wrapper script that runs as root to fix permissions, then switches to node
-COPY <<'EOF' /usr/local/bin/fix-permissions
-#!/bin/sh
-# Fix permissions on mounted project directory
-PROJECT_DIR="${1:-/home/node/app}"
-
-if [ -d "$PROJECT_DIR/node_modules" ]; then
-    echo "Fixing permissions on $PROJECT_DIR/node_modules..."
-    # Change ownership of node_modules to node user
-    chown -R node:node "$PROJECT_DIR/node_modules" 2>/dev/null || {
-        # If chown fails, try to at least make files writable
-        chmod -R u+w "$PROJECT_DIR/node_modules" 2>/dev/null || true
-    }
-fi
-
-# Fix ownership of tmp directory for logs
-if [ -d "$PROJECT_DIR/tmp" ]; then
-    chown -R node:node "$PROJECT_DIR/tmp" 2>/dev/null || true
-fi
-EOF
-
-RUN chmod +x /usr/local/bin/fix-permissions
-
-# =============================================================================
 # Set working directory - run as root for full permissions
 # =============================================================================
-# Don't switch to node user - stay as root for full permissions
+# Container runs as root to avoid permission conflicts with host files
 # The host's ~/.qwen will be mounted to /root/.qwen in the container
 WORKDIR /home/node/app
 
