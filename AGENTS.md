@@ -86,14 +86,7 @@ For React state changes, verify:
 
 ## Sandbox Environment
 
-When working in the sandbox, use `GH_TOKEN` for git operations:
-
-```bash
-git remote set-url origin https://$GH_TOKEN@github.com/ssotangkur/cycledesign.git
-git push -u origin branch-name
-```
-
-For details, invoke the `sandbox` skill.
+If the user mentions they are in a sandbox environment, you MUST invoke the `sandbox` skill.
 
 ---
 
