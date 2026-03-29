@@ -84,6 +84,12 @@ For React state changes, verify:
 
 ---
 
+## Sandbox Environment
+
+If the user mentions they are in a sandbox environment, you MUST invoke the `sandbox` skill.
+
+---
+
 ## Screenshot & Snapshot Rule
 
 **All screenshots and snapshots from Chrome DevTools MCP or Playwright must be saved to the `tmp/` directory.**
