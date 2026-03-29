@@ -1,8 +1,5 @@
 {
     "$version": 3,
-    "tools": {
-        "sandbox": true
-    },
     "mcpServers": {
         "chrome-devtools": {
             "command": "npx",
