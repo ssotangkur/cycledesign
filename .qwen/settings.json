@@ -11,8 +11,7 @@
             "trust": true
         },
         "github": {
-            "type": "http",
-            "url": "https://api.githubcopilot.com/mcp/",
+            "httpUrl": "https://api.githubcopilot.com/mcp/",
             "headers": {
                 "Authorization": "Bearer ${GH_TOKEN}"
             },
