@@ -88,6 +88,12 @@ scripts\sandbox-start.ps1 -i "explain this codebase"
 scripts\sandbox-start.ps1 -y --model coder-model "analyze the project"
 ```
 
+### Stopping the sandbox
+```powershell
+scripts\sandbox-stop.ps1  # Windows
+./scripts/sandbox-stop.sh  # Linux/macOS
+```
+
 ## First-Time Setup
 
 ### 1. Build the Sandbox Image
@@ -159,12 +165,35 @@ Stop existing containers:
 docker ps | findstr cycledesign-sandbox
 docker kill <container-id>
 ```
+Or use the stop script:
+```powershell
+scripts\sandbox-stop.ps1  # Windows
+./scripts/sandbox-stop.sh  # Linux/macOS
+```
 
 ### VNC connection refused
 Wait a few seconds for the container to fully start. The GUI services take ~5 seconds to initialize.
 
 ### Docker not running
 Start Docker Desktop before running the script.
+
+### Permission errors after sandbox use
+
+If you see `EACCES` errors on `node_modules` (should not happen with the fixed sandbox):
+
+```powershell
+# Clean reinstall on host
+Remove-Item -Recurse -Force node_modules
+npm install
+```
+
+### Sandbox build issues
+
+Rebuild the sandbox image:
+```bash
+cd .qwen
+docker build -f sandbox.Dockerfile.gui -t cycledesign-sandbox:gui .
+```
 
 ## Related Files
 
