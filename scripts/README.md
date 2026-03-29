@@ -33,22 +33,6 @@ The script sets up environment variables and runs `qwen` with all arguments pass
 
 All arguments are passed directly to `qwen`.
 
-## Important: Node Modules Protection
-
-**The sandbox container runs as root to avoid permission changes on host files.**
-
-**Why?** Windows junction points in `node_modules/@cycledesign/` cause permission conflicts when:
-1. Container runs `chown` or `chmod` on `node_modules`
-2. Host (Windows user) tries to access `node_modules` afterward
-3. Result: `EACCES: permission denied` errors
-
-**Solution:** The container:
-- Runs as root (no permission changes needed)
-- Mounts host's `~/.qwen` to `/root/.qwen`
-- Does NOT run `chown` or `chmod` on `node_modules`
-
-See [sandbox-usage.md](sandbox-usage.md) for details.
-
 ## Access URLs
 
 Once running, you can access:
@@ -130,11 +114,8 @@ The script runs `qwen` with sandbox mode enabled. Qwen Code will:
 
 1. Start a Docker container using `cycledesign-sandbox:gui`
 2. Mount the workspace and `.qwen` config directory into the container
-3. Run as root to avoid permission changes on host files
-4. Run qwen commands inside the isolated container
-5. Clean up the container when done
-
-**Note:** The container does NOT run `chown` or `chmod` on `node_modules`, preventing junction corruption.
+3. Run qwen commands inside the isolated container
+4. Clean up the container when done
 
 The container includes:
 - **Chromium browser** with DevTools Protocol
@@ -176,16 +157,6 @@ Wait a few seconds for the container to fully start. The GUI services take ~5 se
 
 ### Docker not running
 Start Docker Desktop before running the script.
-
-### Permission errors after sandbox use
-
-If you see `EACCES` errors on `node_modules` (should not happen with the fixed sandbox):
-
-```powershell
-# Clean reinstall on host
-Remove-Item -Recurse -Force node_modules
-npm install
-```
 
 ### Sandbox build issues
 
