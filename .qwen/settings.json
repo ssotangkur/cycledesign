@@ -12,14 +12,12 @@
         },
         "github": {
             "type": "stdio",
-            "command": "go",
+            "command": "npx",
             "args": [
-                "run",
-                "github.com/github/github-mcp-server/cmd/github-mcp-server@latest",
-                "stdio"
+                "@modelcontextprotocol/server-github@latest"
             ],
             "env": {
-                "GITHUB_PERSONAL_ACCESS_TOKEN": "${input:github_token}"
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "${GH_TOKEN}"
             },
             "timeout": 60000,
             "trust": true
