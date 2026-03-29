@@ -11,13 +11,10 @@
             "trust": true
         },
         "github": {
-            "type": "stdio",
-            "command": "npx",
-            "args": [
-                "@modelcontextprotocol/server-github@latest"
-            ],
-            "env": {
-                "GITHUB_PERSONAL_ACCESS_TOKEN": "${GH_TOKEN}"
+            "type": "http",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {
+                "Authorization": "Bearer ${GH_TOKEN}"
             },
             "timeout": 60000,
             "trust": true
