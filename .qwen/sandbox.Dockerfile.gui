@@ -364,9 +364,6 @@ COPY <<'EOF' /usr/local/bin/docker-entrypoint.sh
 #!/bin/sh
 set -e
 
-# Running as root - no permission fixes needed
-# The container runs as root to avoid permission conflicts with host files
-
 # Setup GitHub authentication if token is provided
 if [ -n "$GH_TOKEN" ]; then
     /usr/local/bin/setup-github-auth
@@ -404,10 +401,8 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # =============================================================================
-# Set working directory - run as root for full permissions
+# Set working directory
 # =============================================================================
-# Container runs as root to avoid permission conflicts with host files
-# The host's ~/.qwen will be mounted to /root/.qwen in the container
 WORKDIR /home/node/app
 
 # =============================================================================
