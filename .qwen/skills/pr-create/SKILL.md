@@ -1,6 +1,11 @@
+---
+name: pr-create
+description: Delegate PR creation/updates to the pr-creator subagent for comprehensive descriptions
+---
+
 # PR Creation Skill
 
-When creating or updating pull requests, delegate to the `pr-creator` agent.
+When creating or updating pull requests, delegate to the `pr-creator` subagent.
 
 ## Usage
 
@@ -11,7 +16,7 @@ Delegate to @pr-creator:
 
 ## What It Does
 
-The `pr-creator` agent will:
+The `pr-creator` subagent will:
 1. Analyze net changes (branch vs. main)
 2. Understand the overall intent
 3. Create structured PR description with:

@@ -220,23 +220,6 @@ graph TD
 - Improved [metric: testability/performance/etc.]
 ```
 
-## Tools Available
-
-### Git Commands
-```bash
-git diff <base>..<head>          # Compare branches
-git log --oneline <base>..<head> # View commits
-git show --stat <commit>         # Commit details
-```
-
-### GitHub CLI
-```bash
-gh pr view <number>              # View PR details
-gh pr edit <number> -F body.md   # Update PR
-gh pr create --body-file body.md # Create PR
-gh api repos/.../pulls/<n>       # API access
-```
-
 ## Quality Checklist
 
 Before submitting, verify:
@@ -249,18 +232,3 @@ Before submitting, verify:
 - [ ] Diagrams used where helpful
 - [ ] PR successfully updated via gh API
 - [ ] Update verified by re-fetching PR
-
-## Example Task
-
-```
-User: "Update PR #33 with a comprehensive description"
-
-You:
-1. git diff origin/main..fix/sandbox-junction-permissions --stat
-2. Analyze: Dockerfile changes, new scripts, docs updates
-3. Identify: Windows junction permission fix
-4. Create tmp/pr-body.md with structured description
-5. gh api -X PATCH ... -F body=@tmp/pr-body.md
-6. Verify: gh api ... --jq ".body" shows full content
-7. Report: "PR #33 updated successfully with comprehensive description"
-```
