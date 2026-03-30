@@ -166,6 +166,7 @@ Report back to the orchestrator with:
 - [x] UI behavior: Verified as expected
 - [x] Console: No errors
 - [x] Intent alignment: Addresses Purpose/Why
+- [x] **Skills/agents changes verified** (if applicable)
 
 ### Intent Alignment Check
 
@@ -243,6 +244,49 @@ Report back to the orchestrator with:
 - [ ] No regressions introduced
 - [ ] Edge cases handled
 - [ ] Similar bugs prevented
+```
+
+### For Skills/MCP/Agents Changes
+
+When verifying changes to skills (`.qwen/skills/`), agents (`.qwen/agents/`), or MCP configuration:
+
+```markdown
+- [ ] Skill/agent file syntax valid (YAML frontmatter, markdown)
+- [ ] Description includes trigger patterns/keywords
+- [ ] Trigger patterns cover common user phrasings
+- [ ] Documentation updated if behavior changed
+- [ ] Skill actually triggers when tested (see Skill Trigger Test below)
+- [ ] MCP config valid JSON (if modified)
+- [ ] Agent tools/permissions correct (if modified)
+```
+
+## Skill Trigger Test
+
+For changes to skill descriptions (especially trigger-related changes):
+
+1. **Identify trigger patterns** from the skill description
+2. **Test with Chrome DevTools or direct model query**:
+   - Ask the model to respond to: "resolve issue #123"
+   - Ask the model to respond to: "fix issue #456"
+   - Verify the model delegates to the correct skill/agent
+3. **Check skill invocation**:
+   - Does the model recognize the trigger phrase?
+   - Does it delegate to the correct agent?
+   - Is the issue number extracted correctly?
+
+**Example Test:**
+```
+Test: Verify issue-resolve skill triggers on "resolve issue #X"
+
+1. Ask model: "resolve issue #46"
+2. Expected: Model delegates to @issue-resolver
+3. Expected: Issue number 46 is extracted
+4. Expected: Model references the issue-resolve skill
+
+If model doesn't trigger skill:
+- Description may be too vague
+- Trigger patterns may not be explicit enough
+- May need to add more example phrasings
 ```
 
 ## Common Verification Failures
