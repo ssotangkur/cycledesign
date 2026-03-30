@@ -33,8 +33,11 @@ test.describe('Session Management', () => {
     // Get the session select element
     const sessionSelect = authenticatedPage.getByTestId('session-select');
 
-    // Wait for UI to stabilize
-    await authenticatedPage.waitForTimeout(500);
+    // Wait for the select to have a non-empty value using waitForFunction
+    await authenticatedPage.waitForFunction(() => {
+      const select = document.querySelector('[data-testid="session-select"]') as HTMLSelectElement;
+      return select && select.value !== '' && select.value !== undefined;
+    }, { timeout: 10000 });
 
     // Get the selected value
     const selectedValue = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
@@ -48,8 +51,9 @@ test.describe('Session Management', () => {
       return Array.from(el.options).map(opt => opt.value);
     });
     
+    // Should have at least 2 sessions
+    expect(allOptionValues.length).toBeGreaterThanOrEqual(2);
     // The first option should be the most recent (selected) session
-    expect(allOptionValues.length).toBeGreaterThanOrEqual(1);
     expect(selectedValue).toBe(allOptionValues[0]);
   });
 
