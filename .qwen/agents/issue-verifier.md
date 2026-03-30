@@ -248,46 +248,102 @@ Report back to the orchestrator with:
 
 ### For Skills/MCP/Agents Changes
 
-When verifying changes to skills (`.qwen/skills/`), agents (`.qwen/agents/`), or MCP configuration:
+When verifying changes to skills (`.qwen/skills/`), agents (`.qwen/agents/`), MCP configuration (`.qwen/settings.json`), or any Qwen-specific settings:
 
 ```markdown
-- [ ] Skill/agent file syntax valid (YAML frontmatter, markdown)
-- [ ] Description includes trigger patterns/keywords
-- [ ] Trigger patterns cover common user phrasings
-- [ ] Documentation updated if behavior changed
-- [ ] Skill actually triggers when tested (see Skill Trigger Test below)
-- [ ] MCP config valid JSON (if modified)
-- [ ] Agent tools/permissions correct (if modified)
+- [ ] File syntax valid (YAML frontmatter, JSON, markdown)
+- [ ] Configuration follows documented format
+- [ ] Changes are self-contained and complete
+- [ ] **Tested in fresh Qwen session** (see Fresh Session Testing below)
 ```
 
-## Skill Trigger Test
+## Fresh Session Testing
 
-For changes to skill descriptions (especially trigger-related changes):
+**Key Principle:** Qwen loads configuration (skills, agents, MCP, settings) at session start. To verify changes take effect, you must test in a fresh session.
 
-1. **Identify trigger patterns** from the skill description
-2. **Test with Chrome DevTools or direct model query**:
-   - Ask the model to respond to: "resolve issue #123"
-   - Ask the model to respond to: "fix issue #456"
-   - Verify the model delegates to the correct skill/agent
-3. **Check skill invocation**:
-   - Does the model recognize the trigger phrase?
-   - Does it delegate to the correct agent?
-   - Is the issue number extracted correctly?
+### How to Test in a Fresh Session
 
-**Example Test:**
+1. **Use the `qwen` CLI with `-p` flag** to spawn a new session:
+   ```bash
+   qwen -p "<prompt that exercises the changed behavior>"
+   ```
+
+2. **Design a prompt that triggers the modified behavior**:
+   - For **skill changes**: Use a trigger phrase that should invoke the skill
+   - For **agent changes**: Ask the agent to perform its modified function
+   - For **MCP changes**: Use a tool that depends on the MCP server
+   - For **settings changes**: Perform an action affected by the setting
+
+3. **Verify the expected behavior occurs**:
+   - Skill is invoked when triggered
+   - Agent behaves according to updated instructions
+   - MCP tools respond correctly
+   - Settings affect behavior as intended
+
+### Example: Testing Skill Trigger Changes
+
+```bash
+# Change: Added trigger patterns to issue-resolve skill
+# Test: Verify the skill triggers on the new patterns
+
+qwen -p "resolve issue #46 - just tell me which skill you would use"
+# Expected: Model responds with "issue-resolve skill"
+
+qwen -p "fix issue #46 - just tell me which skill you would use"
+# Expected: Model responds with "issue-resolve skill"
 ```
-Test: Verify issue-resolve skill triggers on "resolve issue #X"
 
-1. Ask model: "resolve issue #46"
-2. Expected: Model delegates to @issue-resolver
-3. Expected: Issue number 46 is extracted
-4. Expected: Model references the issue-resolve skill
+### Example: Testing Agent Behavior Changes
 
-If model doesn't trigger skill:
-- Description may be too vague
-- Trigger patterns may not be explicit enough
-- May need to add more example phrasings
+```bash
+# Change: Updated issue-verifier to include fresh session testing
+# Test: Ask the verifier to verify something and check it follows new instructions
+
+qwen -p "Verify the changes in .qwen/skills/issue-resolve/SKILL.md"
+# Expected: Verifier includes fresh session testing in its verification plan
 ```
+
+### Example: Testing MCP Configuration Changes
+
+```bash
+# Change: Added new MCP server configuration
+# Test: Use a tool provided by the MCP server
+
+qwen -p "List all available MCP tools"
+# Expected: New MCP tools appear in the list
+```
+
+### Common Patterns for Fresh Session Testing
+
+| Change Type | Test Prompt Pattern |
+|-------------|---------------------|
+| Skill trigger | `"use <skill-name> to <action>"` or trigger phrase |
+| Skill behavior | `"<skill-name>: do <task>"` |
+| Agent instructions | `"act as <agent-name>: <task>"` |
+| MCP server | Use a tool from that server |
+| Settings | Perform action affected by setting |
+
+### Tips for Effective Fresh Session Testing
+
+1. **Keep prompts focused**: Test one behavior at a time
+2. **Use timeouts**: `timeout 60 qwen -p "..."` to avoid hanging
+3. **Check output**: Verify the response shows expected behavior
+4. **Test edge cases**: Try variations to ensure robustness
+5. **Document results**: Record what was tested and the outcome
+
+### When Fresh Session Testing Is Required
+
+- Skill description or behavior changes
+- Agent instruction updates
+- MCP server configuration changes
+- Settings modifications (`.qwen/settings.json`)
+- Any change that affects model behavior or tool availability
+
+### When Fresh Session Testing Is NOT Required
+
+- Documentation-only changes
+- Changes to files not loaded by Qwen (e.g., source code tests use other methods)
+- Changes that are verified through other means (e.g., unit tests, linting)
 
 ## Common Verification Failures
 
