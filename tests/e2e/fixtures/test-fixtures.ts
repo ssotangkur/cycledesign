@@ -34,9 +34,10 @@ export const test = base.extend<TestFixtures>({
       await authenticatedPage.getByTestId('new-session-button').click();
 
       // Wait for session select to have a value (session was created and selected)
+      // MUI Select renders a div with role="combobox", not a native select element
       await authenticatedPage.waitForFunction(() => {
-        const select = document.querySelector('[data-testid="session-select"]') as HTMLSelectElement;
-        return select && select.value !== '';
+        const combobox = document.querySelector('[data-testid="session-select"] [role="combobox"]');
+        return combobox && combobox.textContent && combobox.textContent.trim() !== '';
       }, { timeout: 5000 });
     };
 
