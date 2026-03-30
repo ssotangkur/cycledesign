@@ -33,15 +33,19 @@ test.describe('Session Management', () => {
     // Get the session select element
     const sessionSelect = authenticatedPage.getByTestId('session-select');
 
-    // Wait for the select to have exactly 2 options (ensuring UI has updated)
-    await expect(sessionSelect.locator('option')).toHaveCount(2);
+    // Wait for session options to appear (using data-testid on MenuItem)
+    await expect(authenticatedPage.getByTestId('session-option')).toHaveCount(2, { timeout: 5000 });
 
-    // Get all session option values
-    const options = sessionSelect.locator('option');
-    const firstOptionValue = await options.first().getAttribute('value');
-
-    // The selected value should be the first option (most recent session)
+    // Get the selected value
     const selectedValue = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
+
+    // Verify a session is selected (should be the most recent one)
+    expect(selectedValue).toBeDefined();
+    expect(selectedValue).not.toBe('');
+    
+    // Get all session option values and verify the first one is selected
+    const options = authenticatedPage.getByTestId('session-option');
+    const firstOptionValue = await options.first().getAttribute('value');
     expect(selectedValue).toBe(firstOptionValue);
   });
 
@@ -59,8 +63,8 @@ test.describe('Session Management', () => {
     // Create second session
     await createSession();
 
-    // Wait for the select to update with the new session
-    await expect(sessionSelect.locator('option')).toHaveCount(2);
+    // Wait for the second session option to appear
+    await expect(authenticatedPage.getByTestId('session-option')).toHaveCount(2, { timeout: 5000 });
     
     // Give React state update time to propagate
     await authenticatedPage.waitForTimeout(200);
@@ -81,8 +85,8 @@ test.describe('Session Management', () => {
     // Get the most recent session ID
     const sessionSelect = authenticatedPage.getByTestId('session-select');
     
-    // Wait for the select to have exactly 2 options
-    await expect(sessionSelect.locator('option')).toHaveCount(2);
+    // Wait for session options to appear
+    await expect(authenticatedPage.getByTestId('session-option')).toHaveCount(2, { timeout: 5000 });
     
     const mostRecentSessionId = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
 
@@ -91,7 +95,7 @@ test.describe('Session Management', () => {
     await authenticatedPage.getByTestId('confirm-delete-button').click();
 
     // Wait for the session list to update (should now have 1 option)
-    await expect(sessionSelect.locator('option')).toHaveCount(1);
+    await expect(authenticatedPage.getByTestId('session-option')).toHaveCount(1, { timeout: 5000 });
 
     // The selected session should now be the remaining session (not the deleted one)
     const newSessionId = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
@@ -112,9 +116,9 @@ test.describe('Session Management', () => {
 
     // The session select should have no options
     const sessionSelect = authenticatedPage.getByTestId('session-select');
-    const options = sessionSelect.locator('option');
-    const optionCount = await options.count();
-    expect(optionCount).toBe(0);
+    
+    // Wait for all session options to be removed
+    await expect(authenticatedPage.getByTestId('session-option')).toHaveCount(0, { timeout: 5000 });
 
     // The select value should be empty (undefined when no options exist)
     const selectedValue = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
