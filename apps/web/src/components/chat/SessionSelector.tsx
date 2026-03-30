@@ -42,6 +42,8 @@ function SessionSelector() {
     if (!sessionToDelete) return;
     try {
       await deleteSession(sessionToDelete);
+      // Clear currentSessionId if we deleted the current session
+      // The auto-selection logic in useCurrentSessionId will then select the most recent remaining session
       if (currentSessionId === sessionToDelete) {
         setCurrentSessionId(null);
       }
@@ -55,6 +57,7 @@ function SessionSelector() {
   const handleDeleteAllSessions = async () => {
     try {
       await deleteAllSessions();
+      // Clear currentSessionId - auto-selection won't trigger since no sessions remain
       setCurrentSessionId(null);
       setDeleteAllDialogOpen(false);
     } catch (error) {
