@@ -10,9 +10,39 @@ const STORAGE_KEY = 'cycledesign:currentSessionId';
 /**
  * Hook to manage the current session ID.
  * Persists to localStorage and syncs across components.
+ * 
+ * Auto-selection logic:
+ * - If currentSessionId exists in localStorage AND exists in sessions list → keep it
+ * - If currentSessionId exists in localStorage but NOT in sessions list → select most recent
+ * - If currentSessionId is null/empty AND sessions exist → select most recent
+ * - If currentSessionId is null/empty AND no sessions → show empty state
  */
 export function useCurrentSessionId() {
   const [currentSessionId, setCurrentSessionId] = useLocalStorage<string | null>(STORAGE_KEY, null);
+  const { sessions, isLoading } = useSessions();
+
+  // Auto-select most recent session when needed
+  useEffect(() => {
+    // Skip if still loading or no sessions available
+    if (isLoading || sessions.length === 0) {
+      return;
+    }
+
+    // If no current session ID is set, select the most recent session
+    if (!currentSessionId) {
+      setCurrentSessionId(sessions[0].id);
+      return;
+    }
+
+    // If current session ID exists in sessions list, keep it
+    const sessionExists = sessions.some((s) => s.id === currentSessionId);
+    if (sessionExists) {
+      return;
+    }
+
+    // Current session ID doesn't exist in sessions list, fall back to most recent
+    setCurrentSessionId(sessions[0].id);
+  }, [sessions, isLoading, currentSessionId, setCurrentSessionId]);
 
   return {
     currentSessionId,

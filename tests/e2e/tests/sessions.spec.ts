@@ -2,36 +2,120 @@ import { test, expect } from '../fixtures/test-fixtures';
 
 /**
  * E2E Tests for Session Management
- * 
+ *
  * These tests verify the core session CRUD operations:
  * - Creating sessions
  * - Session appears in selector
  * - Deleting sessions
  * - Session persistence across page reload
- * 
+ * - Auto-selection of most recent session
+ *
  * Note: This app manages sessions via localStorage, not URL routing.
  */
 test.describe('Session Management', () => {
-  
+
   test('should create a new session with auto-generated name', async ({ createSession }) => {
     // Use the createSession fixture which handles all the waiting
     await createSession();
-    
+
     // If we got here, the session was created successfully
     // The fixture waits for the session select to have a value
+  });
+
+  test('should auto-select most recent session on app load', async ({ authenticatedPage, createSession }) => {
+    // Create first session
+    await createSession();
+    await authenticatedPage.waitForTimeout(500);
+    
+    // Create second session (most recent)
+    await createSession();
+
+    // Get the session select element
+    const sessionSelect = authenticatedPage.getByTestId('session-select');
+    
+    // Get all session option values
+    const options = sessionSelect.locator('option');
+    const firstOptionValue = await options.first().getAttribute('value');
+    
+    // The selected value should be the first option (most recent session)
+    const selectedValue = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
+    expect(selectedValue).toBe(firstOptionValue);
+  });
+
+  test('should auto-select new session after creation', async ({ authenticatedPage, createSession }) => {
+    // Create first session
+    await createSession();
+    
+    // Get the first session ID
+    const sessionSelect = authenticatedPage.getByTestId('session-select');
+    const firstSessionId = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
+    
+    // Create second session
+    await createSession();
+    
+    // Get the new selected session ID
+    const newSessionId = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
+    
+    // The selected session should have changed to the new one
+    expect(newSessionId).not.toBe(firstSessionId);
+  });
+
+  test('should fall back to most recent session when stored session no longer exists', async ({ authenticatedPage, createSession }) => {
+    // Create two sessions
+    await createSession();
+    await authenticatedPage.waitForTimeout(500);
+    await createSession();
+    
+    // Get the most recent session ID
+    const sessionSelect = authenticatedPage.getByTestId('session-select');
+    const mostRecentSessionId = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
+    
+    // Delete the most recent session
+    await authenticatedPage.getByTestId('delete-session-button').click();
+    await authenticatedPage.getByTestId('confirm-delete-button').click();
+    
+    // Wait for the session list to update
+    await authenticatedPage.waitForTimeout(500);
+    
+    // The selected session should now be the remaining session (not the deleted one)
+    const newSessionId = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
+    expect(newSessionId).toBeDefined();
+    expect(newSessionId).not.toBe(mostRecentSessionId);
+  });
+
+  test('should show empty state when all sessions deleted', async ({ authenticatedPage, createSession }) => {
+    // Create a session
+    await createSession();
+    
+    // Delete all sessions
+    await authenticatedPage.getByTestId('delete-all-sessions-button').click();
+    await authenticatedPage.getByTestId('confirm-delete-all-button').click();
+    
+    // Wait for the session list to update
+    await authenticatedPage.waitForTimeout(500);
+    
+    // The session select should have no options
+    const sessionSelect = authenticatedPage.getByTestId('session-select');
+    const options = sessionSelect.locator('option');
+    const optionCount = await options.count();
+    expect(optionCount).toBe(0);
+    
+    // The select value should be empty
+    const selectedValue = await sessionSelect.evaluate((el: HTMLSelectElement) => el.value);
+    expect(selectedValue).toBe('');
   });
 
   test('should delete a session', async ({ authenticatedPage, createSession }) => {
     // Create a session first
     await createSession();
-    
+
     // Click delete button
     await authenticatedPage.getByTestId('delete-session-button').click();
-    
+
     // Confirm deletion in dialog
     await expect(authenticatedPage.getByTestId('delete-dialog')).toBeVisible();
     await authenticatedPage.getByTestId('confirm-delete-button').click();
-    
+
     // Verify delete dialog is closed
     await expect(authenticatedPage.getByTestId('delete-dialog')).not.toBeVisible();
   });
