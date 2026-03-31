@@ -220,10 +220,12 @@ Check for regressions in existing functionality."
        - {Task 1}: {summary}
        - {Task 2}: {summary}
 
-       ## Verification
-       ✅ All tasks verified and passed
+       ## Verification Evidence
+       ✅ All acceptance criteria verified with evidence
        ✅ Final verification passed
        ✅ Validation passed (ESLint, TypeScript, Knip)
+       
+       See "Verification Evidence" section below for detailed proof.
 
        ## Related Issues
        Closes #{issueNumber}
@@ -316,6 +318,216 @@ Before marking issue resolution complete, ensure:
 6. [OK] PR description updated with summary and verification results
 7. [OK] Changes committed and pushed
 
+## Verification Evidence Requirements
+
+**Critical Rule:** Never mark acceptance criteria as complete without attaching verification evidence. This applies to ALL implementation methods (via issue-resolve or direct implementation).
+
+### What Counts as Verification Evidence
+
+Verification evidence is **concrete, observable proof** that a requirement has been met. It must be:
+- **Reproducible**: Someone else can verify the same result
+- **Observable**: Shows actual output, behavior, or state
+- **Complete**: Covers all aspects of the acceptance criterion
+
+### Evidence Types by Change Category
+
+#### For File Changes
+
+**Required Evidence:**
+- File exists at correct path (show `ls` or `dir` output)
+- File content is correct (show `cat`, `Get-Content`, or file read)
+- Git tracking is correct (show `git status` or `git check-ignore`)
+
+**Example - Good Evidence:**
+```markdown
+### Verification Evidence
+
+**File Created:** `.qwen/.env.sandbox.example`
+```bash
+$ ls -la .qwen/.env.sandbox.example
+-rw-r--r-- 1 user user 256 Mar 31 10:00 .qwen/.env.sandbox.example
+
+$ cat .qwen/.env.sandbox.example
+# Sandbox environment configuration
+NOVNC_PORT=6082
+VNC_PORT=5902
+CHROME_PORT=9224
+```
+
+**Git Ignore Verified:**
+```bash
+$ git check-ignore .qwen/.env.sandbox
+.qwen/.env.sandbox
+```
+```
+
+**Example - Bad Evidence:**
+```markdown
+### Verification Evidence
+- [x] File created ✓
+- [x] Content added ✓
+```
+❌ **Why it's bad:** No actual proof shown. Claims without evidence.
+
+#### For Code Changes
+
+**Required Evidence:**
+- Syntax is valid (show linter/compiler output)
+- Tests pass (show test runner output)
+- No new warnings/errors (show build output)
+
+**Example - Good Evidence:**
+```markdown
+### Verification Evidence
+
+**TypeScript Compilation:**
+```bash
+$ npm run typecheck
+✓ No errors found in 45 files
+```
+
+**ESLint Validation:**
+```bash
+$ npm run lint
+✓ All files passed linting
+```
+
+**Knip Check:**
+```bash
+$ npm run knip
+✓ No unused exports or files detected
+```
+```
+
+**Example - Bad Evidence:**
+```markdown
+### Verification Evidence
+- [x] Code compiles ✓
+- [x] No lint errors ✓
+```
+❌ **Why it's bad:** No output shown. Cannot verify claims were actually tested.
+
+#### For Behavior Changes
+
+**Required Evidence:**
+- Before/after comparison (screenshots, logs, or CLI output)
+- Edge cases tested (show test inputs and outputs)
+- Error conditions handled (show error message output)
+
+**Example - Good Evidence:**
+```markdown
+### Verification Evidence
+
+**UI Behavior Tested:**
+```
+chrome-devtools_navigate_page url="http://localhost:3000/settings"
+chrome-devtools_click uid="theme-toggle"
+chrome-devtools_wait_for text="Dark mode enabled"
+```
+
+**Console Check (No Errors):**
+```bash
+chrome-devtools_list_console_messages types=["error", "warn"]
+# Result: No error or warning messages since last navigation
+```
+
+**Screenshot:** `tmp/theme-toggle-verification.png`
+
+**Persistence Verified:**
+```
+1. Toggle theme to dark mode
+2. Refresh page (F5)
+3. Theme remains in dark mode
+4. Console shows: "Loaded theme preference: dark"
+```
+```
+
+**Example - Bad Evidence:**
+```markdown
+### Verification Evidence
+- [x] Toggle works ✓
+- [x] Theme persists ✓
+```
+❌ **Why it's bad:** No proof of actual testing. "Works" is subjective without showing behavior.
+
+#### For Documentation Changes
+
+**Required Evidence:**
+- File updated with correct information
+- Examples are accurate and tested
+- Links are valid (show link checker output or manual verification)
+
+**Example - Good Evidence:**
+```markdown
+### Verification Evidence
+
+**Documentation Updated:**
+```bash
+$ grep -A 5 "Verification Evidence" .qwen/agents/issue-resolver.md
+## Verification Evidence Requirements
+
+**Critical Rule:** Never mark acceptance criteria as complete without attaching verification evidence.
+```
+
+**Links Validated:**
+- [x] `https://github.com/ssotangkur/cycledesign/issues/57` - Verified accessible
+- [x] `./issue-verifier.md` - Internal link resolves correctly
+```
+
+### Evidence in PR Description
+
+When updating the PR description, include a **Verification Evidence** section:
+
+```markdown
+## Verification Evidence
+
+### Acceptance Criterion 1: [Criterion text]
+**Evidence:**
+```bash
+[command output showing criterion is met]
+```
+**Status:** ✅ VERIFIED
+
+### Acceptance Criterion 2: [Criterion text]
+**Evidence:**
+- Screenshot: `tmp/criterion2-verification.png`
+- Test output: [paste relevant test results]
+**Status:** ✅ VERIFIED
+```
+
+### Evidence Checklist for Orchestrator
+
+Before marking any task or acceptance criterion as complete, verify:
+
+- [ ] Evidence is **concrete** (actual output, not claims)
+- [ ] Evidence is **complete** (covers all aspects of the criterion)
+- [ ] Evidence is **reproducible** (someone else can verify)
+- [ ] Evidence is **attached** (in PR description or comments)
+- [ ] Evidence **matches the criterion** (not tangential proof)
+
+### When Verification Evidence Is Missing
+
+If @issue-verifier reports that evidence is missing or insufficient:
+
+1. **Do NOT mark the criterion as complete**
+2. Return to @issue-coder with specific evidence requirements
+3. Request: "Provide [specific evidence type] showing [specific behavior]"
+4. Re-verify once evidence is provided
+
+**Example Response:**
+```
+Verification Status: FAIL
+
+Missing Evidence:
+- Criterion 1 claims "file created" but no `ls` or `cat` output shown
+- Criterion 2 claims "tests pass" but no test runner output included
+
+Required Before Marking Complete:
+1. Show `ls -la .qwen/.env.sandbox.example` output
+2. Show `cat .qwen/.env.sandbox.example` content
+3. Show test runner output with pass/fail summary
+```
+
 ## Error Handling
 
 ### Branch Already Exists
@@ -367,7 +579,7 @@ You:
    - Delegate to @issue-verifier
    - Handle feedback if needed
 7. Final verification with @issue-verifier
-8. Update PR description
+8. Update PR description with verification evidence
 9. Commit and push
 10. Report completion
 ```
@@ -382,6 +594,7 @@ You:
 6. **Document intent alignment** - Note how solutions address the why
 7. **COMMIT after all tasks** - Single commit for the issue resolution
 8. **USE GitHub MCP tools** - Prefer over gh CLI for all GitHub operations
+9. **REQUIRE verification evidence** - Never mark criteria complete without evidence
 
 ## When to Ask the User
 
