@@ -31,9 +31,75 @@ This ensures you're checking the actual GitHub Actions status, not just local va
 
 ---
 
+## Verification Evidence Requirement
+
+**When implementing issues **(via issue-resolve or directly)
+
+This applies to ALL implementation methods. Nothing enforces verification evidence before marking criteria complete, whether using issue-resolve or implementing directly.
+
+### What Counts as Verification Evidence
+
+Verification evidence is **concrete, observable proof** that a requirement has been met:
+
+| Change Type | Required Evidence |
+|-------------|-------------------|
+| **File changes** | `ls`/`dir` output, `cat`/`Get-Content` output, `git status` or `git check-ignore` |
+| **Code changes** | `npm run typecheck` output, `npm run lint` output, `npm run knip` output |
+| **Behavior changes** | Screenshots (`tmp/`), Chrome DevTools logs, before/after comparison |
+| **Documentation** | `grep` output showing changes, link validation results |
+
+### Good vs Bad Evidence Examples
+
+**❌ Bad Evidence **(claims without proof)
+```markdown
+### Verification Evidence
+- [x] File created ✓
+- [x] Code compiles ✓
+- [x] Tests pass ✓
+```
+
+**✅ Good Evidence **(concrete proof)
+```markdown
+### Verification Evidence
+
+**File Created**:
+```bash
+$ ls -la .qwen/.env.sandbox.example
+-rw-r--r-- 1 user user 256 Mar 31 10:00 .qwen/.env.sandbox.example
+
+$ cat .qwen/.env.sandbox.example
+NOVNC_PORT=6082
+VNC_PORT=5902
+CHROME_PORT=9224
+```
+
+**Validation**:
+```bash
+$ npm run typecheck
+✓ No errors found in 45 files
+```
+```
+
+### Evidence Checklist
+
+Before marking any criterion complete, ensure:
+- [ ] Evidence is **concrete** (actual output, not claims)
+- [ ] Evidence is **complete** (covers all aspects of the criterion)
+- [ ] Evidence is **reproducible** (someone else can verify)
+- [ ] Evidence is **attached** (in PR description or comments)
+- [ ] Evidence **matches the criterion** (not tangential proof)
+
+### Related Documentation
+
+- `.qwen/agents/issue-resolver.md` - Full verification evidence requirements
+- `.qwen/agents/issue-verifier.md` - Evidence validation workflow
+- `.qwen/skills/issue-create/SKILL.md` - Verification checklist template
+
+---
+
 ## Knip Configuration Rule
 
-**Do not add files to `knip.json` ignore list without explicit user permission.**
+**Do not add files to `knip.json` ignore list without explicit user permission**.
 
 When Knip reports unused files/exports:
 1. First verify if the file is actually needed (search for imports/usages)
@@ -92,24 +158,24 @@ If the user mentions they are in a sandbox environment, you MUST invoke the `san
 
 ## Screenshot & Snapshot Rule
 
-**All screenshots and snapshots from Chrome DevTools MCP or Playwright must be saved to the `tmp/` directory.**
+**All screenshots and snapshots from Chrome DevTools MCP or Playwright must be saved to the `tmp/` directory**.
 
 The `tmp/` directory is already in `.gitignore`, so test artifacts won't be committed.
 
-**Examples:**
+**Examples**:
 
-**Chrome DevTools MCP:**
+**Chrome DevTools MCP**:
 ```
 "Take a screenshot and save it to tmp/homepage-screenshot.png"
 "Capture the current page state to tmp/login-flow-snapshot.png"
 ```
 
-**Playwright:**
+**Playwright**:
 ```bash
 npx playwright screenshot http://localhost:3000 tmp/page-screenshot.png
 ```
 
-**Never save screenshots to the project root or tracked directories.**
+**Never save screenshots to the project root or tracked directories**.
 
 ---
 

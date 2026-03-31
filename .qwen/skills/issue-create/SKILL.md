@@ -24,7 +24,7 @@ The issue resolution framework works best when issues clearly state **what** nee
 
 ### What to Include
 
-✅ **DO include:**
+✅ **DO include**:
 - Clear outcome statements in the Goal
 - Testable acceptance criteria (input → expected output)
 - Expected behavior descriptions
@@ -32,7 +32,7 @@ The issue resolution framework works best when issues clearly state **what** nee
 - Constraints and requirements
 - Open questions for implementer discretion or clarification
 
-❌ **DO NOT include:**
+❌ **DO NOT include**:
 - Code snippets or implementation examples
 - Specific function names or class structures
 - Step-by-step implementation instructions
@@ -58,9 +58,15 @@ implementers understand the intent behind the requirements.]
 - [ ] Criterion 2 (testable)
 - [ ] Criterion 3 (testable)
 
+## Verification Checklist
+**Required Evidence for Each Criterion**:
+- **Criterion 1**: [Type of evidence needed]
+- **Criterion 2**: [Type of evidence needed]
+- **Criterion 3**: [Type of evidence needed]
+
 ## Scope
-**In:** What this issue covers
-**Out:** What is explicitly excluded
+**In**: What this issue covers
+**Out**: What is explicitly excluded
 
 ## Open Questions
 - [ ] Question 1 (implementer discretion / needs clarification)
@@ -76,8 +82,8 @@ implementers understand the intent behind the requirements.]
 
 Describe the desired outcome in clear, specific terms. Can be multiple sentences or paragraphs.
 
-**Good:** "Enable sandbox scripts to load port configuration from `.env.sandbox` file"
-**Bad:** "Update sandbox-start.ps1 to read .env.sandbox"
+**Good**: "Enable sandbox scripts to load port configuration from `.env.sandbox` file"
+**Bad**: "Update sandbox-start.ps1 to read .env.sandbox"
 
 #### Purpose/Why
 
@@ -92,7 +98,7 @@ Include:
 - What user pain point this addresses
 - What business goal this supports
 
-**Example:**
+**Example**:
 ```markdown
 ## Purpose/Why
 Users have been reporting multiple accidental form submissions because the
@@ -111,32 +117,61 @@ List testable criteria that define when the issue is complete. Each criterion sh
 
 Format: `- [ ] Criterion (testable)`
 
+#### Verification Checklist (REQUIRED)
+
+**Critical**: For each acceptance criterion, specify what verification evidence is required. This ensures implementers know what proof to provide before marking criteria complete.
+
+**Evidence Types by Criterion**:
+
+| Criterion Type | Required Evidence |
+|----------------|-------------------|
+| **File created/modified** | `ls`/`dir` output, `cat`/`Get-Content` output, `git status` or `git check-ignore` |
+| **Code quality** | `npm run typecheck` output, `npm run lint` output, `npm run knip` output |
+| **UI behavior** | Screenshots (tmp/), Chrome DevTools interaction logs, console error checks |
+| **API/Backend** | API response logs, test runner output, curl/Postman results |
+| **Bug fix** | Before/after comparison, reproduction steps with results |
+| **Documentation** | `grep` output showing changes, link validation results |
+
+**Example**:
+```markdown
+## Verification Checklist
+
+**Required Evidence for Each Criterion**:
+
+- **Criterion 1**: File `.qwen/.env.sandbox.example` created
+  - `ls -la .qwen/.env.sandbox.example` output
+  - `cat .qwen/.env.sandbox.example` content
+  - `git check-ignore .qwen/.env.sandbox` verification
+
+- **Criterion 2**: PowerShell script loads configuration
+  - Script execution log showing ports loaded
+  - Test with custom ports (e.g., 6082/5902/9224)
+  - Error handling tested (missing file scenario)
+
+- **Criterion 3**: Backward compatible (works without file)
+  - Test run without `.env.sandbox` present
+  - Output showing default ports used
+  - No errors in console
+```
+
 #### Scope
 
 Clearly define boundaries to prevent scope creep:
 
-- **In:** What this issue covers
-- **Out:** What is explicitly excluded
+- **In**: What this issue covers
+- **Out**: What is explicitly excluded
 
 #### Open Questions
 
 Capture unresolved decisions, making it clear where implementers have discretion vs where clarification is needed.
 
-**When to use:**
+**When to use**:
 - Multiple valid approaches exist and you want implementer input
 - You're unsure about edge cases or requirements
 - A decision depends on research or experimentation
 - You want to surface assumptions for verification
 
-**How to format:**
-```markdown
-## Open Questions
-- [ ] Should we support X use case? (implementer discretion)
-- [ ] What happens when Y occurs? (needs clarification)
-- [ ] Should this integrate with Z or remain separate? (implementer discretion)
-```
-
-**Labels:**
+**Labels**:
 - `(implementer discretion)` - Implementer can decide based on their analysis
 - `(needs clarification)` - Issue author or team needs to provide answer
 
@@ -148,18 +183,18 @@ Describe **expected behavior**, not specific code. Include:
 - Files that may be affected
 - Constraints and requirements
 
-**✅ Good Technical Notes:**
+**✅ Good Technical Notes**:
 ```markdown
 ## Technical Notes
 
 ### Expected Behavior
 
-**When `.env.sandbox` exists:**
+**When `.env.sandbox` exists**:
 - Scripts load port configuration from the file
 - Sandbox binds to the specified host ports
 - Startup output shows the configured ports
 
-**When `.env.sandbox` does not exist:**
+**When `.env.sandbox` does not exist**:
 - Scripts use default ports (backward compatible)
 - Behavior matches current implementation
 
@@ -168,7 +203,7 @@ Describe **expected behavior**, not specific code. Include:
 - `scripts/sandbox-start.sh` - Linux/macOS launcher
 ```
 
-**❌ Bad Technical Notes:**
+**❌ Bad Technical Notes**:
 ```markdown
 ## Technical Notes
 Update scripts/sandbox-start.ps1:
@@ -199,6 +234,20 @@ The `issue-create` skill ensures issues are:
 2. **Intent-aware**: Purpose/Why section guides implementation decisions
 3. **Testable**: Acceptance criteria are verifiable by ISSUE-VERIFIER
 4. **Scoped**: Clear boundaries prevent scope creep
+5. **Evidence-ready**: Verification checklist tells implementers what proof to provide
+
+## Verification Evidence Requirements
+
+**IMPORTANT**: All implementations (via issue-resolve or direct) MUST provide verification evidence before marking acceptance criteria complete.
+
+When creating issues, inform implementers that:
+- Claims without evidence will be rejected by ISSUE-VERIFIER
+- Evidence must be concrete (actual output, not checkmarks)
+- Evidence must be complete (covers all aspects of the criterion)
+- Evidence must be reproducible (someone else can verify)
+- Evidence must be attached (in PR description or comments)
+
+See "Verification Checklist" section above for evidence types by criterion.
 
 ## Example Usage
 
@@ -212,11 +261,15 @@ Acceptance Criteria:
   - Toggle switches between light and dark themes
   - Preference persists across sessions
   - Default to system preference on first load
+
+Verification Checklist:
+  - Toggle criterion: Screenshot showing toggle in both states, console check for no errors
+  - Persistence criterion: Refresh test showing theme persists, localStorage inspection
+  - System preference: Test with system in light/dark mode, first-load behavior log
+
 Scope:
   In: Settings page toggle, theme persistence
   Out: Per-page themes, auto-switching based on time
-Open Questions:
-  - Should the toggle show a preview of the theme? (implementer discretion)
 Technical Notes:
   Expected Behavior:
   - Toggle in settings page switches between light/dark modes
