@@ -16,6 +16,29 @@ Delegate to @issue-create:
 
 Or when using the issue resolution framework, issues should already be in this format.
 
+## Core Principle: Outcomes Over Implementation
+
+**This skill explicitly focuses on outcomes and input/output criteria, never prescribing implementation details.**
+
+The issue resolution framework works best when issues clearly state **what** needs to be accomplished and **why**, leaving the **how** to ISSUE-RESOLVER and the implementer.
+
+### What to Include
+
+✅ **DO include:**
+- Clear outcome statements in the Goal
+- Testable acceptance criteria (input → expected output)
+- Expected behavior descriptions
+- Files that may be affected
+- Constraints and requirements
+- Open questions for implementer discretion or clarification
+
+❌ **DO NOT include:**
+- Code snippets or implementation examples
+- Specific function names or class structures
+- Step-by-step implementation instructions
+- Algorithm prescriptions
+- Library recommendations (unless it's a constraint)
+
 ## Template Structure
 
 All issues created by this skill follow this template:
@@ -47,32 +70,83 @@ implementers understand the intent behind the requirements.]
 [Expected behavior, files involved, constraints - NO implementation code]
 ```
 
-## Core Principle: Outcomes Over Implementation
+### Section-by-Section Guidance
 
-**This skill explicitly focuses on outcomes and input/output criteria, never prescribing implementation details.**
+#### Goal
 
-The issue resolution framework works best when issues clearly state **what** needs to be accomplished and **why**, leaving the **how** to ISSUE-RESOLVER and the implementer.
+Describe the desired outcome in clear, specific terms. Can be multiple sentences or paragraphs.
 
-### What to Include
+**Good:** "Enable sandbox scripts to load port configuration from `.env.sandbox` file"
+**Bad:** "Update sandbox-start.ps1 to read .env.sandbox"
 
-✅ **DO include:**
-- Clear outcome statements in the Goal
-- Testable acceptance criteria (input → expected output)
-- Expected behavior descriptions
+#### Purpose/Why
+
+Explain WHY this issue matters. This section is critical for the issue resolution framework:
+
+- **ISSUE-CODER** uses it to understand the intent behind requirements
+- **ISSUE-VERIFIER** uses it to validate the solution addresses the actual problem
+- Distinguishes between technically correct vs intent-aligned implementations
+
+Include:
+- What problem this solves
+- What user pain point this addresses
+- What business goal this supports
+
+**Example:**
+```markdown
+## Purpose/Why
+Users have been reporting multiple accidental form submissions because the
+button remains clickable while the request is in progress. This causes:
+- Duplicate accounts being created
+- Confusion about whether submission worked
+- Unnecessary server load
+
+The intent is to provide clear feedback that "your submission is being processed"
+and prevent accidental double-submissions.
+```
+
+#### Acceptance Criteria
+
+List testable criteria that define when the issue is complete. Each criterion should be verifiable by ISSUE-VERIFIER.
+
+Format: `- [ ] Criterion (testable)`
+
+#### Scope
+
+Clearly define boundaries to prevent scope creep:
+
+- **In:** What this issue covers
+- **Out:** What is explicitly excluded
+
+#### Open Questions
+
+Capture unresolved decisions, making it clear where implementers have discretion vs where clarification is needed.
+
+**When to use:**
+- Multiple valid approaches exist and you want implementer input
+- You're unsure about edge cases or requirements
+- A decision depends on research or experimentation
+- You want to surface assumptions for verification
+
+**How to format:**
+```markdown
+## Open Questions
+- [ ] Should we support X use case? (implementer discretion)
+- [ ] What happens when Y occurs? (needs clarification)
+- [ ] Should this integrate with Z or remain separate? (implementer discretion)
+```
+
+**Labels:**
+- `(implementer discretion)` - Implementer can decide based on their analysis
+- `(needs clarification)` - Issue author or team needs to provide answer
+
+#### Technical Notes
+
+Describe **expected behavior**, not specific code. Include:
+
+- Expected behavior for different scenarios
 - Files that may be affected
 - Constraints and requirements
-- Open questions for implementer discretion or clarification
-
-❌ **DO NOT include:**
-- Code snippets or implementation examples
-- Specific function names or class structures
-- Step-by-step implementation instructions
-- Algorithm prescriptions
-- Library recommendations (unless it's a constraint)
-
-### Technical Notes Guidance
-
-The **Technical Notes** section should describe **expected behavior**, not specific code:
 
 **✅ Good Technical Notes:**
 ```markdown
@@ -109,31 +183,6 @@ if (Test-Path $envSandboxPath) {
 }
 ```
 ```
-
-## Open Questions Section
-
-The **Open Questions** section provides a structured way to capture unresolved decisions, making it clear to implementers where they have discretion vs where clarification may be needed.
-
-### When to Use
-
-- Multiple valid approaches exist and you want implementer input
-- You're unsure about edge cases or requirements
-- A decision depends on research or experimentation
-- You want to surface assumptions for verification
-
-### How to Format
-
-```markdown
-## Open Questions
-- [ ] Should we support X use case? (implementer discretion)
-- [ ] What happens when Y occurs? (needs clarification)
-- [ ] Should this integrate with Z or remain separate? (implementer discretion)
-```
-
-### Labels
-
-- `(implementer discretion)` - Implementer can decide based on their analysis
-- `(needs clarification)` - Issue author or team needs to provide answer
 
 ## Example Comparison
 
@@ -180,6 +229,10 @@ Developers need to configure custom port mappings for sandbox environments to av
 - [ ] Startup output displays the configured ports
 - [ ] Port conflicts are detected and reported
 
+## Scope
+**In:** Loading port config from .env.sandbox, backward compatibility
+**Out:** Port validation, auto-increment on conflicts
+
 ## Open Questions
 - [ ] Should we validate all three ports or just one? (implementer discretion)
 - [ ] Should port conflicts fail immediately or warn and auto-increment? (needs clarification)
@@ -208,38 +261,6 @@ Developers need to configure custom port mappings for sandbox environments to av
 - Provides testable acceptance criteria
 - Surfaces open questions for implementer/author resolution
 - Leaves implementation approach to the implementer
-
-## Why Purpose/Why Matters
-
-The **Purpose/Why** section is critical for the issue resolution framework:
-
-- **ISSUE-CODER** uses it to understand the intent behind requirements
-- **ISSUE-VERIFIER** uses it to validate the solution addresses the actual problem
-- Distinguishes between:
-  - **Technically correct implementations** (meets all criteria but misses the point)
-  - **Intent-aligned implementations** (solves the actual problem)
-
-**Example:**
-
-```markdown
-## Goal
-Add a disabled state to the login button during form submission.
-
-## Purpose/Why
-Users have been reporting multiple accidental form submissions because the
-button remains clickable while the request is in progress. This causes:
-- Duplicate accounts being created
-- Confusion about whether submission worked
-- Unnecessary server load
-
-The intent is to provide clear feedback that "your submission is being processed"
-and prevent accidental double-submissions.
-
-## Acceptance Criteria
-- [ ] Button is disabled immediately after user clicks submit
-- [ ] Button shows loading indicator while disabled
-- [ ] Button re-enables if submission fails with error message
-```
 
 ## When to Use
 
