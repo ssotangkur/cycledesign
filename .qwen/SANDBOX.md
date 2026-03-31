@@ -49,6 +49,89 @@ While running:
 
 ---
 
+## Multi-Sandbox Setup
+
+Run multiple sandboxes simultaneously across different work trees or branches by configuring custom ports.
+
+### Step 1: Create Port Configuration
+
+**For your first sandbox (default ports):**
+```bash
+cd .qwen
+cp .env.sandbox.example .env.sandbox
+# Uses default ports: 6080, 5900, 9222
+```
+
+**For additional sandboxes (incremented ports):**
+```bash
+cd .qwen
+cp .env.sandbox.example .env.sandbox
+# Edit .env.sandbox:
+NOVNC_PORT=6081
+VNC_PORT=5901
+CHROME_PORT=9223
+```
+
+### Step 2: Start Each Sandbox
+
+**Sandbox 1 (main worktree):**
+```powershell
+# Windows
+cd D:\Projects\cycledesign-2
+$env:GH_TOKEN = "ghp_your_token_here"
+.\scripts\sandbox-start.ps1 -y "your prompt"
+# Access: http://localhost:6080
+```
+
+```bash
+# Linux/macOS
+cd ~/projects/cycledesign-2
+export GH_TOKEN="ghp_your_token_here"
+./scripts/sandbox-start.sh -y "your prompt"
+# Access: http://localhost:6080
+```
+
+**Sandbox 2 (feature worktree):**
+```powershell
+# Windows
+cd D:\Projects\cycledesign-2-feature
+$env:GH_TOKEN = "ghp_your_token_here"
+.\scripts\sandbox-start.ps1 -y "your prompt"
+# Access: http://localhost:6081
+```
+
+### Git Worktree Example
+
+```bash
+# Main branch - default ports
+git checkout main
+# Optional: cp .qwen/.env.sandbox.example .qwen/.env.sandbox (uses defaults)
+./scripts/sandbox-start.sh -y "your prompt"
+# Access: http://localhost:6080
+
+# Feature branch - alternate ports
+git worktree add ../cycledesign-feature feature-branch
+cd ../cycledesign-feature
+cp .qwen/.env.sandbox.example .qwen/.env.sandbox
+# Edit .qwen/.env.sandbox: NOVNC_PORT=6081, VNC_PORT=5901, CHROME_PORT=9223
+./scripts/sandbox-start.sh -y "your prompt"
+# Access: http://localhost:6081
+
+# Both sandboxes run simultaneously on different ports
+```
+
+### Port Configuration Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NOVNC_PORT` | 6080 | Web-based VNC interface |
+| `VNC_PORT` | 5900 | Direct VNC server port |
+| `CHROME_PORT` | 9222 | Chrome DevTools remote debugging |
+
+**Note:** `.env.sandbox` is git-ignored. Each worktree maintains its own configuration.
+
+---
+
 ## Configuration
 
 ### Required Environment Variables
