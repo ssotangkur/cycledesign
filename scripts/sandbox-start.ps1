@@ -23,21 +23,25 @@ if (-not $env:GH_TOKEN) {
 $envSandboxPath = Join-Path $PSScriptRoot "..\.qwen\.env.sandbox"
 if (Test-Path $envSandboxPath) {
     Write-Host "Loading port configuration from .qwen/.env.sandbox..." -ForegroundColor Gray
-    Get-Content $envSandboxPath | ForEach-Object {
-        if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
+    $lines = Get-Content $envSandboxPath
+    foreach ($line in $lines) {
+        if ($line -match '^\s*([^#][^=]+)=(.*)$') {
             $varName = $matches[1].Trim()
             $varValue = $matches[2].Trim()
-            Set-Item -Force -Path "ENV:$varName" -Value $varValue
             Write-Host "  $varName = $varValue" -ForegroundColor Gray
+            # Store in specific variables
+            if ($varName -eq "NOVNC_PORT") { $envNOVNC_PORT = $varValue }
+            elseif ($varName -eq "VNC_PORT") { $envVNC_PORT = $varValue }
+            elseif ($varName -eq "CHROME_PORT") { $envCHROME_PORT = $varValue }
         }
     }
     Write-Host ""
 }
 
 # Use configured ports with defaults
-$novncPort = if ($env:NOVNC_PORT) { $env:NOVNC_PORT } else { 6080 }
-$vncPort = if ($env:VNC_PORT) { $env:VNC_PORT } else { 5900 }
-$chromePort = if ($env:CHROME_PORT) { $env:CHROME_PORT } else { 9222 }
+$novncPort = if ($envNOVNC_PORT) { $envNOVNC_PORT } else { 6080 }
+$vncPort = if ($envVNC_PORT) { $envVNC_PORT } else { 5900 }
+$chromePort = if ($envCHROME_PORT) { $envCHROME_PORT } else { 9222 }
 
 # Check for port conflicts before starting
 Write-Host "Checking for port conflicts..." -ForegroundColor Gray
@@ -76,7 +80,7 @@ $env:QWEN_SANDBOX_IMAGE = "cycledesign-sandbox:gui"
 # Pass GH_TOKEN into container for GitHub auth
 # Also expose ports for VNC/noVNC/Chrome DevTools
 $hostQwenDir = "${env:USERPROFILE}\.qwen"
-$env:SANDBOX_FLAGS = "-p 0.0.0.0:$vncPort:5900 -p 0.0.0.0:$novncPort:6080 -p 0.0.0.0:$chromePort:9222 -v `"${hostQwenDir}:/root/.qwen`" -e GH_TOKEN"
+$env:SANDBOX_FLAGS = "-p 0.0.0.0:$($vncPort):5900 -p 0.0.0.0:$($novncPort):6080 -p 0.0.0.0:$($chromePort):9222 -v `"${hostQwenDir}:/root/.qwen`" -e GH_TOKEN"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
