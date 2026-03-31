@@ -166,6 +166,7 @@ Report back to the orchestrator with:
 - [x] UI behavior: Verified as expected
 - [x] Console: No errors
 - [x] Intent alignment: Addresses Purpose/Why
+- [x] **Skills/agents changes verified** (if applicable)
 
 ### Intent Alignment Check
 
@@ -244,6 +245,105 @@ Report back to the orchestrator with:
 - [ ] Edge cases handled
 - [ ] Similar bugs prevented
 ```
+
+### For Skills/MCP/Agents Changes
+
+When verifying changes to skills (`.qwen/skills/`), agents (`.qwen/agents/`), MCP configuration (`.qwen/settings.json`), or any Qwen-specific settings:
+
+```markdown
+- [ ] File syntax valid (YAML frontmatter, JSON, markdown)
+- [ ] Configuration follows documented format
+- [ ] Changes are self-contained and complete
+- [ ] **Tested in fresh Qwen session** (see Fresh Session Testing below)
+```
+
+## Fresh Session Testing
+
+**Key Principle:** Qwen loads configuration (skills, agents, MCP, settings) at session start. To verify changes take effect, you must test in a fresh session.
+
+### How to Test in a Fresh Session
+
+1. **Use the `qwen` CLI with `-p` flag** to spawn a new session:
+   ```bash
+   qwen -p "<prompt that exercises the changed behavior>"
+   ```
+
+2. **Design a prompt that triggers the modified behavior**:
+   - For **skill changes**: Use a trigger phrase that should invoke the skill
+   - For **agent changes**: Ask the agent to perform its modified function
+   - For **MCP changes**: Use a tool that depends on the MCP server
+   - For **settings changes**: Perform an action affected by the setting
+
+3. **Verify the expected behavior occurs**:
+   - Skill is invoked when triggered
+   - Agent behaves according to updated instructions
+   - MCP tools respond correctly
+   - Settings affect behavior as intended
+
+### Example: Testing Skill Trigger Changes
+
+```bash
+# Change: Added trigger patterns to issue-resolve skill
+# Test: Verify the skill triggers on the new patterns
+
+qwen -p "resolve issue #46 - just tell me which skill you would use"
+# Expected: Model responds with "issue-resolve skill"
+
+qwen -p "fix issue #46 - just tell me which skill you would use"
+# Expected: Model responds with "issue-resolve skill"
+```
+
+### Example: Testing Agent Behavior Changes
+
+```bash
+# Change: Updated issue-verifier to include fresh session testing
+# Test: Ask the verifier to verify something and check it follows new instructions
+
+qwen -p "Verify the changes in .qwen/skills/issue-resolve/SKILL.md"
+# Expected: Verifier includes fresh session testing in its verification plan
+```
+
+### Example: Testing MCP Configuration Changes
+
+```bash
+# Change: Added new MCP server configuration
+# Test: Use a tool provided by the MCP server
+
+qwen -p "List all available MCP tools"
+# Expected: New MCP tools appear in the list
+```
+
+### Common Patterns for Fresh Session Testing
+
+| Change Type | Test Prompt Pattern |
+|-------------|---------------------|
+| Skill trigger | `"use <skill-name> to <action>"` or trigger phrase |
+| Skill behavior | `"<skill-name>: do <task>"` |
+| Agent instructions | `"act as <agent-name>: <task>"` |
+| MCP server | Use a tool from that server |
+| Settings | Perform action affected by setting |
+
+### Tips for Effective Fresh Session Testing
+
+1. **Keep prompts focused**: Test one behavior at a time
+2. **Use timeouts**: `timeout 60 qwen -p "..."` to avoid hanging
+3. **Check output**: Verify the response shows expected behavior
+4. **Test edge cases**: Try variations to ensure robustness
+5. **Document results**: Record what was tested and the outcome
+
+### When Fresh Session Testing Is Required
+
+- Skill description or behavior changes
+- Agent instruction updates
+- MCP server configuration changes
+- Settings modifications (`.qwen/settings.json`)
+- Any change that affects model behavior or tool availability
+
+### When Fresh Session Testing Is NOT Required
+
+- Documentation-only changes
+- Changes to files not loaded by Qwen (e.g., source code tests use other methods)
+- Changes that are verified through other means (e.g., unit tests, linting)
 
 ## Common Verification Failures
 
