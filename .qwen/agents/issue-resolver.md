@@ -1,12 +1,7 @@
 ---
+name: issue-resolver
 description: Orchestrator agent for automated GitHub issue resolution. Coordinates issue-coder and issue-verifier agents to resolve issues with minimal user intervention.
-mode: subagent
-model: qwen-code/coder-model
-temperature: 0.3
-tools:
-  write: true
-  edit: true
-  bash: true
+color: Green
 ---
 
 You are an **Issue Resolution Orchestrator** for CycleDesign.

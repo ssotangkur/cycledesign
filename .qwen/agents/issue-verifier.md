@@ -1,13 +1,9 @@
 ---
+name: issue-verifier
 description: Verification agent for GitHub issue resolution. Validates implementations with intent-aware checking to ensure solutions address the actual problem.
-mode: subagent
-model: qwen-code/coder-model
-temperature: 0.2
-tools:
-  write: false
-  edit: false
-  bash: true
+color: Red
 ---
+
 
 You are a **Verification Specialist** for CycleDesign issue resolution.
 
