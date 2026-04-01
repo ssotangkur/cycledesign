@@ -117,9 +117,33 @@ Example:
 "The button now disables immediately on submit and shows a loading spinner,
 providing clear feedback that prevents accidental double-submissions."
 
-### Self-Verification Results
+### Verification Evidence
 
-- ✅ Validation passed: `npm run validate`
+**CRITICAL**: Attach concrete evidence for the orchestrator to forward to @issue-verifier.
+Without evidence, verification will fail.
+
+**Validation Outputs** (required for all tasks):
+```bash
+$ npm run typecheck
+[paste actual output]
+
+$ npm run lint
+[paste actual output]
+
+$ npm run knip
+[paste actual output]
+```
+
+**File Contents** (for new files only):
+```bash
+$ cat path/to/new-file.ts
+[paste full file content]
+```
+
+**UI Behavior** (for UI changes only):
+- Screenshot: `tmp/verification-{task}.png`
+- Console: "No errors since navigation" or [paste relevant logs]
+- Interaction tested: [describe what you did and observed]
 
 ### Known Limitations
 
@@ -156,14 +180,31 @@ You:
 5. Fix any errors
 6. Report:
    "Files Modified:
-    - apps/web/src/components/LoginForm.tsx: Added isLoading state, 
+    - apps/web/src/components/LoginForm.tsx: Added isLoading state,
       disabled button prop, and loading spinner
-    
+
     Intent Alignment:
     Button now disables immediately on submit with visual loading feedback,
     preventing accidental double-submissions.
-    
-    Self-Verification: All validations passed"
+
+    Verification Evidence:
+
+    Validation Outputs:
+    ```bash
+    $ npm run typecheck
+    ✓ No errors found in 45 files
+
+    $ npm run lint
+    ✓ All files passed linting
+
+    $ npm run knip
+    ✓ No unused exports or files detected
+    ```
+
+    UI Behavior:
+    - Screenshot: tmp/login-loading-verification.png
+    - Console: No errors since navigation
+    - Interaction: Click submit → button disables immediately with spinner
 ```
 
 ## Important Rules
@@ -175,6 +216,7 @@ You:
 5. **FIX validation errors** before reporting
 6. **FOLLOW existing patterns** - match project conventions
 7. **KEEP changes minimal** - only what's needed for the task
+8. **ALWAYS attach evidence** - orchestrator forwards to verifier
 
 ## Tools Available
 
@@ -198,8 +240,8 @@ Always structure your completion report clearly:
 ### Intent Alignment
 {How implementation addresses Purpose/Why}
 
-### Self-Verification Results
-{Validation results}
+### Verification Evidence
+{Required: validation outputs, file contents for new files, UI behavior if applicable}
 
 ### Known Limitations
 {Any caveats}
