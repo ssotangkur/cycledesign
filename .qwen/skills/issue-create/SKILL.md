@@ -59,6 +59,7 @@ implementers understand the intent behind the requirements.]
 - [ ] Criterion 3 (testable)
 
 ## Verification Checklist
+
 **Required Evidence for Each Criterion**:
 - **Criterion 1**: [Type of evidence needed]
 - **Criterion 2**: [Type of evidence needed]
@@ -117,20 +118,9 @@ List testable criteria that define when the issue is complete. Each criterion sh
 
 Format: `- [ ] Criterion (testable)`
 
-#### Verification Checklist (REQUIRED)
+#### Verification Checklist
 
-**Critical**: For each acceptance criterion, specify what verification evidence is required. This ensures implementers know what proof to provide before marking criteria complete.
-
-**Evidence Types by Criterion**:
-
-| Criterion Type | Required Evidence |
-|----------------|-------------------|
-| **File created/modified** | `ls`/`dir` output, `cat`/`Get-Content` output, `git status` or `git check-ignore` |
-| **Code quality** | `npm run typecheck` output, `npm run lint` output, `npm run knip` output |
-| **UI behavior** | Screenshots (tmp/), Chrome DevTools interaction logs, console error checks |
-| **API/Backend** | API response logs, test runner output, curl/Postman results |
-| **Bug fix** | Before/after comparison, reproduction steps with results |
-| **Documentation** | `grep` output showing changes, link validation results |
+For each acceptance criterion, specify what type of evidence the ISSUE-VERIFIER will need to see. This helps the verifier understand what to test.
 
 **Example**:
 ```markdown
@@ -139,20 +129,19 @@ Format: `- [ ] Criterion (testable)`
 **Required Evidence for Each Criterion**:
 
 - **Criterion 1**: File `.qwen/.env.sandbox.example` created
-  - `ls -la .qwen/.env.sandbox.example` output
-  - `cat .qwen/.env.sandbox.example` content
-  - `git check-ignore .qwen/.env.sandbox` verification
+  - File exists at correct path
+  - Content matches requirements
 
 - **Criterion 2**: PowerShell script loads configuration
-  - Script execution log showing ports loaded
-  - Test with custom ports (e.g., 6082/5902/9224)
-  - Error handling tested (missing file scenario)
+  - Script execution with custom ports
+  - Error handling for missing file
 
 - **Criterion 3**: Backward compatible (works without file)
   - Test run without `.env.sandbox` present
-  - Output showing default ports used
-  - No errors in console
+  - Default ports used successfully
 ```
+
+The ISSUE-VERIFIER will determine the specific tests and evidence needed based on your checklist.
 
 #### Scope
 
@@ -234,20 +223,6 @@ The `issue-create` skill ensures issues are:
 2. **Intent-aware**: Purpose/Why section guides implementation decisions
 3. **Testable**: Acceptance criteria are verifiable by ISSUE-VERIFIER
 4. **Scoped**: Clear boundaries prevent scope creep
-5. **Evidence-ready**: Verification checklist tells implementers what proof to provide
-
-## Verification Evidence Requirements
-
-**IMPORTANT**: All implementations (via issue-resolve or direct) MUST provide verification evidence before marking acceptance criteria complete.
-
-When creating issues, inform implementers that:
-- Claims without evidence will be rejected by ISSUE-VERIFIER
-- Evidence must be concrete (actual output, not checkmarks)
-- Evidence must be complete (covers all aspects of the criterion)
-- Evidence must be reproducible (someone else can verify)
-- Evidence must be attached (in PR description or comments)
-
-See "Verification Checklist" section above for evidence types by criterion.
 
 ## Example Usage
 
@@ -263,9 +238,9 @@ Acceptance Criteria:
   - Default to system preference on first load
 
 Verification Checklist:
-  - Toggle criterion: Screenshot showing toggle in both states, console check for no errors
-  - Persistence criterion: Refresh test showing theme persists, localStorage inspection
-  - System preference: Test with system in light/dark mode, first-load behavior log
+  - Toggle criterion: Toggle UI works, theme switches correctly
+  - Persistence criterion: Theme persists after page refresh
+  - System preference: First-load uses system preference
 
 Scope:
   In: Settings page toggle, theme persistence
