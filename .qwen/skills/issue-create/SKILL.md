@@ -24,7 +24,7 @@ The issue resolution framework works best when issues clearly state **what** nee
 
 ### What to Include
 
-✅ **DO include:**
+✅ **DO include**:
 - Clear outcome statements in the Goal
 - Testable acceptance criteria (input → expected output)
 - Expected behavior descriptions
@@ -32,7 +32,7 @@ The issue resolution framework works best when issues clearly state **what** nee
 - Constraints and requirements
 - Open questions for implementer discretion or clarification
 
-❌ **DO NOT include:**
+❌ **DO NOT include**:
 - Code snippets or implementation examples
 - Specific function names or class structures
 - Step-by-step implementation instructions
@@ -58,9 +58,16 @@ implementers understand the intent behind the requirements.]
 - [ ] Criterion 2 (testable)
 - [ ] Criterion 3 (testable)
 
+## Verification Checklist
+
+**Required Evidence for Each Criterion**:
+- **Criterion 1**: [Type of evidence needed]
+- **Criterion 2**: [Type of evidence needed]
+- **Criterion 3**: [Type of evidence needed]
+
 ## Scope
-**In:** What this issue covers
-**Out:** What is explicitly excluded
+**In**: What this issue covers
+**Out**: What is explicitly excluded
 
 ## Open Questions
 - [ ] Question 1 (implementer discretion / needs clarification)
@@ -76,8 +83,8 @@ implementers understand the intent behind the requirements.]
 
 Describe the desired outcome in clear, specific terms. Can be multiple sentences or paragraphs.
 
-**Good:** "Enable sandbox scripts to load port configuration from `.env.sandbox` file"
-**Bad:** "Update sandbox-start.ps1 to read .env.sandbox"
+**Good**: "Enable sandbox scripts to load port configuration from `.env.sandbox` file"
+**Bad**: "Update sandbox-start.ps1 to read .env.sandbox"
 
 #### Purpose/Why
 
@@ -92,7 +99,7 @@ Include:
 - What user pain point this addresses
 - What business goal this supports
 
-**Example:**
+**Example**:
 ```markdown
 ## Purpose/Why
 Users have been reporting multiple accidental form submissions because the
@@ -111,32 +118,49 @@ List testable criteria that define when the issue is complete. Each criterion sh
 
 Format: `- [ ] Criterion (testable)`
 
+#### Verification Checklist
+
+For each acceptance criterion, specify what type of evidence the ISSUE-VERIFIER will need to see. This helps the verifier understand what to test.
+
+**Example**:
+```markdown
+## Verification Checklist
+
+**Required Evidence for Each Criterion**:
+
+- **Criterion 1**: File `.qwen/.env.sandbox.example` created
+  - File exists at correct path
+  - Content matches requirements
+
+- **Criterion 2**: PowerShell script loads configuration
+  - Script execution with custom ports
+  - Error handling for missing file
+
+- **Criterion 3**: Backward compatible (works without file)
+  - Test run without `.env.sandbox` present
+  - Default ports used successfully
+```
+
+The ISSUE-VERIFIER will determine the specific tests and evidence needed based on your checklist.
+
 #### Scope
 
 Clearly define boundaries to prevent scope creep:
 
-- **In:** What this issue covers
-- **Out:** What is explicitly excluded
+- **In**: What this issue covers
+- **Out**: What is explicitly excluded
 
 #### Open Questions
 
 Capture unresolved decisions, making it clear where implementers have discretion vs where clarification is needed.
 
-**When to use:**
+**When to use**:
 - Multiple valid approaches exist and you want implementer input
 - You're unsure about edge cases or requirements
 - A decision depends on research or experimentation
 - You want to surface assumptions for verification
 
-**How to format:**
-```markdown
-## Open Questions
-- [ ] Should we support X use case? (implementer discretion)
-- [ ] What happens when Y occurs? (needs clarification)
-- [ ] Should this integrate with Z or remain separate? (implementer discretion)
-```
-
-**Labels:**
+**Labels**:
 - `(implementer discretion)` - Implementer can decide based on their analysis
 - `(needs clarification)` - Issue author or team needs to provide answer
 
@@ -148,18 +172,18 @@ Describe **expected behavior**, not specific code. Include:
 - Files that may be affected
 - Constraints and requirements
 
-**✅ Good Technical Notes:**
+**✅ Good Technical Notes**:
 ```markdown
 ## Technical Notes
 
 ### Expected Behavior
 
-**When `.env.sandbox` exists:**
+**When `.env.sandbox` exists**:
 - Scripts load port configuration from the file
 - Sandbox binds to the specified host ports
 - Startup output shows the configured ports
 
-**When `.env.sandbox` does not exist:**
+**When `.env.sandbox` does not exist**:
 - Scripts use default ports (backward compatible)
 - Behavior matches current implementation
 
@@ -168,7 +192,7 @@ Describe **expected behavior**, not specific code. Include:
 - `scripts/sandbox-start.sh` - Linux/macOS launcher
 ```
 
-**❌ Bad Technical Notes:**
+**❌ Bad Technical Notes**:
 ```markdown
 ## Technical Notes
 Update scripts/sandbox-start.ps1:
@@ -212,11 +236,15 @@ Acceptance Criteria:
   - Toggle switches between light and dark themes
   - Preference persists across sessions
   - Default to system preference on first load
+
+Verification Checklist:
+  - Toggle criterion: Toggle UI works, theme switches correctly
+  - Persistence criterion: Theme persists after page refresh
+  - System preference: First-load uses system preference
+
 Scope:
   In: Settings page toggle, theme persistence
   Out: Per-page themes, auto-switching based on time
-Open Questions:
-  - Should the toggle show a preview of the theme? (implementer discretion)
 Technical Notes:
   Expected Behavior:
   - Toggle in settings page switches between light/dark modes

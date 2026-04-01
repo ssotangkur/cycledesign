@@ -33,7 +33,7 @@ This ensures you're checking the actual GitHub Actions status, not just local va
 
 ## Knip Configuration Rule
 
-**Do not add files to `knip.json` ignore list without explicit user permission.**
+**Do not add files to `knip.json` ignore list without explicit user permission**.
 
 When Knip reports unused files/exports:
 1. First verify if the file is actually needed (search for imports/usages)
@@ -92,24 +92,24 @@ If the user mentions they are in a sandbox environment, you MUST invoke the `san
 
 ## Screenshot & Snapshot Rule
 
-**All screenshots and snapshots from Chrome DevTools MCP or Playwright must be saved to the `tmp/` directory.**
+**All screenshots and snapshots from Chrome DevTools MCP or Playwright must be saved to the `tmp/` directory**.
 
 The `tmp/` directory is already in `.gitignore`, so test artifacts won't be committed.
 
-**Examples:**
+**Examples**:
 
-**Chrome DevTools MCP:**
+**Chrome DevTools MCP**:
 ```
 "Take a screenshot and save it to tmp/homepage-screenshot.png"
 "Capture the current page state to tmp/login-flow-snapshot.png"
 ```
 
-**Playwright:**
+**Playwright**:
 ```bash
 npx playwright screenshot http://localhost:3000 tmp/page-screenshot.png
 ```
 
-**Never save screenshots to the project root or tracked directories.**
+**Never save screenshots to the project root or tracked directories**.
 
 ---
 
