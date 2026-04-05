@@ -109,9 +109,16 @@ test.describe('Settings - Provider/Model Selection', () => {
       // Get the new model value
       const modelAfterChange = await modelSelect.locator('.MuiSelect-select').textContent();
 
-      // Model should have changed (either to first available model or empty)
+      // Model should have changed or be reset to first available model
       // The key is that it should be a valid model for the new provider
       expect(modelAfterChange).toBeDefined();
+      
+      // If we had a model before, verify it actually changed or was reset appropriately
+      if (modelBeforeChange && modelBeforeChange.trim() && !modelBeforeChange.includes('Loading')) {
+        // Model should either be different or the same (if both providers share the first model)
+        // The important thing is that it's a valid model for the new provider
+        expect(modelAfterChange && modelAfterChange.trim().length > 0).toBe(true);
+      }
     }
   });
 
