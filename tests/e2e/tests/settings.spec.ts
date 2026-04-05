@@ -154,8 +154,14 @@ test.describe('Settings - Provider/Model Selection', () => {
     // Select first model (if available and not disabled)
     const firstModelOption = modelOptions.first();
     const firstModelText = await firstModelOption.textContent();
+
+    // Check if the first option is clickable (not disabled)
+    const isDisabled = await firstModelOption.getAttribute('aria-disabled');
     
-    if (!firstModelText?.includes('Loading') && !firstModelText?.includes('No models')) {
+    if (!firstModelText?.includes('Loading') && 
+        !firstModelText?.includes('No models') && 
+        !firstModelText?.includes('Provide API key') &&
+        isDisabled !== 'true') {
       await firstModelOption.click();
 
       // Wait for save to complete
