@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -36,9 +36,13 @@ export default function SettingsPage() {
 
   const updateConfigMutation = trpc.providerConfig.updateConfig.useMutation({
     onSuccess: () => {
-      // Invalidate both config and models queries to ensure fresh data
-      queryClient.invalidateQueries({ queryKey: ['providerConfig.getConfig'] });
-      queryClient.invalidateQueries({ queryKey: ['providerConfig.listModels'] });
+      // Invalidate config and models queries to refetch with updated data
+      queryClient.invalidateQueries({
+        queryKey: [['providerConfig', 'getConfig']],
+      });
+      queryClient.invalidateQueries({
+        queryKey: [['providerConfig', 'listModels']],
+      });
       setApiKeyInput(API_KEY_PLACEHOLDER);
     },
   });
@@ -83,13 +87,18 @@ export default function SettingsPage() {
   };
 
   // Reset model selection when provider changes (model IDs are provider-specific)
+  const previousProviderRef = useRef(configData?.provider);
   useEffect(() => {
     if (modelsData && modelsData.length > 0 && configData?.model) {
       // Check if current model is valid for the new provider
       const isValidModel = modelsData.some((m) => m.id === configData.model);
-      if (!isValidModel) {
-        // Reset to first available model
+      if (!isValidModel && previousProviderRef.current !== configData?.provider) {
+        // Reset to first available model only if provider actually changed
+        previousProviderRef.current = configData?.provider;
         updateConfigMutation.mutate({ model: modelsData[0].id });
+      } else if (previousProviderRef.current === configData?.provider) {
+        // Update ref if model was just reset
+        previousProviderRef.current = configData?.provider;
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,6 +142,7 @@ export default function SettingsPage() {
               label="Provider"
               onChange={(e) => handleProviderChange(e.target.value)}
               disabled={saving}
+              data-testid="provider-select"
             >
               {providersData?.map((p) => (
                 <MenuItem key={p.name} value={p.name}>
@@ -176,6 +186,7 @@ export default function SettingsPage() {
               label="Model"
               onChange={(e) => handleModelChange(e.target.value)}
               disabled={saving || loadingModels}
+              data-testid="model-select"
             >
               {loadingModels ? (
                 <MenuItem value="" disabled>
