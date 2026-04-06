@@ -9,6 +9,7 @@
         "tests/*"
     ],
     "scripts": {
+        "preinstall": "node -e \"var v = process.version; if (!process.env.CI && !/^v20\\./.test(v)) { console.error(''); console.error('❌ Wrong Node.js version!'); console.error('   This project requires Node.js 20.19.x'); console.error('   Current version: ' + v); console.error(''); console.error('💡 Fix this by:'); console.error('   1. Install fnm: https://fnm.vercel.app'); console.error('   2. Run: fnm use --install-if-missing'); console.error('   3. Then: npm install'); console.error(''); process.exit(1); }\"",
         "dev": "npm run dev:kill && concurrently --kill-others \"npm run dev:server:log\" \"npm run dev:web:log\"",
         "dev:kill": "node scripts/succeed.js npx kill-port 3000 3001 3002",
         "dev:server": "npm run dev --workspace=@cycledesign/server",
@@ -41,6 +42,9 @@
     },
     "optionalDependencies": {
         "@rollup/rollup-linux-x64-gnu": "4.59.0"
+    },
+    "engines": {
+        "node": ">=20.19.0 <21.0.0 || >=22.13.0 <23.0.0 || >=24.0.0"
     },
     "dependencies": {}
 }
