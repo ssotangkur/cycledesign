@@ -26,9 +26,40 @@ As of March 2026, the server uses a unified ToolLoopAgent-based architecture wit
 
 ## Prerequisites
 
-- Node.js 18+ 
-- npm or yarn
+- **Node.js 20.19.x** (managed via fnm)
+- npm
 - Chrome browser (for OAuth authorization)
+
+### Node.js Version Management
+
+This project uses [fnm (Fast Node Manager)](https://github.com/Schniz/fnm) to ensure all developers use the same Node.js version.
+
+**Install fnm:**
+
+```bash
+# macOS/Linux
+curl -fsSL https://fnm.vercel.app/install | bash
+
+# Windows (using winget)
+winget install Schniz.fnm
+
+# Or via Homebrew (macOS)
+brew install fnm
+```
+
+**Setup Node.js for this project:**
+
+```bash
+# In the project directory
+fnm use --install-if-missing
+
+# Verify version
+node --version  # Should show v20.19.0
+```
+
+The project includes a `.nvmrc` file specifying Node.js 20.19.0. fnm will automatically use this version when you run `fnm use`.
+
+**Note:** If you don't have fnm installed, the `npm install` command will show a warning about the wrong Node.js version.
 
 ## Installation
 
