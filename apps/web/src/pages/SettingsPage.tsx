@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   Typography,
@@ -21,18 +22,27 @@ const API_KEY_PLACEHOLDER = '**********';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
 
   const { data: providersData, isLoading: loadingProviders } = trpc.providerConfig.list.useQuery();
-  const { data: configData, isLoading: loadingConfig, refetch: refetchConfig } = trpc.providerConfig.getConfig.useQuery();
-  const { data: modelsData, isLoading: loadingModels } = trpc.providerConfig.listModels.useQuery(undefined, {
-    enabled: !!configData?.hasApiKey,
+  const { data: configData, isLoading: loadingConfig } = trpc.providerConfig.getConfig.useQuery();
+  
+  // Fetch models based on current provider - refetches when provider changes
+  const { data: modelsData, isLoading: loadingModels, error: modelsError, refetch: refetchModels } = trpc.providerConfig.listModels.useQuery(undefined, {
+    enabled: !!configData?.provider,
   });
 
   const updateConfigMutation = trpc.providerConfig.updateConfig.useMutation({
     onSuccess: () => {
-      refetchConfig();
+      // Invalidate config and models queries to refetch with updated data
+      queryClient.invalidateQueries({
+        queryKey: [['providerConfig', 'getConfig']],
+      });
+      queryClient.invalidateQueries({
+        queryKey: [['providerConfig', 'listModels']],
+      });
       setApiKeyInput(API_KEY_PLACEHOLDER);
     },
   });
@@ -50,6 +60,7 @@ export default function SettingsPage() {
       : apiKeyInput;
 
   const handleProviderChange = (provider: string) => {
+    // Update provider - this will trigger the models query to refetch via the enabled flag
     updateConfigMutation.mutate({ provider });
   };
 
@@ -70,6 +81,28 @@ export default function SettingsPage() {
       apiKey: apiKeyInput.trim(),
     });
   };
+
+  const handleRetryModels = () => {
+    refetchModels();
+  };
+
+  // Reset model selection when provider changes (model IDs are provider-specific)
+  const previousProviderRef = useRef(configData?.provider);
+  useEffect(() => {
+    if (modelsData && modelsData.length > 0 && configData?.model) {
+      // Check if current model is valid for the new provider
+      const isValidModel = modelsData.some((m) => m.id === configData.model);
+      if (!isValidModel && previousProviderRef.current !== configData?.provider) {
+        // Reset to first available model only if provider actually changed
+        previousProviderRef.current = configData?.provider;
+        updateConfigMutation.mutate({ model: modelsData[0].id });
+      } else if (previousProviderRef.current === configData?.provider) {
+        // Update ref if model was just reset
+        previousProviderRef.current = configData?.provider;
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelsData, configData?.model, configData?.provider]);
 
   if (loading) {
     return (
@@ -109,6 +142,7 @@ export default function SettingsPage() {
               label="Provider"
               onChange={(e) => handleProviderChange(e.target.value)}
               disabled={saving}
+              data-testid="provider-select"
             >
               {providersData?.map((p) => (
                 <MenuItem key={p.name} value={p.name}>
@@ -141,7 +175,7 @@ export default function SettingsPage() {
             </>
           )}
 
-          <FormControl fullWidth>
+          <FormControl fullWidth error={!!modelsError}>
             <InputLabel>Model</InputLabel>
             <Select
               value={
@@ -152,10 +186,15 @@ export default function SettingsPage() {
               label="Model"
               onChange={(e) => handleModelChange(e.target.value)}
               disabled={saving || loadingModels}
+              data-testid="model-select"
             >
               {loadingModels ? (
                 <MenuItem value="" disabled>
                   Loading models...
+                </MenuItem>
+              ) : modelsError ? (
+                <MenuItem value="" disabled>
+                  Failed to load models
                 </MenuItem>
               ) : !modelsData || modelsData.length === 0 ? (
                 <MenuItem value="" disabled>
@@ -170,6 +209,17 @@ export default function SettingsPage() {
               )}
             </Select>
           </FormControl>
+          
+          {/* Error state with retry option */}
+          {modelsError && (
+            <Alert severity="error" action={
+              <Button color="inherit" size="small" onClick={handleRetryModels}>
+                Retry
+              </Button>
+            }>
+              Failed to load models. Please try again.
+            </Alert>
+          )}
         </Box>
       </Paper>
     </Box>
