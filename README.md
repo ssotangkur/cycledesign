@@ -47,6 +47,21 @@ winget install Schniz.fnm
 brew install fnm
 ```
 
+**Windows Setup (PowerShell):**
+
+After installing fnm on Windows, you need to set up your PowerShell profile:
+
+```powershell
+# Add fnm to your PowerShell profile
+fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+
+# To make it persistent, add it to your profile:
+if (!(Test-Path -Path $PROFILE)) { New-Item -Type File -Path $PROFILE -Force }
+Add-Content -Path $PROFILE -Value 'fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression'
+```
+
+**Note:** After adding to your profile, restart PowerShell or run `. $PROFILE` to reload.
+
 **Setup Node.js for this project:**
 
 ```bash
