@@ -37,6 +37,15 @@ interface ChatMessage {
   message?: {
     role: string;
     content?: string;
+    parts?: Array<{
+      text?: string;
+      thought?: boolean;
+      functionCall?: {
+        id: string;
+        name: string;
+        args: Record<string, unknown>;
+      };
+    }>;
   };
   subtype?: string;
   systemPayload?: Record<string, unknown>;
@@ -885,14 +894,37 @@ async function main(): Promise<void> {
     let content = '';
     if (msg.message?.content) {
       content = msg.message.content;
+    } else if (msg.message?.parts && msg.message.parts.length > 0) {
+      // Extract text from parts array (Qwen Code v0.13+ format)
+      const textParts = msg.message.parts
+        .filter(p => p.text && !p.thought)
+        .map(p => p.text)
+        .join('\n\n');
+      const thoughtParts = msg.message.parts
+        .filter(p => p.thought && p.text)
+        .map(p => p.text);
+      
+      if (thoughtParts.length > 0) {
+        content = `[Thinking] ${thoughtParts.join(' ')}\n\n${textParts}`.trim();
+      } else {
+        content = textParts;
+      }
     } else if (typeof msg.message === 'string') {
       content = msg.message;
     } else if (msg.systemPayload) {
       content = JSON.stringify(msg.systemPayload).substring(0, 200);
     }
 
-    // Extract tool calls
-    const toolCalls = msg.toolCalls || [];
+    // Extract tool calls from message parts (v0.13+ format)
+    let toolCalls = msg.toolCalls || [];
+    if (toolCalls.length === 0 && msg.message?.parts) {
+      toolCalls = msg.message.parts
+        .filter(p => p.functionCall)
+        .map(p => ({
+          name: p.functionCall!.name,
+          arguments: JSON.stringify(p.functionCall!.args),
+        }));
+    }
 
     return {
       timestamp: msg.timestamp,
