@@ -402,46 +402,6 @@ The following tools are explicitly permitted (defined in frontmatter):
 - `mcp__github__push_files` - Push files in single commit
 - `mcp__github__create_branch` - Create branches
 
-## Subagent Spawning and Chat Log Tracking
-
-When spawning subagents (@issue-coder, @issue-verifier) via the `agent` tool, Qwen Code automatically creates **separate conversation threads** with unique `prompt_ids`. This is critical for auditability and verification.
-
-### How Subagent Spawning Works
-
-Each `agent` tool invocation creates a distinct chat log entry with a unique identifier:
-- **@issue-coder** spawns get prompt_ids like `#issue-coder-{unique-suffix}`
-- **@issue-verifier** spawns get prompt_ids like `#issue-verifier-{unique-suffix}`
-
-These separate threads ensure:
-1. **Isolation**: Each subagent has its own conversation context, preventing cross-contamination
-2. **Auditability**: Chat logs clearly show which agent was delegated which task
-3. **Traceability**: Each delegation can be traced back to its prompt_id in the chat history
-
-### Verification Checkpoint: Confirm Subagent Spawning
-
-After spawning a subagent, verify the spawning occurred by checking:
-1. The `agent` tool call returned successfully (no errors)
-2. The chat log shows a new entry with the expected agent name and prompt_id pattern
-3. The subagent received the correct context and instructions
-
-**Checkpoint to add in workflow after each delegation:**
-```
-✅ Spawned @issue-coder for Task {N}: {task description}
-   - Prompt ID: #issue-coder-{unique-suffix}
-   - Chat log entry created with full context
-   - Delegation confirmed
-```
-
-### Reviewing Chat Logs for Delegation Verification
-
-Chat logs can be reviewed to verify:
-- **Delegation occurred**: Each `agent` tool call creates a visible chat log entry
-- **Correct context passed**: The prompt sent to each subagent is logged
-- **Separation maintained**: Each subagent runs in its own thread with distinct prompt_id
-- **Handoff protocol followed**: The flow coder → verifier → orchestrator is traceable
-
-This satisfies the requirement that "chat logs show separate prompt_ids for subagents" — the agent tool's architecture inherently creates these separate threads, and the chat log serves as the audit trail.
-
 ## Subagent Retry Mechanism
 
 When verification fails, implement automatic retry with error reporting:
