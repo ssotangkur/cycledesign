@@ -4,12 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useChatChannel } from './useChatChannel';
 import type { ChatMessage } from '@cycledesign/common-protocol';
 
-export interface ChatMessageWithStatus {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  userId: string;
-  timestamp: number;
+export interface ChatMessageWithStatus extends ChatMessage {
   status: 'pending' | 'confirmed' | 'streaming' | 'completed';
   clientMsgId?: string;
 }
@@ -49,9 +44,8 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
       historyReceived = true;
       console.log('[useChatMessageList] Received history:', payload.messages.length, 'messages');
 
-      setMessages(payload.messages.map((msg: ChatMessage) => ({
+      setMessages(payload.messages.map((msg) => ({
         ...msg,
-        role: (msg.userId === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
         status: 'completed' as const,
       })));
     });
@@ -76,13 +70,9 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
           );
         }
 
-        // Determine role from userId
-        const role = payload.userId === 'user' ? 'user' as const : 'assistant' as const;
-        
         // New message from other user - server message doesn't have id, generate one
-        const newMessage = {
+        const newMessage: ChatMessageWithStatus = {
           id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-          role,
           ...payload,
           status: 'completed' as const
         };
@@ -107,9 +97,8 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
     const clientMsgId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const tempMessage: ChatMessageWithStatus = {
       id: clientMsgId,
-      role: 'user' as const,
       content,
-      userId: 'current-user',
+      userId: 'user',
       timestamp: Date.now(),
       status: 'pending',
       clientMsgId,

@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 /**
- * Zod schemas for channel types - single source of truth
- * Types are inferred from these schemas for runtime validation
+ * Zod schemas for channel types - used for runtime validation
+ * Types are defined separately as TypeScript interfaces for clean type hints
  */
 
 /**
@@ -23,8 +23,9 @@ const ChatMessageSchema = z.object({
 
   /**
    * User ID who sent the message
+   * Valid values: 'user' for user messages, 'assistant' for assistant messages
    */
-  userId: z.string(),
+  userId: z.union([z.literal('user'), z.literal('assistant')]),
 
   /**
    * Unix timestamp in milliseconds
@@ -38,8 +39,18 @@ const ChatMessageSchema = z.object({
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 /**
+ * Chat message schema reference - used when composing into other schemas.
+ * This tells z.infer to preserve the `ChatMessage` type name instead of
+ * expanding it to the raw object shape.
+ */
+const ChatMessageAsType: z.ZodType<ChatMessage> = ChatMessageSchema;
+
+/**
  * Channel type registry - defines all available channels and their events
  * Separates client-to-server and server-to-client events
+ *
+ * Types are inferred from this schema. Use `*AsType` references (like
+ * ChatMessageAsType) to preserve named types in IDE hints.
  *
  * Structure pattern:
  * ChannelTypes['channel-name'] = {
@@ -105,14 +116,14 @@ export const ChannelTypesSchema = z.object({
     }),
     server: z.object({
       'message': z.object({ content: z.string(), userId: z.string(), timestamp: z.number() }),
-      'history': z.object({ messages: z.array(ChatMessageSchema) }),
+      'history': z.object({ messages: z.array(ChatMessageAsType) }),
       'user-joined': z.object({ userId: z.string(), name: z.string() }),
     }),
   }),
 });
 
 /**
- * Channel type registry - inferred from schema
+ * Channel type registry - inferred from schema (single source of truth)
  */
 export type ChannelTypes = z.infer<typeof ChannelTypesSchema>;
 

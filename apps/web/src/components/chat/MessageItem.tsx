@@ -1,29 +1,12 @@
 import { Box, Avatar, Typography } from '@mui/material';
-import { Message } from '../../api/client';
+import type { ChatMessageWithStatus } from '../../hooks/useChatMessageList';
 
 interface MessageItemProps {
-  message: Message;
+  message: ChatMessageWithStatus;
 }
 
 function MessageItem({ message }: MessageItemProps) {
-  const isUser = message.role === 'user';
-  const isTool = message.role === 'tool';
-
-  if (isTool) {
-    return (
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          py: 1,
-        }}
-      >
-        <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-          Tool result for call: {message.toolCallId}
-        </Typography>
-      </Box>
-    );
-  }
+  const isUser = message.userId === 'user' || message.userId === 'current-user';
 
   return (
     <Box
@@ -57,11 +40,6 @@ function MessageItem({ message }: MessageItemProps) {
         <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
           {message.content}
         </Typography>
-        {message.tokenCount && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-            {message.tokenCount} tokens
-          </Typography>
-        )}
       </Box>
     </Box>
   );
