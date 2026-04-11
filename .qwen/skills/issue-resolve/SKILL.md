@@ -46,3 +46,19 @@ Delegates to `@issue-resolver` which orchestrates the full resolution workflow:
 - Manages iterative fix cycles if verification fails
 - Commits and pushes changes on successful verification
 - Updates PR description with verification results
+
+## Subagent Delegation Behavior
+
+When `@issue-resolver` spawns subagents via the `agent` tool:
+
+- **Separate conversation threads** are created with unique `prompt_ids`
+- **@issue-coder** receives prompt_ids like `#issue-coder-{unique-suffix}`
+- **@issue-verifier** receives prompt_ids like `#issue-verifier-{unique-suffix}`
+- **Chat logs** show each delegation as a distinct entry, providing an audit trail
+
+This architecture ensures:
+1. **Isolation**: Each subagent operates in its own context
+2. **Traceability**: Delegation is verifiable through chat log review
+3. **Accountability**: Each agent's work is attributed to its unique prompt_id
+
+To verify subagent spawning occurred, check that the chat log contains entries for each delegated task with distinct prompt_ids matching the expected patterns.
