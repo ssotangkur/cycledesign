@@ -287,14 +287,25 @@ test.describe('Session Management', () => {
     expect(selectedValue?.trim()).toBeTruthy();
   });
 
-  test('should update session label to first message content after sending message', async ({ authenticatedPage }) => {
-    // Clear all existing sessions to ensure a clean state
-    await authenticatedPage.evaluate(() => localStorage.clear());
-    await authenticatedPage.reload();
-    await authenticatedPage.waitForSelector('[data-testid="app-layout"]');
+  test('should update session label to first message content after sending message', async ({ authenticatedPage, createSession }) => {
+    // Delete all existing sessions via UI to ensure clean client AND server state
+    // This is more reliable than localStorage.clear() which only clears client-side state
+    // while server-side sessions (.cycledesign/sessions/) persist across test runs
+    const deleteAllButton = authenticatedPage.getByTestId('delete-all-sessions-button');
+    if (await deleteAllButton.isVisible().catch(() => false)) {
+      await deleteAllButton.click();
+      await authenticatedPage.getByTestId('confirm-delete-all-button').click();
+      // Wait for the session select to become empty
+      const sessionSelect = authenticatedPage.locator('[data-testid="session-select"] [role="combobox"]');
+      await sessionSelect.waitFor({ state: 'visible', timeout: 10000 });
+      await authenticatedPage.waitForFunction(() => {
+        const combobox = document.querySelector('[data-testid="session-select"] [role="combobox"]');
+        return combobox && (!combobox.textContent || combobox.textContent.trim().replace(/\u200b/g, '') === '');
+      }, { timeout: 5000 });
+    }
 
-    // Create a new session
-    await authenticatedPage.getByTestId('new-session-button').click();
+    // Create a new session with a clean state
+    await createSession();
 
     // Get the session select element
     const sessionSelect = authenticatedPage.locator('[data-testid="session-select"] [role="combobox"]');
