@@ -75,7 +75,7 @@ export class MessageHandler {
     let isStreaming = false;
 
     return {
-      message: async (payload: { content: string }) => {
+      message: async (payload: { content: string; sessionId: string }) => {
         // Check if already streaming
         if (isStreaming) {
           console.log('[MessageHandler] Message ignored - streaming in progress for channel:', channel.id);
@@ -89,9 +89,8 @@ export class MessageHandler {
         isStreaming = true;
 
         try {
-          // For now, we use a default sessionId for storage
-          // In a multi-session setup, this would come from the channel metadata
-          const sessionId = 'default';
+          // Use sessionId from the payload (sent by frontend)
+          const sessionId = payload.sessionId;
 
           // Generate message IDs
           const serverMsgId = generateMessageId();

@@ -1,26 +1,78 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Box, TextField, IconButton } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
-import { useCurrentSessionId, useIsHydrated, useInvalidateSessions } from '../../hooks/useSession';
+import { useCurrentSessionId, useIsHydrated, useInvalidateSessions, useSessions } from '../../hooks/useSession';
 import { useChatMessageList } from '../../hooks/useChatMessageList';
 
 function PromptInput() {
   const { currentSessionId } = useCurrentSessionId();
   const isHydrated = useIsHydrated();
   const { invalidateSessions } = useInvalidateSessions();
+  const { sessions } = useSessions();
   const { sendMessage, isStreaming, isConnected, messages } = useChatMessageList(currentSessionId);
   const [input, setInput] = useState('');
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const disabled = !isHydrated || !currentSessionId || !isConnected || isStreaming;
+
+  // Poll for firstMessage update after sending first message
+  useEffect(() => {
+    return () => {
+      // Cleanup on unmount
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const startPollingForFirstMessage = () => {
+    // Clear any existing polling
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
+    // Poll every 500ms for firstMessage update
+    pollingRef.current = setInterval(() => {
+      invalidateSessions();
+    }, 500);
+
+    // Stop polling after 10 seconds timeout
+    timeoutRef.current = setTimeout(() => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    }, 10000);
+  };
+
+  const stopPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  // Check if current session now has firstMessage - stop polling if so
+  useEffect(() => {
+    if (!currentSessionId || !pollingRef.current) return;
+
+    const session = sessions.find(s => s.id === currentSessionId);
+    if (session?.firstMessage) {
+      stopPolling();
+    }
+  }, [sessions, currentSessionId]);
 
   const handleSubmit = async () => {
     if (input.trim() && !disabled) {
       const isFirstMessage = messages.length === 0;
       sendMessage(input.trim());
       setInput('');
-      // Invalidate sessions list after first message to update the session label
+      // Start polling for session label update after first message
       if (isFirstMessage) {
-        invalidateSessions();
+        startPollingForFirstMessage();
       }
     }
   };

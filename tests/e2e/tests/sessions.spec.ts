@@ -286,4 +286,65 @@ test.describe('Session Management', () => {
     const selectedValue = await sessionSelect.textContent();
     expect(selectedValue?.trim()).toBeTruthy();
   });
+
+  test('should update session label to first message content after sending message', async ({ authenticatedPage, createSession }) => {
+    // Create a new session
+    await createSession();
+
+    // Get the session select element
+    const sessionSelect = authenticatedPage.locator('[data-testid="session-select"] [role="combobox"]');
+    await sessionSelect.waitFor({ state: 'visible', timeout: 10000 });
+
+    // Wait for UI to stabilize
+    await authenticatedPage.waitForTimeout(500);
+
+    // Verify the session label shows the session ID (last 8 chars) before any messages
+    const labelBeforeMessage = await sessionSelect.textContent();
+    expect(labelBeforeMessage?.trim()).toBeTruthy();
+    // The label should be the last 8 chars of the session ID (which is what formatSessionLabel returns when no message)
+    expect(labelBeforeMessage?.trim().length).toBe(8);
+
+    // Store the initial label to verify it changes
+    const initialLabel = labelBeforeMessage?.trim();
+
+    // Define a test message with some special characters to verify they get stripped
+    const testMessage = 'Hello, this is a test message!\nWith special\tcharacters.';
+    const expectedLabel = 'Hello, this is a test message!With special characters.';
+
+    // Type the message in the prompt input
+    const promptInput = authenticatedPage.getByTestId('prompt-input');
+    await promptInput.waitFor({ state: 'visible', timeout: 5000 });
+    await promptInput.click();
+    await promptInput.fill(testMessage);
+
+    // Send the message via the send button
+    await authenticatedPage.getByTestId('send-button').click();
+
+    // Wait for the session label to update by polling the session select text
+    // The label should change from the session ID to the first message content
+    await authenticatedPage.waitForFunction(
+      ({ expectedLabel, initialLabel }) => {
+        const combobox = document.querySelector('[data-testid="session-select"] [role="combobox"]');
+        if (!combobox || !combobox.textContent) return false;
+        const currentLabel = combobox.textContent.trim();
+        // Label should have changed from the initial value
+        if (currentLabel === initialLabel) return false;
+        // Label should contain the expected text (truncated version of the message)
+        return currentLabel.includes(expectedLabel.slice(0, 50));
+      },
+      { expectedLabel, initialLabel },
+      { timeout: 10000 }
+    );
+
+    // Final verification - get the updated label
+    const labelAfterMessage = await sessionSelect.textContent();
+    expect(labelAfterMessage?.trim()).toBeTruthy();
+    expect(labelAfterMessage?.trim()).not.toBe(initialLabel);
+    // Verify special characters (\r, \n, \t) are stripped
+    expect(labelAfterMessage?.trim()).not.toContain('\n');
+    expect(labelAfterMessage?.trim()).not.toContain('\r');
+    expect(labelAfterMessage?.trim()).not.toContain('\t');
+    // Verify the label contains the message content (truncated to 50 chars max)
+    expect(labelAfterMessage?.trim()).toContain('Hello, this is a test message!');
+  });
 });

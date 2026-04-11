@@ -100,7 +100,7 @@ export const ChannelTypesSchema = z.object({
    */
   'chat': z.object({
     client: z.object({
-      'message': z.object({ content: z.string() }),
+      'message': z.object({ content: z.string(), sessionId: z.string() }),
       'typing': z.object({ isTyping: z.boolean() }),
     }),
     server: z.object({

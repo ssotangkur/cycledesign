@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
 import { useCallback, useState, useEffect } from 'react';
 import { trpc } from '../utils/trpc';
+import { formatSessionLabel } from '../utils/formatSessionLabel';
 
 const STORAGE_KEY = 'cycledesign:currentSessionId';
 
@@ -88,7 +89,7 @@ export function useSessions() {
   const sessionLabelsMap = useMemo(() => {
     const map: Record<string, string> = {};
     sessions.forEach((session) => {
-      map[session.id] = session.firstMessage || session.id.slice(-8);
+      map[session.id] = formatSessionLabel(session.firstMessage, session.id);
     });
     return map;
   }, [sessions]);
