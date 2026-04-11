@@ -4,7 +4,8 @@
   "ignore": [
     "**/ecosystem.config.js",
     "**/scripts/tee.js",
-    "**/eslint.config.js"
+    "**/eslint.config.js",
+    ".qwen/skills/chat-log-parser/scripts/parse-chat-log.ts"
   ],
   "ignoreDependencies": [
     "zod",
