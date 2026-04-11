@@ -51,7 +51,7 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
 
       setMessages(payload.messages.map((msg: ChatMessage) => ({
         ...msg,
-        role: 'assistant' as const,  // Messages from history are from assistant
+        role: (msg.userId === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
         status: 'completed' as const,
       })));
     });
