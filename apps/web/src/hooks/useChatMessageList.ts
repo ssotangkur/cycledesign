@@ -47,8 +47,9 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
       // Merge: keep optimistic pending rows that the server history can't
       // know about yet instead of wiping them.
       setMessages(prev => [
-        ...payload.messages.map((msg) => ({
+        ...payload.messages.map((msg: ChatMessage) => ({
           ...msg,
+          role: (msg.userId === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
           status: 'completed' as const,
         })),
         ...prev.filter((m) => m.status === 'pending'),
