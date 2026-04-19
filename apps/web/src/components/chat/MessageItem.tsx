@@ -6,7 +6,7 @@ interface MessageItemProps {
 }
 
 function MessageItem({ message }: MessageItemProps) {
-  const isUser = message.userId === 'user' || message.userId === 'current-user';
+  const isUser = message.userId === 'user';
 
   return (
     <Box
