@@ -8,6 +8,7 @@ import { SYSTEM_PROMPT } from '../../llm/system-prompt.js';
 import { executeToolCalls } from '../../llm/tool-executor.js';
 import { allTools } from '../../llm/tools/tools.js';
 import { getLLMProvider } from '../../llm/providers/provider-factory.js';
+import { ModelMessage } from 'ai';
 
 /**
  * MessageHandler - Handles LLM streaming and tool execution for chat messages
@@ -147,15 +148,17 @@ export class MessageHandler {
       const messages = await getMessages(sessionId);
       console.log('[MessageHandler] Retrieved', messages.length, 'messages from storage');
 
-      // Build messages array for LLM
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let currentMessages: any[] = [
-        { role: 'system', content: [{ type: 'text', text: SYSTEM_PROMPT }] },
-        ...messages.map(msg => ({
-          role: msg.role as 'user' | 'assistant',
-          content: [{ type: 'text', text: msg.content || '' }],
-        })),
-      ];
+       // Build messages array for LLM
+       let currentMessages: ModelMessage[] = [
+         { 
+           role: 'system', 
+           content: SYSTEM_PROMPT 
+         },
+         ...messages.map(msg => ({
+           role: msg.role as 'user' | 'assistant',
+           content: msg.content || '',
+         })),
+       ];
 
       console.log('[MessageHandler] Built currentMessages array with', currentMessages.length, 'items');
 
@@ -241,28 +244,15 @@ export class MessageHandler {
           await executeToolCalls(toolCallArray, userMessageId);
           console.log('[MessageHandler] All tool calls completed');
 
-          // Build new messages for next turn
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const newMessages: any[] = [];
+           // Build new messages for next turn
+           const newMessages: ModelMessage[] = [];
 
-          if (fullResponseContent.trim()) {
-            newMessages.push({ role: 'assistant', content: [{ type: 'text', text: fullResponseContent }] });
-          }
+           if (fullResponseContent.trim()) {
+             newMessages.push({ role: 'assistant', content: fullResponseContent });
+           }
 
-          for (let i = 0; i < toolCalls.length; i++) {
-            const tc = toolCalls[i] as { toolCallId?: string; id?: string; toolName?: string; name?: string };
-            const toolCallId = tc.toolCallId ?? tc.id ?? `tool-${i}`;
-            const toolName = tc.toolName ?? tc.name ?? 'unknown';
-            newMessages.push({
-              role: 'tool' as const,
-              content: [{
-                type: 'tool-result',
-                toolCallId,
-                toolName,
-                output: { success: true, output: 'Tool executed' },
-              }],
-            });
-          }
+           // Note: Tool messages are handled by the AI SDK automatically
+           // The SDK will generate appropriate tool messages based on the tool calls
 
           currentMessages = [...currentMessages, ...newMessages];
           console.log('[MessageHandler] Added', newMessages.length, 'messages for next turn');
