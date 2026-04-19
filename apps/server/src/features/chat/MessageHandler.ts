@@ -97,13 +97,17 @@ export class MessageHandler {
           // Generate message IDs
           const serverMsgId = generateMessageId();
 
-          // Save user message to storage
-          const userMsg: StoredMessage = {
-            id: serverMsgId,
-            role: 'user',
-            content: payload.content,
-            timestamp: Date.now(),
-          };
+           // Save user message to storage
+           const userMsg: StoredMessage = {
+             id: serverMsgId,
+             role: 'user',
+             content: payload.content,
+             timestamp: Date.now(),
+             modelMessage: {
+               role: 'user',
+               content: payload.content
+             }
+           };
 
           await addMessage(sessionId, userMsg);
           console.log('[MessageHandler] User message saved to session:', sessionId);
@@ -149,15 +153,13 @@ export class MessageHandler {
       console.log('[MessageHandler] Retrieved', messages.length, 'messages from storage');
 
        // Build messages array for LLM
+       // Use stored modelMessages directly, avoiding repeated conversion
        let currentMessages: ModelMessage[] = [
          { 
            role: 'system', 
            content: SYSTEM_PROMPT 
          },
-         ...messages.map(msg => ({
-           role: msg.role as 'user' | 'assistant',
-           content: msg.content || '',
-         })),
+         ...messages.map(msg => msg.modelMessage),
        ];
 
       console.log('[MessageHandler] Built currentMessages array with', currentMessages.length, 'items');
@@ -261,13 +263,17 @@ export class MessageHandler {
           console.log('[MessageHandler] No tool calls detected');
           hasMoreToolCalls = false;
 
-          // Save assistant message to storage
-          const assistantMsg: StoredMessage = {
-            id: generateMessageId(),
-            role: 'assistant',
-            content: hasToolCalls ? '[Design generated]' : fullResponseContent,
-            timestamp: Date.now(),
-          };
+           // Save assistant message to storage
+           const assistantMsg: StoredMessage = {
+             id: generateMessageId(),
+             role: 'assistant',
+             content: hasToolCalls ? '[Design generated]' : fullResponseContent,
+             timestamp: Date.now(),
+             modelMessage: {
+               role: 'assistant',
+               content: hasToolCalls ? '[Design generated]' : fullResponseContent
+             }
+           };
 
           await addMessage(sessionId, assistantMsg);
           console.log('[MessageHandler] Assistant message saved to session:', sessionId);

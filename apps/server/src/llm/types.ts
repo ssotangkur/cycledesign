@@ -5,6 +5,10 @@ export interface StoredMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;
   timestamp: number;
+  
+  // The ModelMessage representation of this message for direct use with LLM
+  // This avoids repeated conversion when sending messages to the LLM
+  modelMessage: ModelMessage;
 
   toolCalls?: Array<{
     id: string;
