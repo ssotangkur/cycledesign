@@ -127,3 +127,9 @@ npx playwright screenshot http://localhost:3000 tmp/page-screenshot.png
 - **Backend**: Express, Vercel AI SDK, Qwen OAuth
 - **LLM**: Qwen coder-model via OAuth Device Flow
 - **Testing**: Chrome DevTools MCP
+
+---
+
+## Deployment
+
+- Frontend (`apps/web`) and backend (`apps/server`) ship together from this repo; no client versioning or migration shims needed.
