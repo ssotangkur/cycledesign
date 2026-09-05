@@ -3,9 +3,10 @@ import { ModelMessage, ToolSet } from 'ai';
 export interface StoredMessage {
   id: string;
   timestamp: number;
-  
-  // The ModelMessage representation of this message for direct use with LLM
-  // This avoids repeated conversion when sending messages to the LLM
+
+  // The ModelMessage representation of this message for direct use with LLM.
+  // This avoids repeated conversion when sending messages to the LLM.
+  // Role and text content live inside `modelMessage` — use the helpers below.
   modelMessage: ModelMessage;
 
   // The ModelMessage representation of this message for direct use with LLM.
