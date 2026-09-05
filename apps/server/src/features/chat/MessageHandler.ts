@@ -3,7 +3,7 @@
 import type { ServerChannel, ChannelTypes } from '@cycledesign/common-protocol';
 import { statusBroadcaster } from '../status/StatusBroadcaster.js';
 import { getMessages, addMessage, generateMessageId } from '../../sessions/storage.js';
-import { StoredMessage } from '../../llm/types.js';
+import { StoredMessage, getStoredMessageRole, toModelMessage } from '../../llm/types.js';
 import { SYSTEM_PROMPT } from '../../llm/system-prompt.js';
 import { executeToolCalls } from '../../llm/tool-executor.js';
 import { allTools } from '../../llm/tools/tools.js';
@@ -94,20 +94,34 @@ export class MessageHandler {
           // In a multi-session setup, this would come from the channel metadata
           const sessionId = 'default';
 
+          // Ensure system message exists once per session (storage-checked,
+          // so server restarts don't duplicate it)
+          const existingMessages = await getMessages(sessionId);
+          if (!existingMessages.some((m) => getStoredMessageRole(m) === 'system')) {
+            const systemMsg: StoredMessage = {
+              id: generateMessageId(),
+              timestamp: Date.now(),
+              modelMessage: {
+                role: 'system',
+                content: SYSTEM_PROMPT
+              }
+            };
+            await addMessage(sessionId, systemMsg);
+            console.log('[MessageHandler] System message saved to session:', sessionId);
+          }
+
           // Generate message IDs
           const serverMsgId = generateMessageId();
 
-           // Save user message to storage
-           const userMsg: StoredMessage = {
-             id: serverMsgId,
-             role: 'user',
-             content: payload.content,
-             timestamp: Date.now(),
-             modelMessage: {
-               role: 'user',
-               content: payload.content
-             }
-           };
+          // Save user message to storage
+          const userMsg: StoredMessage = {
+            id: serverMsgId,
+            timestamp: Date.now(),
+            modelMessage: {
+              role: 'user',
+              content: payload.content
+            }
+          };
 
           await addMessage(sessionId, userMsg);
           console.log('[MessageHandler] User message saved to session:', sessionId);
@@ -152,19 +166,26 @@ export class MessageHandler {
       const messages = await getMessages(sessionId);
       console.log('[MessageHandler] Retrieved', messages.length, 'messages from storage');
 
-       // Build messages array for LLM
-       // Use stored modelMessages directly, avoiding repeated conversion
-       let currentMessages: ModelMessage[] = [
-         { 
-           role: 'system', 
-           content: SYSTEM_PROMPT 
-         },
-         ...messages.map(msg => msg.modelMessage),
-       ];
+        // Build messages array for LLM
+        // Use stored modelMessages directly, avoiding repeated conversion.
+        // Legacy rows without modelMessage are rebuilt; unusable rows are
+        // skipped (never pass undefined into the provider).
+        let currentMessages: ModelMessage[] = [];
+        for (const msg of messages) {
+          const modelMsg = toModelMessage(msg);
+          if (modelMsg) {
+            currentMessages.push(modelMsg);
+          } else {
+            // Null-safe: a corrupt row may have no id either.
+            // Null-safe: a corrupt row may have no id either.
+            const rowId = (msg as { id?: unknown } | null | undefined)?.id;
+            console.warn('[MessageHandler] Skipping stored message with no usable content:', rowId ?? '<unknown>');
+          }
+        }
 
       console.log('[MessageHandler] Built currentMessages array with', currentMessages.length, 'items');
 
-      const hasToolCalls = false;
+      let toolCallsMade = false;
       let isFirstTurn = true;
       let hasMoreToolCalls = true;
       let loopCount = 0;
@@ -231,6 +252,7 @@ export class MessageHandler {
         }
 
         if (hasToolCalls) {
+          toolCallsMade = true;
           console.log('[MessageHandler] Detected', toolCalls.length, 'tool calls');
 
           const toolCallArray = toolCalls.map(tc => ({
@@ -265,15 +287,13 @@ export class MessageHandler {
 
            // Save assistant message to storage
            const assistantMsg: StoredMessage = {
-             id: generateMessageId(),
-             role: 'assistant',
-             content: hasToolCalls ? '[Design generated]' : fullResponseContent,
-             timestamp: Date.now(),
-             modelMessage: {
-               role: 'assistant',
-               content: hasToolCalls ? '[Design generated]' : fullResponseContent
-             }
-           };
+              id: generateMessageId(),
+              timestamp: Date.now(),
+              modelMessage: {
+                role: 'assistant',
+                content: hasToolCalls ? '[Design generated]' : fullResponseContent
+              }
+            };
 
           await addMessage(sessionId, assistantMsg);
           console.log('[MessageHandler] Assistant message saved to session:', sessionId);
@@ -289,10 +309,12 @@ export class MessageHandler {
         }
       }
 
-      // After multi-turn loop completes, trigger validation if tool calls were made
-      if (hasToolCalls) {
-        const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-        const autoMessageId = lastUserMsg?.id || generateMessageId();
+      // After multi-turn loop completes, trigger validation if tool calls were made.
+      // The just-handled user message is the validation target — use its id
+      // directly instead of re-deriving it from the pre-loop snapshot, which
+      // can be stale under concurrency or contain skipped corrupt rows.
+      if (toolCallsMade) {
+        const autoMessageId = userMessageId;
 
         // Trigger validation pipeline
         try {

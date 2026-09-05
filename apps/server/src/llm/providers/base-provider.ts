@@ -100,10 +100,10 @@ export abstract class BaseProvider implements IProvider {
     messages: ModelMessage[],
     options?: { tools?: ToolSet; stream?: boolean }
   ): Promise<LLMResponse> {
-     const agent = await this.getAgent({ tools: options?.tools });
+    const agent = await this.getAgent({ tools: options?.tools });
 
-     if (options?.stream) {
-       const result = await agent.stream({ messages });
+    if (options?.stream) {
+      const result = await agent.stream({ messages });
       const toolCalls = await result.toolCalls;
       return {
         stream: result.textStream,
@@ -116,8 +116,8 @@ export abstract class BaseProvider implements IProvider {
           }))
           : [],
       };
-     } else {
-       const result = await agent.generate({ messages });
+    } else {
+      const result = await agent.generate({ messages });
       return {
         content: result.text,
         toolCalls: result.toolCalls

@@ -6,6 +6,18 @@ import { z } from 'zod';
  */
 
 /**
+ * User ID schema - single source of truth for message sender identity.
+ * Reused by ChatMessage and every chat channel event so client and server
+ * validators can never disagree about valid values.
+ */
+export const UserIdSchema = z.union([z.literal('user'), z.literal('assistant')]);
+
+/**
+ * User ID type - inferred from schema
+ */
+export type UserId = z.infer<typeof UserIdSchema>;
+
+/**
  * Chat message schema - represents a single chat message
  * Used by the chat channel for message history and broadcasting
  */
@@ -23,9 +35,8 @@ const ChatMessageSchema = z.object({
 
   /**
    * User ID who sent the message
-   * Valid values: 'user' for user messages, 'assistant' for assistant messages
    */
-  userId: z.union([z.literal('user'), z.literal('assistant')]),
+  userId: UserIdSchema,
 
   /**
    * Unix timestamp in milliseconds
@@ -115,8 +126,10 @@ export const ChannelTypesSchema = z.object({
       'typing': z.object({ isTyping: z.boolean() }),
     }),
     server: z.object({
-      'message': z.object({ content: z.string(), userId: z.string(), timestamp: z.number() }),
+      'message': z.object({ content: z.string(), userId: UserIdSchema, timestamp: z.number() }),
       'history': z.object({ messages: z.array(ChatMessageAsType) }),
+      // user-joined carries a real user identity (channel id, uuid, …),
+      // not a message role — so it stays a plain string.
       'user-joined': z.object({ userId: z.string(), name: z.string() }),
     }),
   }),

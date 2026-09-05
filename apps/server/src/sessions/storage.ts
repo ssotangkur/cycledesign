@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
-import { StoredMessage } from '../llm/types.js';
+import { StoredMessage, getStoredMessageRole, getStoredMessageText } from '../llm/types.js';
 
 const SESSIONS_DIR = join(process.cwd(), '.cycledesign', 'sessions');
 
@@ -23,6 +23,16 @@ export function generateSessionId(): string {
 
 export function generateMessageId(): string {
   return `msg-${uuidv4()}`;
+}
+
+/**
+ * True only for missing files (fresh sessions). Other FS errors (EACCES,
+ * EBADF, …) are rethrown so they surface instead of masquerading as an
+ * empty session.
+ */
+function isEnoent(error: unknown): boolean {
+  return !!error && typeof error === 'object' && 'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT';
 }
 
 async function ensureSessionsDir(): Promise<void> {
@@ -55,27 +65,36 @@ export async function createSession(name?: string): Promise<SessionMeta> {
 }
 
 async function getFirstUserMessage(sessionId: string): Promise<string | null> {
+  let data: string;
   try {
     const sessionDir = join(SESSIONS_DIR, sessionId);
     const messagesPath = join(sessionDir, 'messages.jsonl');
-    const data = await fs.readFile(messagesPath, 'utf-8');
+    data = await fs.readFile(messagesPath, 'utf-8');
+  } catch (error) {
+    if (isEnoent(error)) return null;
+    throw error;
+  }
     
-    if (!data.trim()) {
-      return null;
-    }
-    
-    const lines = data.trim().split('\n');
-    for (const line of lines) {
-      const message = JSON.parse(line) as StoredMessage;
-      if (message.role === 'user' && message.content) {
-        return message.content;
-      }
-    }
-    
-    return null;
-  } catch {
+  if (!data.trim()) {
     return null;
   }
+
+  const lines = data.trim().split('\n');
+  for (const line of lines) {
+    let message: StoredMessage;
+    try {
+      message = JSON.parse(line) as StoredMessage;
+    } catch {
+      console.warn(`[storage] Skipping corrupt line in session ${sessionId}: ${line.slice(0, 80)}`);
+      continue;
+    }
+    if (getStoredMessageRole(message) === 'user') {
+      const text = getStoredMessageText(message);
+      if (text) return text;
+    }
+  }
+
+  return null;
 }
 
 export async function getSession(id: string): Promise<SessionMeta | null> {
@@ -84,9 +103,16 @@ export async function getSession(id: string): Promise<SessionMeta | null> {
     const metaPath = join(sessionDir, 'meta.json');
     const data = await fs.readFile(metaPath, 'utf-8');
     const meta = JSON.parse(data) as SessionMeta;
-    
-    meta.firstMessage = await getFirstUserMessage(id);
-    
+
+    // A broken messages.jsonl must not sink the whole session entry:
+    // degrade to a null preview instead of dropping the session from the list.
+    try {
+      meta.firstMessage = await getFirstUserMessage(id);
+    } catch (error) {
+      console.warn(`[storage] Could not read messages for session ${id}:`, (error as Error).message);
+      meta.firstMessage = null;
+    }
+
     return meta;
   } catch {
     return null;
@@ -150,19 +176,39 @@ export async function addMessage(sessionId: string, message: StoredMessage): Pro
 }
 
 export async function getMessages(sessionId: string): Promise<StoredMessage[]> {
+  let data: string;
   try {
     const sessionDir = join(SESSIONS_DIR, sessionId);
     const messagesPath = join(sessionDir, 'messages.jsonl');
-    const data = await fs.readFile(messagesPath, 'utf-8');
-    
-    if (!data.trim()) {
-      return [];
-    }
-    
-    return data.trim().split('\n').map(line => JSON.parse(line) as StoredMessage);
-  } catch {
+    data = await fs.readFile(messagesPath, 'utf-8');
+  } catch (error) {
+    if (isEnoent(error)) return [];
+    throw error;
+  }
+
+  if (!data.trim()) {
     return [];
   }
+    
+  const messages: StoredMessage[] = [];
+  for (const line of data.trim().split('\n')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      console.warn(`[storage] Skipping corrupt line in session ${sessionId}: ${line.slice(0, 80)}`);
+      continue;
+    }
+    // JSON.parse succeeds for valid-JSON wrong-shape rows (null, 42, "hi").
+    // They violate StoredMessage, so skip them here instead of crashing
+    // consumers (msg.id access, role reads) downstream.
+    if (!parsed || typeof parsed !== 'object') {
+      console.warn(`[storage] Skipping non-object row in session ${sessionId}: ${line.slice(0, 80)}`);
+      continue;
+    }
+    messages.push(parsed as StoredMessage);
+  }
+  return messages;
 }
 
 export async function deleteMessage(sessionId: string, messageId: string): Promise<boolean> {

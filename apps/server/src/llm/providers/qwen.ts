@@ -48,8 +48,11 @@ export class QwenProvider extends BaseProvider {
   protected async getAgentAsync(options?: { tools?: ToolSet; systemText?: string }): Promise<ToolLoopAgent> {
     // If tools are provided, create a new scoped agent (not cached)
     if (options?.tools) {
+      // getModel() assigns this.qwenProvider (and handles auth); without it
+      // a cold start takes this branch with a null provider and crashes.
+      const model = await this.getModel();
       return new ToolLoopAgent({
-        model: this.qwenProvider!('qwen-coder-model'),
+        model,
         instructions: options.systemText,
         tools: options.tools,
         stopWhen: stepCountIs(10),

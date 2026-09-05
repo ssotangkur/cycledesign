@@ -44,10 +44,16 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
       historyReceived = true;
       console.log('[useChatMessageList] Received history:', payload.messages.length, 'messages');
 
-      setMessages(payload.messages.map((msg) => ({
-        ...msg,
-        status: 'completed' as const,
-      })));
+      // Merge: keep optimistic pending rows that the server history can't
+      // know about yet instead of wiping them.
+      setMessages(prev => [
+        ...payload.messages.map((msg) => ({
+          ...msg,
+          status: 'completed' as const,
+        })),
+        ...prev.filter((m) => m.status === 'pending'),
+      ]);
+      setIsStreaming(false);
     });
 
     // Subscribe to new messages
@@ -107,6 +113,7 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
     // Add to pending messages
     pendingMessages.current.set(clientMsgId, tempMessage);
     setMessages(prev => [...prev, tempMessage]);
+    setIsStreaming(true);
 
     // Publish to channel
     chatChannel.publish('message', { content });
