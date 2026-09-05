@@ -100,22 +100,10 @@ export abstract class BaseProvider implements IProvider {
     messages: ModelMessage[],
     options?: { tools?: ToolSet; stream?: boolean }
   ): Promise<LLMResponse> {
-    // Extract system message if present
-    const systemMessage = messages.find(m => m.role === 'system') as
-      { role: 'system', content: string | Array<{ type: 'text', text: string }> } | undefined;
-    const userMessages = messages.filter(m => m.role !== 'system');
-
-    // Extract text from system message content (handle both string and array formats)
-    const systemText = typeof systemMessage?.content === 'string'
-      ? systemMessage.content
-      : Array.isArray(systemMessage?.content)
-        ? systemMessage.content.map(c => c.text).join('')
-        : undefined;
-
-    const agent = await this.getAgent({ tools: options?.tools, systemText });
+    const agent = await this.getAgent({ tools: options?.tools });
 
     if (options?.stream) {
-      const result = await agent.stream({ messages: userMessages });
+      const result = await agent.stream({ messages });
       const toolCalls = await result.toolCalls;
       return {
         stream: result.textStream,
@@ -129,7 +117,7 @@ export abstract class BaseProvider implements IProvider {
           : [],
       };
     } else {
-      const result = await agent.generate({ messages: userMessages });
+      const result = await agent.generate({ messages });
       return {
         content: result.text,
         toolCalls: result.toolCalls

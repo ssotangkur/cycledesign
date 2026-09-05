@@ -1,13 +1,14 @@
 // apps/server/src/features/chat/MessageHandler.ts
 
-import type { ServerChannel, ChannelTypes } from '@cycledesign/common-protocol';
+import type { ServerChannel, ChannelTypes, UserId } from '@cycledesign/common-protocol';
 import { statusBroadcaster } from '../status/StatusBroadcaster.js';
 import { getMessages, addMessage, generateMessageId } from '../../sessions/storage.js';
-import { StoredMessage } from '../../llm/types.js';
+import { StoredMessage, getStoredMessageRole, toModelMessage } from '../../llm/types.js';
 import { SYSTEM_PROMPT } from '../../llm/system-prompt.js';
 import { executeToolCalls } from '../../llm/tool-executor.js';
 import { allTools } from '../../llm/tools/tools.js';
 import { getLLMProvider } from '../../llm/providers/provider-factory.js';
+import { ModelMessage } from 'ai';
 
 /**
  * MessageHandler - Handles LLM streaming and tool execution for chat messages
@@ -17,20 +18,20 @@ import { getLLMProvider } from '../../llm/providers/provider-factory.js';
  * status updates.
  */
 export class MessageHandler {
-  private messageHandlers = new Set<(msg: { id: string; content: string; userId: string; timestamp: number }) => void>();
-  private messages: Array<{ id: string; content: string; userId: string; timestamp: number }> = [];
+  private messageHandlers = new Set<(msg: { id: string; content: string; userId: UserId; timestamp: number }) => void>();
+  private messages: Array<{ id: string; content: string; userId: UserId; timestamp: number }> = [];
 
   /**
    * Get all messages (for history)
    */
-  getHistory(): Array<{ id: string; content: string; userId: string; timestamp: number }> {
+  getHistory(): Array<{ id: string; content: string; userId: UserId; timestamp: number }> {
     return [...this.messages];
   }
 
   /**
    * Subscribe to new messages
    */
-  onMessage(handler: (msg: { id: string; content: string; userId: string; timestamp: number }) => void): () => void {
+  onMessage(handler: (msg: { id: string; content: string; userId: UserId; timestamp: number }) => void): () => void {
     this.messageHandlers.add(handler);
     return () => this.messageHandlers.delete(handler);
   }
@@ -38,7 +39,7 @@ export class MessageHandler {
   /**
    * Add a message to internal memory and notify subscribers
    */
-  private addMessageToMemory(content: string, userId: string): void {
+  private addMessageToMemory(content: string, userId: UserId): void {
     const message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       content,
@@ -52,7 +53,7 @@ export class MessageHandler {
   /**
    * Add a message and notify subscribers
    */
-  private addMessage(content: string, userId: string): void {
+  private addMessage(content: string, userId: UserId): void {
     const message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       content,
@@ -99,15 +100,33 @@ export class MessageHandler {
             return;
           }
 
+          // Ensure system message exists once per session (storage-checked,
+          // so server restarts don't duplicate it)
+          const existingMessages = await getMessages(sessionId);
+          if (!existingMessages.some((m) => getStoredMessageRole(m) === 'system')) {
+            const systemMsg: StoredMessage = {
+              id: generateMessageId(),
+              timestamp: Date.now(),
+              modelMessage: {
+                role: 'system',
+                content: SYSTEM_PROMPT
+              }
+            };
+            await addMessage(sessionId, systemMsg);
+            console.log('[MessageHandler] System message saved to session:', sessionId);
+          }
+
           // Generate message IDs
           const serverMsgId = generateMessageId();
 
           // Save user message to storage
           const userMsg: StoredMessage = {
             id: serverMsgId,
-            role: 'user',
-            content: payload.content,
             timestamp: Date.now(),
+            modelMessage: {
+              role: 'user',
+              content: payload.content
+            }
           };
 
           await addMessage(sessionId, userMsg);
@@ -153,19 +172,26 @@ export class MessageHandler {
       const messages = await getMessages(sessionId);
       console.log('[MessageHandler] Retrieved', messages.length, 'messages from storage');
 
-      // Build messages array for LLM
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let currentMessages: any[] = [
-        { role: 'system', content: [{ type: 'text', text: SYSTEM_PROMPT }] },
-        ...messages.map(msg => ({
-          role: msg.role as 'user' | 'assistant',
-          content: [{ type: 'text', text: msg.content || '' }],
-        })),
-      ];
+        // Build messages array for LLM
+        // Use stored modelMessages directly, avoiding repeated conversion.
+        // Legacy rows without modelMessage are rebuilt; unusable rows are
+        // skipped (never pass undefined into the provider).
+        let currentMessages: ModelMessage[] = [];
+        for (const msg of messages) {
+          const modelMsg = toModelMessage(msg);
+          if (modelMsg) {
+            currentMessages.push(modelMsg);
+          } else {
+            // Null-safe: a corrupt row may have no id either.
+            // Null-safe: a corrupt row may have no id either.
+            const rowId = (msg as { id?: unknown } | null | undefined)?.id;
+            console.warn('[MessageHandler] Skipping stored message with no usable content:', rowId ?? '<unknown>');
+          }
+        }
 
       console.log('[MessageHandler] Built currentMessages array with', currentMessages.length, 'items');
 
-      const hasToolCalls = false;
+      let toolCallsMade = false;
       let isFirstTurn = true;
       let hasMoreToolCalls = true;
       let loopCount = 0;
@@ -232,6 +258,7 @@ export class MessageHandler {
         }
 
         if (hasToolCalls) {
+          toolCallsMade = true;
           console.log('[MessageHandler] Detected', toolCalls.length, 'tool calls');
 
           const toolCallArray = toolCalls.map(tc => ({
@@ -247,28 +274,15 @@ export class MessageHandler {
           await executeToolCalls(toolCallArray, userMessageId);
           console.log('[MessageHandler] All tool calls completed');
 
-          // Build new messages for next turn
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const newMessages: any[] = [];
+           // Build new messages for next turn
+           const newMessages: ModelMessage[] = [];
 
-          if (fullResponseContent.trim()) {
-            newMessages.push({ role: 'assistant', content: [{ type: 'text', text: fullResponseContent }] });
-          }
+           if (fullResponseContent.trim()) {
+             newMessages.push({ role: 'assistant', content: fullResponseContent });
+           }
 
-          for (let i = 0; i < toolCalls.length; i++) {
-            const tc = toolCalls[i] as { toolCallId?: string; id?: string; toolName?: string; name?: string };
-            const toolCallId = tc.toolCallId ?? tc.id ?? `tool-${i}`;
-            const toolName = tc.toolName ?? tc.name ?? 'unknown';
-            newMessages.push({
-              role: 'tool' as const,
-              content: [{
-                type: 'tool-result',
-                toolCallId,
-                toolName,
-                output: { success: true, output: 'Tool executed' },
-              }],
-            });
-          }
+           // Note: Tool messages are handled by the AI SDK automatically
+           // The SDK will generate appropriate tool messages based on the tool calls
 
           currentMessages = [...currentMessages, ...newMessages];
           console.log('[MessageHandler] Added', newMessages.length, 'messages for next turn');
@@ -277,13 +291,15 @@ export class MessageHandler {
           console.log('[MessageHandler] No tool calls detected');
           hasMoreToolCalls = false;
 
-          // Save assistant message to storage
-          const assistantMsg: StoredMessage = {
-            id: generateMessageId(),
-            role: 'assistant',
-            content: hasToolCalls ? '[Design generated]' : fullResponseContent,
-            timestamp: Date.now(),
-          };
+           // Save assistant message to storage
+           const assistantMsg: StoredMessage = {
+              id: generateMessageId(),
+              timestamp: Date.now(),
+              modelMessage: {
+                role: 'assistant',
+                content: hasToolCalls ? '[Design generated]' : fullResponseContent
+              }
+            };
 
           await addMessage(sessionId, assistantMsg);
           console.log('[MessageHandler] Assistant message saved to session:', sessionId);
@@ -299,10 +315,12 @@ export class MessageHandler {
         }
       }
 
-      // After multi-turn loop completes, trigger validation if tool calls were made
-      if (hasToolCalls) {
-        const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-        const autoMessageId = lastUserMsg?.id || generateMessageId();
+      // After multi-turn loop completes, trigger validation if tool calls were made.
+      // The just-handled user message is the validation target — use its id
+      // directly instead of re-deriving it from the pre-loop snapshot, which
+      // can be stale under concurrency or contain skipped corrupt rows.
+      if (toolCallsMade) {
+        const autoMessageId = userMessageId;
 
         // Trigger validation pipeline
         try {

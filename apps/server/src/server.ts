@@ -127,16 +127,34 @@ export { protocolServer };
 function gracefulShutdown(signal: string) {
   console.log(`\nReceived ${signal}. Shutting down gracefully...`);
 
-  server.close(() => {
-    console.log('HTTP server closed');
-    process.exit(0);
-  });
-
-  // Force close after 10 seconds
-  setTimeout(() => {
+  // Close the protocol layer (unsubscribes channels, closes WS server) and
+  // stop the spawned preview child first, so server.close() isn't held open
+  // by lingering connections and the vite child isn't orphaned on port 3002.
+  // Sequenced: process.exit only runs after the closes settle (or timeout).
+  const forceExit = setTimeout(() => {
     console.error('Forcing shutdown after timeout');
     process.exit(1);
   }, 10000);
+
+  void (async () => {
+    try {
+      await protocolServer.close();
+      console.log('Protocol server closed');
+    } catch (error) {
+      console.error('Error closing protocol server:', (error as Error).message);
+    }
+    try {
+      await previewManager.stop();
+      console.log('Preview server stopped');
+    } catch (error) {
+      console.error('Error stopping preview server:', (error as Error).message);
+    }
+    server.close(() => {
+      console.log('HTTP server closed');
+      clearTimeout(forceExit);
+      process.exit(0);
+    });
+  })();
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
