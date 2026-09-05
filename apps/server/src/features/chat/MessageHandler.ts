@@ -92,6 +92,13 @@ export class MessageHandler {
           // Use sessionId from the payload (sent by frontend)
           const sessionId = payload.sessionId;
 
+          // Reject missing or path-traversal sessionIds before touching storage
+          // (storage joins sessionId onto the sessions directory)
+          if (!sessionId || sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+            console.error('[MessageHandler] Rejected message with invalid sessionId:', JSON.stringify(sessionId));
+            return;
+          }
+
           // Generate message IDs
           const serverMsgId = generateMessageId();
 

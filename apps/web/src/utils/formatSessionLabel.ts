@@ -2,9 +2,9 @@
  * Format a session label from the first message content or session ID.
  *
  * - If firstMessage is null/empty, returns last 8 characters of sessionId
- * - Strips special characters (\r, \n, \t)
+ * - Replaces runs of special characters (\r, \n, \t) with a single space
  * - Trims whitespace
- * - Truncates to 50 characters max with "..." ellipsis if truncated
+ * - Truncates to 50 characters plus "..." ellipsis if truncated
  */
 export function formatSessionLabel(firstMessage: string | null, sessionId: string): string {
   // Fallback to session ID if no message
@@ -12,8 +12,8 @@ export function formatSessionLabel(firstMessage: string | null, sessionId: strin
     return sessionId.slice(-8);
   }
 
-  // Strip special characters and trim
-  const cleaned = firstMessage.replace(/[\r\n\t]/g, '').trim();
+  // Replace special characters with a space (preserving word boundaries) and trim
+  const cleaned = firstMessage.replace(/[\r\n\t]+/g, ' ').trim();
 
   // Truncate with ellipsis if needed
   const maxLength = 50;

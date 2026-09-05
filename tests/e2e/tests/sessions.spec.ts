@@ -336,9 +336,11 @@ test.describe('Session Management', () => {
     // Store the initial label to verify it changes
     const initialLabel = labelBeforeMessage?.trim();
 
-    // Define a test message with some special characters to verify they get stripped
+    // Define a test message with some special characters to verify they get replaced
+    // Note: runs of \n and \t become a single space (word boundaries preserved),
+    // matching formatSessionLabel in apps/web/src/utils/formatSessionLabel.ts
     const testMessage = 'Hello, this is a test message!\nWith special\tcharacters.';
-    const expectedLabel = 'Hello, this is a test message!With special characters.';
+    const expectedLabel = 'Hello, this is a test message! With special characters.';
 
     // Verify the initial label is different from what we expect after sending the message
     // This ensures we're starting from a clean state (session ID or short label, not a previous message)
