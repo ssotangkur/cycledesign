@@ -116,7 +116,7 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
     setIsStreaming(true);
 
     // Publish to channel
-    chatChannel.publish('message', { content });
+    chatChannel.publish('message', { content, sessionId });
   }, [sessionId, chatChannel]);
 
   const clearError = useCallback(() => {

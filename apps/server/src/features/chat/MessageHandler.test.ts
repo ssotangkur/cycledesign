@@ -59,10 +59,14 @@ vi.mock('../status/StatusBroadcaster.js', () => ({
 }));
 
 import { MessageHandler } from './MessageHandler.js';
+import { addMessage } from '../../sessions/storage.js';
 
 function fakeChannel(): ServerChannel<ChannelTypes['chat']> {
   return { id: 'channel-1', send: vi.fn() } as unknown as ServerChannel<ChannelTypes['chat']>;
 }
+
+// The chat protocol requires sessionId on every message payload (issue #49).
+const TEST_SESSION_ID = 'session-test-1';
 
 beforeEach(() => {
   state.store.length = 0;
@@ -76,8 +80,8 @@ describe('MessageHandler system message handling', () => {
   it('should store the system message only once across multiple user messages', async () => {
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
 
-    await handler.message({ content: 'first' });
-    await handler.message({ content: 'second' });
+    await handler.message({ content: 'first', sessionId: TEST_SESSION_ID });
+    await handler.message({ content: 'second', sessionId: TEST_SESSION_ID });
 
     const systemMsgs = state.store.filter((m) => m.modelMessage.role === 'system');
     expect(systemMsgs).toHaveLength(1);
@@ -94,14 +98,14 @@ describe('MessageHandler system message handling', () => {
     });
 
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'hello' });
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     expect(state.store.filter((m) => m.modelMessage.role === 'system')).toHaveLength(1);
   });
 
   it('should send the stored system message first to the LLM', async () => {
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'hello' });
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     expect(state.completeCalls).toHaveLength(1);
     expect(state.completeCalls[0][0].role).toBe('system');
@@ -110,7 +114,7 @@ describe('MessageHandler system message handling', () => {
 
   it('should store messages without duplicated top-level role/content', async () => {
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'hello' });
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     expect(state.store.length).toBeGreaterThan(0);
     for (const msg of state.store) {
@@ -129,7 +133,7 @@ describe('MessageHandler system message handling', () => {
     } as unknown as StoredMessage);
 
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'hello' });
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     expect(state.completeCalls).toHaveLength(1);
     expect(state.completeCalls[0]).toContainEqual({ role: 'user', content: 'legacy hi' });
@@ -139,7 +143,7 @@ describe('MessageHandler system message handling', () => {
     state.store.push({ id: 'msg-corrupt', timestamp: Date.now() } as unknown as StoredMessage);
 
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'hello' });
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     expect(state.completeCalls).toHaveLength(1);
     for (const m of state.completeCalls[0]) {
@@ -152,7 +156,7 @@ describe('MessageHandler system message handling', () => {
     state.store.push(42 as unknown as StoredMessage);
 
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'hello' });
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     // No crash (including in the skip-warn logging path), and only valid
     // messages reach the LLM.
@@ -168,7 +172,7 @@ describe('MessageHandler system message handling', () => {
     } as unknown as StoredMessage);
 
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'hello' });
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     expect(state.completeCalls).toHaveLength(1);
     expect(state.completeCalls[0]).toHaveLength(2); // system + new user only
@@ -183,7 +187,7 @@ describe('MessageHandler validation trigger', () => {
     state.toolCallQueue.push([{ id: 'tc-1', name: 'create-file', args: { path: 'a.txt' } }]);
 
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'make a file' });
+    await handler.message({ content: 'make a file', sessionId: TEST_SESSION_ID });
 
     // msg-test-1 is the system message, msg-test-2 the just-handled user message
     expect(state.validateCalls).toEqual(['msg-test-2']);
@@ -191,8 +195,32 @@ describe('MessageHandler validation trigger', () => {
 
   it('should not trigger validation when no tool calls are made', async () => {
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
-    await handler.message({ content: 'hello' });
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     expect(state.validateCalls).toHaveLength(0);
+  });
+});
+
+describe('MessageHandler session routing (issue #49)', () => {
+  it('should save the user message to the sessionId from the payload', async () => {
+    vi.mocked(addMessage).mockClear();
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'Hello, routing test', sessionId: 'session-abc123' });
+
+    expect(addMessage).toHaveBeenCalledWith(
+      'session-abc123',
+      expect.objectContaining({ modelMessage: { role: 'user', content: 'Hello, routing test' } }),
+    );
+  });
+
+  it('should reject empty and path-traversal sessionIds without writing', async () => {
+    vi.mocked(addMessage).mockClear();
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'evil', sessionId: '../../evil' });
+    await handler.message({ content: 'empty', sessionId: '' });
+
+    expect(addMessage).not.toHaveBeenCalled();
   });
 });
