@@ -1,6 +1,6 @@
 // apps/server/src/features/chat/MessageHandler.ts
 
-import type { ServerChannel, ChannelTypes } from '@cycledesign/common-protocol';
+import type { ServerChannel, ChannelTypes, UserId } from '@cycledesign/common-protocol';
 import { statusBroadcaster } from '../status/StatusBroadcaster.js';
 import { getMessages, addMessage, generateMessageId } from '../../sessions/storage.js';
 import { StoredMessage, getStoredMessageRole, toModelMessage } from '../../llm/types.js';
@@ -18,20 +18,20 @@ import { ModelMessage } from 'ai';
  * status updates.
  */
 export class MessageHandler {
-  private messageHandlers = new Set<(msg: { id: string; content: string; userId: string; timestamp: number }) => void>();
-  private messages: Array<{ id: string; content: string; userId: string; timestamp: number }> = [];
+  private messageHandlers = new Set<(msg: { id: string; content: string; userId: UserId; timestamp: number }) => void>();
+  private messages: Array<{ id: string; content: string; userId: UserId; timestamp: number }> = [];
 
   /**
    * Get all messages (for history)
    */
-  getHistory(): Array<{ id: string; content: string; userId: string; timestamp: number }> {
+  getHistory(): Array<{ id: string; content: string; userId: UserId; timestamp: number }> {
     return [...this.messages];
   }
 
   /**
    * Subscribe to new messages
    */
-  onMessage(handler: (msg: { id: string; content: string; userId: string; timestamp: number }) => void): () => void {
+  onMessage(handler: (msg: { id: string; content: string; userId: UserId; timestamp: number }) => void): () => void {
     this.messageHandlers.add(handler);
     return () => this.messageHandlers.delete(handler);
   }
@@ -39,7 +39,7 @@ export class MessageHandler {
   /**
    * Add a message to internal memory and notify subscribers
    */
-  private addMessageToMemory(content: string, userId: string): void {
+  private addMessageToMemory(content: string, userId: UserId): void {
     const message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       content,
@@ -53,7 +53,7 @@ export class MessageHandler {
   /**
    * Add a message and notify subscribers
    */
-  private addMessage(content: string, userId: string): void {
+  private addMessage(content: string, userId: UserId): void {
     const message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       content,
