@@ -15,6 +15,7 @@ export type {
   ChannelSubscription,
   ServerChannel,
   ChatMessage,
+  UserId,
 } from './types.js';
 
 // Schemas (for validation)
@@ -23,6 +24,7 @@ export {
   TransportEnvelopeSchema,
   ControlMessageSchema,
   PayloadSchema,
+  UserIdSchema,
 } from './types.js';
 
 // Server

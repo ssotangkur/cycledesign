@@ -1,0 +1,198 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ServerChannel, ChannelTypes } from '@cycledesign/common-protocol';
+import type { StoredMessage } from '../../llm/types.js';
+import type { ModelMessage } from 'ai';
+
+const state = vi.hoisted(() => ({
+  store: [] as StoredMessage[],
+  completeCalls: [] as ModelMessage[][],
+  idCounter: 0,
+  toolCallQueue: [] as Array<Array<{ id: string; name: string; args: Record<string, unknown> }>>,
+  validateCalls: [] as string[],
+}));
+
+vi.mock('../../sessions/storage.js', () => ({
+  // Deliberately raw (no filtering): the real getMessages filters non-object
+  // rows, but the handler must survive them anyway if they ever arrive.
+  getMessages: vi.fn(async () => [...state.store]),
+  addMessage: vi.fn(async (_sessionId: string, msg: StoredMessage) => {
+    state.store.push(msg);
+  }),
+  generateMessageId: vi.fn(() => `msg-test-${++state.idCounter}`),
+}));
+
+vi.mock('../../llm/providers/provider-factory.js', () => ({
+  getLLMProvider: () => ({
+    complete: vi.fn(async (messages: ModelMessage[]) => {
+      state.completeCalls.push(messages);
+      async function* stream(): AsyncGenerator<string> {
+        yield 'mock reply';
+      }
+      const toolCalls = state.toolCallQueue.shift() ?? [];
+      return { stream: stream(), toolCalls };
+    }),
+  }),
+}));
+
+vi.mock('../../validation/validation-service.js', () => ({
+  ValidationService: class {
+    validateAndPreparePreview = vi.fn(async (id: string) => {
+      state.validateCalls.push(id);
+    });
+  },
+}));
+
+vi.mock('../../llm/tool-executor.js', () => ({
+  executeToolCalls: vi.fn(async () => undefined),
+}));
+
+vi.mock('../../llm/tools/tools.js', () => ({
+  allTools: {},
+}));
+
+vi.mock('../status/StatusBroadcaster.js', () => ({
+  statusBroadcaster: {
+    sendGenerationStart: vi.fn(),
+    sendGenerationComplete: vi.fn(),
+    sendPreviewError: vi.fn(),
+  },
+}));
+
+import { MessageHandler } from './MessageHandler.js';
+
+function fakeChannel(): ServerChannel<ChannelTypes['chat']> {
+  return { id: 'channel-1', send: vi.fn() } as unknown as ServerChannel<ChannelTypes['chat']>;
+}
+
+beforeEach(() => {
+  state.store.length = 0;
+  state.completeCalls.length = 0;
+  state.idCounter = 0;
+  state.toolCallQueue.length = 0;
+  state.validateCalls.length = 0;
+});
+
+describe('MessageHandler system message handling', () => {
+  it('should store the system message only once across multiple user messages', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'first' });
+    await handler.message({ content: 'second' });
+
+    const systemMsgs = state.store.filter((m) => m.modelMessage.role === 'system');
+    expect(systemMsgs).toHaveLength(1);
+
+    const userMsgs = state.store.filter((m) => m.modelMessage.role === 'user');
+    expect(userMsgs.map((m) => m.modelMessage.content)).toEqual(['first', 'second']);
+  });
+
+  it('should not duplicate a system message from a previous server run', async () => {
+    state.store.push({
+      id: 'msg-existing-sys',
+      timestamp: Date.now(),
+      modelMessage: { role: 'system', content: 'existing prompt' },
+    });
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello' });
+
+    expect(state.store.filter((m) => m.modelMessage.role === 'system')).toHaveLength(1);
+  });
+
+  it('should send the stored system message first to the LLM', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello' });
+
+    expect(state.completeCalls).toHaveLength(1);
+    expect(state.completeCalls[0][0].role).toBe('system');
+    expect(state.completeCalls[0].at(-1)).toMatchObject({ role: 'user', content: 'hello' });
+  });
+
+  it('should store messages without duplicated top-level role/content', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello' });
+
+    expect(state.store.length).toBeGreaterThan(0);
+    for (const msg of state.store) {
+      expect('role' in msg).toBe(false);
+      expect('content' in msg).toBe(false);
+      expect(msg.modelMessage.role).toBeDefined();
+    }
+  });
+
+  it('should rebuild legacy rows without modelMessage instead of crashing', async () => {
+    state.store.push({
+      id: 'msg-legacy',
+      timestamp: Date.now(),
+      role: 'user',
+      content: 'legacy hi',
+    } as unknown as StoredMessage);
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello' });
+
+    expect(state.completeCalls).toHaveLength(1);
+    expect(state.completeCalls[0]).toContainEqual({ role: 'user', content: 'legacy hi' });
+  });
+
+  it('should skip corrupt stored rows without crashing', async () => {
+    state.store.push({ id: 'msg-corrupt', timestamp: Date.now() } as unknown as StoredMessage);
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello' });
+
+    expect(state.completeCalls).toHaveLength(1);
+    for (const m of state.completeCalls[0]) {
+      expect(m).toBeDefined();
+    }
+  });
+
+  it('should survive non-object rows even if storage returns them', async () => {
+    state.store.push(null as unknown as StoredMessage);
+    state.store.push(42 as unknown as StoredMessage);
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello' });
+
+    // No crash (including in the skip-warn logging path), and only valid
+    // messages reach the LLM.
+    expect(state.completeCalls).toHaveLength(1);
+    expect(state.completeCalls[0].every((m) => m && typeof m === 'object')).toBe(true);
+  });
+
+  it('should skip passthrough rows with missing content without crashing', async () => {
+    state.store.push({
+      id: 'msg-bad',
+      timestamp: Date.now(),
+      modelMessage: { role: 'user' },
+    } as unknown as StoredMessage);
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello' });
+
+    expect(state.completeCalls).toHaveLength(1);
+    expect(state.completeCalls[0]).toHaveLength(2); // system + new user only
+    for (const m of state.completeCalls[0]) {
+      expect(m).toBeDefined();
+    }
+  });
+});
+
+describe('MessageHandler validation trigger', () => {
+  it('should trigger validation when the LLM makes tool calls', async () => {
+    state.toolCallQueue.push([{ id: 'tc-1', name: 'create-file', args: { path: 'a.txt' } }]);
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'make a file' });
+
+    // msg-test-1 is the system message, msg-test-2 the just-handled user message
+    expect(state.validateCalls).toEqual(['msg-test-2']);
+  });
+
+  it('should not trigger validation when no tool calls are made', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello' });
+
+    expect(state.validateCalls).toHaveLength(0);
+  });
+});
