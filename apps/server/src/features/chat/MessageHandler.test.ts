@@ -77,6 +77,9 @@ beforeEach(() => {
   state.toolCallQueue.length = 0;
   state.validateCalls.length = 0;
   vi.mocked(statusBroadcaster.sendSessionsChanged).mockClear();
+  vi.mocked(statusBroadcaster.sendGenerationStart).mockClear();
+  vi.mocked(statusBroadcaster.sendGenerationComplete).mockClear();
+  vi.mocked(statusBroadcaster.sendPreviewError).mockClear();
 });
 
 describe('MessageHandler system message handling', () => {
@@ -255,5 +258,22 @@ describe('MessageHandler sessions_changed push (issue #75)', () => {
     await handler.message({ content: 'evil', sessionId: '../../evil' });
 
     expect(statusBroadcaster.sendSessionsChanged).not.toHaveBeenCalled();
+  });
+
+  it('should push before the (possibly slow) LLM stream completes', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'first', sessionId: TEST_SESSION_ID });
+
+    // The push fires right after user-message persist, ahead of the
+    // generation_complete that only follows the LLM stream — so the label
+    // can update even under a very slow LLM (issue #75 slow-network case).
+    expect(statusBroadcaster.sendSessionsChanged).toHaveBeenCalledTimes(1);
+    expect(statusBroadcaster.sendGenerationComplete).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(statusBroadcaster.sendSessionsChanged).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(statusBroadcaster.sendGenerationComplete).mock.invocationCallOrder[0],
+    );
   });
 });
