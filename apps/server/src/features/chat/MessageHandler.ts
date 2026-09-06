@@ -103,6 +103,9 @@ export class MessageHandler {
           // Ensure system message exists once per session (storage-checked,
           // so server restarts don't duplicate it)
           const existingMessages = await getMessages(sessionId);
+          const hadPriorUserMessage = existingMessages.some(
+            (m) => getStoredMessageRole(m) === 'user',
+          );
           if (!existingMessages.some((m) => getStoredMessageRole(m) === 'system')) {
             const systemMsg: StoredMessage = {
               id: generateMessageId(),
@@ -131,6 +134,14 @@ export class MessageHandler {
 
           await addMessage(sessionId, userMsg);
           console.log('[MessageHandler] User message saved to session:', sessionId);
+
+          // Server-push label invalidation (issue #75): the label derives
+          // from the first user message, durable before the (possibly very
+          // slow) LLM stream. Emit only on the null→first-user-message
+          // transition so later messages don't refetch.
+          if (!hadPriorUserMessage) {
+            statusBroadcaster.sendSessionsChanged(sessionId);
+          }
 
           // Broadcast user message to all channels (userId 'user' won't match any channel.id)
           this.addMessageToMemory(payload.content, 'user');
