@@ -1,6 +1,7 @@
 export { AuditWrapper } from './components/AuditWrapper';
 export { SelectionBox } from './components/SelectionBox';
 export { usePostMessage } from './hooks/usePostMessage';
+export { resolveToolOrigin } from './utils/resolveToolOrigin';
 
 export type { AuditWrapperProps, SelectionBoxProps } from './components/types';
 export type {

@@ -19,6 +19,9 @@ build/
 .env.production.local
 .qwen/.env.sandbox
 
+# Per-checkout port offset (see .ports.local.json.example)
+.ports.local.json
+
 # Logs
 logs
 *.log

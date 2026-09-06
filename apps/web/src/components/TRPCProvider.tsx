@@ -9,7 +9,7 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
     trpc.createClient({
       links: [
         httpBatchLink({
-          url: `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/trpc`,
+          url: `${import.meta.env.VITE_API_URL || ''}/trpc`,
         }),
       ],
     })

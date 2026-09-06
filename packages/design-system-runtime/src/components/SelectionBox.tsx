@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box } from '@mui/material';
 import { usePostMessage } from '../hooks/usePostMessage';
+import { resolveToolOrigin } from '../utils/resolveToolOrigin';
 
 export interface SelectionBoxProps {
   id: string;
@@ -9,9 +10,10 @@ export interface SelectionBoxProps {
 }
 
 export function SelectionBox({ id, componentName, children }: SelectionBoxProps) {
+  const toolOrigin = resolveToolOrigin();
   const { sendMessage } = usePostMessage({
-    targetOrigin: 'http://localhost:3000',
-    allowedOrigins: ['http://localhost:3000'],
+    targetOrigin: toolOrigin,
+    allowedOrigins: [toolOrigin],
   });
 
   const handleClick = (event: React.MouseEvent) => {

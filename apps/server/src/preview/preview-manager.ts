@@ -3,8 +3,8 @@ import { EventEmitter } from 'events';
 import { existsSync, copyFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import killPort from 'kill-port';
 import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types.js';
+import { resolvePreviewPort } from '../ports.js';
 
 // Get directory name in ES module scope
 const __filename = fileURLToPath(import.meta.url);
@@ -16,7 +16,6 @@ const WORKSPACE_DIR = resolve(SERVER_ROOT, '../../workspace');
 const DESIGNS_DIR = resolve(WORKSPACE_DIR, 'designs');
 const PREVIEW_DIR = resolve(SERVER_ROOT, '../preview');
 const TEMPLATE_PATH = resolve(SERVER_ROOT, 'resources/templates/app.tsx');
-const DEFAULT_PORT = 3002;
 const MAX_LOG_BUFFER = 100;
 
 let previewProcess: ReturnType<typeof spawn> | null = null;
@@ -58,9 +57,9 @@ export class PreviewManager extends EventEmitter {
       this.loadDesign(designName);
     }
 
-    // Use default port directly - kill any process using it first
-    const targetPort = DEFAULT_PORT;
-    await this.killPortOnEndpoint(targetPort);
+    // Offset-aware port (issue #76): never kill-and-restart another owner's
+    // server. Fail fast with a clear message if the port is busy instead.
+    const targetPort = resolvePreviewPort();
     this.port = targetPort;
 
     try {
@@ -70,7 +69,7 @@ export class PreviewManager extends EventEmitter {
       // Start Vite directly with spawn
       const env = { ...process.env, PORT: targetPort.toString(), IN_PREVIEW_SERVER: 'true' };
 
-      previewProcess = spawn('npx', ['vite', '--port', targetPort.toString()], {
+      previewProcess = spawn('npx', ['vite', '--port', targetPort.toString(), '--strictPort'], {
         cwd: PREVIEW_DIR,
         env,
         shell: true,
@@ -94,6 +93,15 @@ export class PreviewManager extends EventEmitter {
         const line = data.toString().trim();
         this.addLog('stderr', line);
         console.error('[PREVIEW] stderr:', line);
+        if (/EADDRINUSE|already in use/i.test(line)) {
+          const error = new Error(
+            `[PREVIEW] Port ${targetPort} is already in use by another process. ` +
+              `Run "node scripts/check-ports.cjs" to identify the owner.`,
+          );
+          this.state = 'ERROR';
+          this.emit('stateChange', this.state);
+          this.emit('error', error);
+        }
       });
 
       previewProcess.on('error', (error: Error) => {
@@ -134,11 +142,6 @@ export class PreviewManager extends EventEmitter {
       previewProcess.kill();
       previewProcess = null;
       this.addLog('stdout', 'Preview server stopped');
-    }
-
-    // Kill any remaining process on the port
-    if (this.port) {
-      await this.killPortOnEndpoint(this.port);
     }
 
     this.state = 'STOPPED';
@@ -190,6 +193,11 @@ export class PreviewManager extends EventEmitter {
       }, 30000);
 
       const checkReady = async () => {
+        if (this.state === 'ERROR') {
+          clearTimeout(timeout);
+          reject(new Error('Preview server failed to start (see PREVIEW logs for the port conflict)'));
+          return;
+        }
         try {
           const logs = await this.getLogs();
           const readyLog = logs.find((log) => 
@@ -221,15 +229,6 @@ export class PreviewManager extends EventEmitter {
         reject(new Error('Preview server failed to start'));
       }
     });
-  }
-
-  private async killPortOnEndpoint(port: number): Promise<void> {
-    try {
-      await killPort(port);
-      console.log(`[PREVIEW] Killed process on port ${port}`);
-    } catch {
-      // No process on port, that's fine
-    }
   }
 
   private loadDesign(designName: string): void {

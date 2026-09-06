@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box } from '@mui/material';
 import { usePostMessage } from '../hooks/usePostMessage';
+import { resolveToolOrigin } from '../utils/resolveToolOrigin';
 
 export interface AuditWrapperProps {
   id: string;
@@ -11,9 +12,10 @@ export interface AuditWrapperProps {
 export function AuditWrapper({ id, componentName, children }: AuditWrapperProps) {
   const [isHighlighted, setIsHighlighted] = useState(false);
   const [mode, setMode] = useState<'select' | 'preview' | 'audit'>('preview');
+  const toolOrigin = resolveToolOrigin();
   const { sendMessage, lastMessage } = usePostMessage({
-    targetOrigin: 'http://localhost:3000',
-    allowedOrigins: ['http://localhost:3000'],
+    targetOrigin: toolOrigin,
+    allowedOrigins: [toolOrigin],
   });
 
   useEffect(() => {

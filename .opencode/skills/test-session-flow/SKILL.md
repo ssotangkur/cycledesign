@@ -8,7 +8,8 @@ description: Test the complete session management workflow in CycleDesign
 Use this skill to verify the session management features are working correctly.
 
 ### Prerequisites
-- Dev servers must be running (frontend on :3000, backend on :3001)
+- Dev servers must be running (frontend on web port, backend on server port —
+  run `node scripts/ports.cjs` for this checkout's offset-aware ports)
 - Use `/dev-server` skill if not running
 
 ### 1. Create Session
@@ -53,6 +54,9 @@ Use this skill to verify the session management features are working correctly.
 - [ ] Delete current session (should clear chat)
 
 ## Testing Commands
+
+> Ports below assume the default offset. Run `node scripts/ports.cjs` and
+> substitute this checkout's web/server ports where needed.
 
 ### Using Chrome DevTools Agent
 ```

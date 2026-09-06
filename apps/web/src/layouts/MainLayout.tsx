@@ -29,7 +29,9 @@ function MainLayout() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const response = await fetch('http://localhost:3001/api/preview/status');
+        // Relative URL: resolved against the web origin and proxied to the
+        // API server by Vite (offset-proof, works in dev and E2E modes).
+        const response = await fetch('/api/preview/status');
         if (response.ok) {
           const data = await response.json();
           setServerState('RUNNING');
@@ -48,7 +50,7 @@ function MainLayout() {
   const handleStartServer = async () => {
     setServerState('STARTING');
     try {
-      const response = await fetch('http://localhost:3001/api/preview/start', {
+      const response = await fetch('/api/preview/start', {
         method: 'POST',
       });
       if (response.ok) {
@@ -66,7 +68,7 @@ function MainLayout() {
 
   const handleStopServer = async () => {
     try {
-      await fetch('http://localhost:3001/api/preview/stop', {
+      await fetch('/api/preview/stop', {
         method: 'POST',
       });
       setServerState('STOPPED');

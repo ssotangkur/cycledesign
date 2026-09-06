@@ -24,10 +24,24 @@ This ensures you're checking the actual GitHub Actions status, not just local va
 ### Dev Server Commands
 
 - `npm run dev` - Start all servers with logging
-- `npm run dev:kill` - Kill processes on ports 3000/3001/3002
+- `npm run dev:kill` - Kill this checkout's dev ports only (never touches sibling checkouts or E2E ports)
 - `npm run dev:server` - Start server only
 - `npm run dev:web` - Start web only
 - Logs: `tmp/server.log` and `tmp/web.log`
+
+### Ports (offset-aware)
+
+Effective ports = `3000/3001/3002 + checkout offset (+ 50 for Playwright-owned servers)`.
+Never hardcode `:3000`/`:3001`/`:3002` in commands — resolve this checkout's ports first:
+
+```bash
+node scripts/ports.cjs          # dev ports for this checkout
+node scripts/ports.cjs --e2e    # Playwright-owned ports
+```
+
+- Each checkout has its own git-ignored `.ports.local.json` (`{ "offset": N }`, see `.ports.local.json.example`); `PORT_OFFSET` env overrides it.
+- `npm run dev:e2e` and Playwright use isolated E2E ports — they never kill or reuse manual dev servers.
+- Port conflict? Run `node scripts/check-ports.cjs` to name the owning process instead of killing blindly.
 
 ---
 
@@ -49,7 +63,7 @@ After making UI changes, follow this testing pattern:
 ### 1. Quick Smoke Test
 ```
 Delegate to @chrome-devtools:
-"Navigate to http://localhost:3000 and verify the page loads without errors"
+"Navigate to this checkout's web port (run `node scripts/ports.cjs` first) and verify the page loads without errors"
 ```
 
 ### 2. Feature-Specific Testing
@@ -104,9 +118,9 @@ The `tmp/` directory is already in `.gitignore`, so test artifacts won't be comm
 "Capture the current page state to tmp/login-flow-snapshot.png"
 ```
 
-**Playwright**:
+**Playwright** (use this checkout's web port from `node scripts/ports.cjs`):
 ```bash
-npx playwright screenshot http://localhost:3000 tmp/page-screenshot.png
+npx playwright screenshot http://localhost:<web-port> tmp/page-screenshot.png
 ```
 
 **Never save screenshots to the project root or tracked directories**.
