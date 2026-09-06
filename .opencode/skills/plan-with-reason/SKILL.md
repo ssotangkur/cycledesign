@@ -21,12 +21,12 @@ Require before starting:
 
 ## Workflow
 
-### Phase 0 — Anchor to the issue
+### Phase 1 — Anchor to the issue
 
 1. Read the issue and restate in one paragraph: problem, desired outcome, explicit constraints.
 2. If the issue is too vague to build a design tree from (no goal, no scope), say so and grill for scope first before any research.
 
-### Phase 1 — Research-first (facts are your job)
+### Phase 2 — Research-first (facts are your job)
 
 For every open question, classify it as **fact** (answerable from repo/environment) or **decision** (requires user judgment):
 
@@ -38,7 +38,7 @@ Rules:
 - A running exploration is an unsettled prerequisite: questions downstream of it wait, independent questions proceed.
 - Record research findings as candidate KDs or as context for grilling questions. Cite file paths (`path:line`) where relevant.
 
-### Phase 2 — Grill (decisions are the user's)
+### Phase 3 — Grill (decisions are the user's)
 
 Map remaining decisions as a **design tree**: every decision branches into the decisions that hang off it.
 
@@ -65,7 +65,7 @@ Rules:
 - Session is done when the frontier is empty: every branch visited, nothing silently assumed.
 - Do not write the final plan until the user confirms shared understanding.
 
-### Phase 3 — Synthesize the plan (Key Decisions + Steps)
+### Phase 4 — Synthesize the plan (Key Decisions + Steps)
 
 Write the plan with two linked sections. IDs are stable (`KD-1`, `KD-2`, ...) and never reused or renumbered once shared.
 
@@ -104,11 +104,24 @@ Also include:
 - **Verification:** end-to-end checks (commands, tests, manual flow).
 - **Risks / open questions:** anything the implementer should re-confirm.
 
-### Phase 4 — Record in the issue
+### Phase 5 — Implementer review (adversarial pass)
+
+Goal: the posted plan must read consistently and completely on first reading. Prefer spending more time in planning over rework after implementation.
+
+1. Spawn a review subagent (`general` / `review`) with the issue + draft plan + repo access. Prompt as implementer viewpoint: does the plan have gaps? Is there contradictory information, plan-vs-plan or plan-vs-code (cite `file:line`)? Do the KDs let you fill remaining gaps, or are there load-bearing ambiguities that must be clarified before implementation?
+2. Triage rule: ignore gaps closable by trivial code search (implementer can look those up). Flag gaps requiring detailed code analysis — those belong in the plan/steps, not left to perfect code reading.
+3. Resolve each finding one of three ways:
+   - **Address** — fix the plan/KD directly (fact or clear oversight).
+   - **Refute** — reject with evidence (issue quote or `file:line`); reviewer drops it.
+   - **Escalate** — new decision the grilling phase missed, or author/reviewer disagree. Bring it to the user as a frontier question; the answer becomes a KD with `Source: grilling Qn`. Escalate when the choice affects scope, cost, UX, or security and cannot be resolved from repo/issue alone.
+4. Rewrite the draft freely until both agree it is good enough to implement. Draft KDs may be renumbered/rewritten — stability applies only after posting.
+5. Loop cap: max 10 rounds to guard against ping-pong. On hitting the cap, escalate unresolved items to the user instead of looping.
+
+### Phase 6 — Record in the issue
 
 1. Post the full plan (sections A + B + contract above) to the GitHub issue via `gh issue comment <number> --repo <owner/repo> --body-file <tmpfile>` or `github_add_issue_comment`. Use a tmp file for long bodies.
 2. Header the comment `## Plan with Reason` and include the KD list so future edits can reference stable IDs.
-3. If a plan comment already exists, post a new comment noting what changed (`Supersedes <link> — changed KD-2 because ...`), never silently edit history.
+3. Post-freeze semantics: after posting, history is immutable. If a plan comment already exists, post a new comment noting what changed (`Supersedes <link> — changed KD-2 because ...`), never silently edit history. Append new KDs (`KD-9`), mark retired ones as superseded, never renumber shared IDs.
 4. Reply to the user with the comment URL and a 3-line summary. Do not start implementing until explicitly asked — planning and implementing are separate tasks.
 
 ## Example (abbreviated)
