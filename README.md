@@ -195,6 +195,18 @@ CycleDesign uses **OAuth 2.0 Device Authorization Flow** (RFC 8628):
 
 The application automatically handles rate limiting with exponential backoff and jitter.
 
+### OpenRouter Free (auto-router)
+
+Selectable in Settings as "OpenRouter Free (auto-router)". Routes every request
+through OpenRouter's `openrouter/free` gateway — no per-model catalog to maintain.
+Requires an `OPENROUTER_API_KEY` (set it in Settings or via env).
+
+- Limits: 20 requests/min, 50/day (1,000/day after a one-time $10 top-up).
+- The underlying model varies per request, so output quality is not reproducible.
+- Free-tier prompts/outputs may be logged upstream by OpenRouter/model hosts.
+- Rate limits surface as a readable error with no auto-fallback: retry manually
+  for per-minute limits; daily limits block until reset or top-up.
+
 ## Basic Usage
 
 ### Creating a Session

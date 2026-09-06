@@ -22,6 +22,12 @@ export abstract class BaseProvider implements IProvider {
   abstract readonly name: string;
   protected cachedAgent: ToolLoopAgent | null = null;
 
+  // Public cache reset so config changes (provider switch, new key/model)
+  // reach the chat path without a server restart.
+  clearCachedAgent(): void {
+    this.cachedAgent = null;
+  }
+
   protected abstract getModel(): Promise<LanguageModel>;
 
   protected createAgentConfig(): AgentConfig {
