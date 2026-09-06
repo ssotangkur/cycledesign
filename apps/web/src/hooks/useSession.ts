@@ -103,7 +103,7 @@ export function useSessions() {
     },
     [utils],
   );
-  useChannelSubscription({
+  useChannelSubscription<'status', 'sessions_changed'>({
     channel: statusChannel,
     event: 'sessions_changed',
     handler: handleSessionsChanged,
