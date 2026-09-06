@@ -116,22 +116,6 @@ export class MessageHandler {
             console.log('[MessageHandler] System message saved to session:', sessionId);
           }
 
-          // Ensure system message exists once per session (storage-checked,
-          // so server restarts don't duplicate it)
-          const existingMessages = await getMessages(sessionId);
-          if (!existingMessages.some((m) => getStoredMessageRole(m) === 'system')) {
-            const systemMsg: StoredMessage = {
-              id: generateMessageId(),
-              timestamp: Date.now(),
-              modelMessage: {
-                role: 'system',
-                content: SYSTEM_PROMPT
-              }
-            };
-            await addMessage(sessionId, systemMsg);
-            console.log('[MessageHandler] System message saved to session:', sessionId);
-          }
-
           // Generate message IDs
           const serverMsgId = generateMessageId();
 

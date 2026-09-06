@@ -9,11 +9,6 @@ export interface StoredMessage {
   // Role and text content live inside `modelMessage` — use the helpers below.
   modelMessage: ModelMessage;
 
-  // The ModelMessage representation of this message for direct use with LLM.
-  // This avoids repeated conversion when sending messages to the LLM.
-  // Role and text content live inside `modelMessage` — use the helpers below.
-  modelMessage: ModelMessage;
-
   toolCalls?: Array<{
     id: string;
     type: 'function';
