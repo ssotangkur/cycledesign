@@ -84,6 +84,9 @@ When linked to an issue, the PR description includes:
 
 ## Related Issues
 Closes #41
+
+## Open Review Notes (for human reviewer)
+[ findings passed in by the caller (e.g. wrap-up `unresolved_findings`), verbatim — or `None — all review findings addressed.` Never drop this section when asked to include it. ]
 ```
 
 The Summary section follows the `pp` skill (Pyramid Principle): conclusion first, supporting bullets grouped MECE. The sections below it serve as evidence.

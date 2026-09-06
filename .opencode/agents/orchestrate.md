@@ -1,7 +1,6 @@
 ---
 description: Orchestration agent for building large features. Reads PRDs, technical docs, and source code to understand requirements, then delegates implementation and review tasks to specialized agents.
 mode: all
-model: qwen-code/coder-model
 temperature: 0.3
 tools:
   write: false

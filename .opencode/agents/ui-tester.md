@@ -1,7 +1,6 @@
 ---
 description: Specialized UI testing agent for React/MUI applications in CycleDesign
 mode: subagent
-model: qwen-code/vision-model
 temperature: 0.2
 tools:
   write: false
