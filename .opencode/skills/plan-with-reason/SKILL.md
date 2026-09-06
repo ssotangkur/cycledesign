@@ -122,7 +122,13 @@ Goal: the posted plan must read consistently and completely on first reading. Pr
 1. Post the full plan (sections A + B + contract above) to the GitHub issue via `gh issue comment <number> --repo <owner/repo> --body-file <tmpfile>` or `github_add_issue_comment`. Use a tmp file for long bodies.
 2. Header the comment `## Plan with Reason` and include the KD list so future edits can reference stable IDs.
 3. Post-freeze semantics: after posting, history is immutable. If a plan comment already exists, post a new comment noting what changed (`Supersedes <link> — changed KD-2 because ...`), never silently edit history. Append new KDs (`KD-9`), mark retired ones as superseded, never renumber shared IDs.
-4. Reply to the user with the comment URL and a 3-line summary. Do not start implementing until explicitly asked — planning and implementing are separate tasks.
+4. If your new comment supersedes a prior `## Plan with Reason` comment, minimize the old one(s) as outdated so the issue shows exactly one current plan. Match the old plan by its header in the `comments` payload (`gh issue view --json comments` gives an `id` per comment), then:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/comments/<comment-id> --jq .node_id
+   gh api graphql -f query='mutation($id:ID!,$classifier:ReportedContentClassifiers!){minimizeComment(input:{subjectId:$id,classifier:$classifier}){minimizedComment{isMinimized}}}' -f id='<node_id>' -f classifier=OUTDATED
+   ```
+   Only minimize superseded plan comments — never minimize human comments or other agents' non-plan comments. Minimized comments stay expandable; history is preserved.
+5. Reply to the user with the comment URL and a 3-line summary. Do not start implementing until explicitly asked — planning and implementing are separate tasks.
 
 ## Example (abbreviated)
 
