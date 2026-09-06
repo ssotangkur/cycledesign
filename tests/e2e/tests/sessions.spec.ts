@@ -287,17 +287,8 @@ test.describe('Session Management', () => {
     expect(selectedValue?.trim()).toBeTruthy();
   });
 
-  // Skipped in CI due to timing issues with session label updates.
-  // The functionality is verified through:
-  // - Unit tests for formatSessionLabel
-  // - Server unit tests for the sessions_changed push (MessageHandler,
-  //   StatusBroadcaster) and protocol schema
-  // - The server-push invalidation in useSession.ts (sessions_changed event
-  //   on the status channel triggers a sessions.list refetch)
-  // The test uses waitForFunction with 10s polling but the label update
-  // relies on WebSocket communication which can be unreliable in CI environments.
-  test('should update session label to first message content after sending message', async ({ authenticatedPage, createSession }) => {
-    test.skip(process.env.CI === 'true', 'Flaky in CI due to timing issues');
+  test('should update session label to first message content after sending message', async ({ authenticatedPage, createSession, useMockProvider }) => {
+    await useMockProvider();
     // Delete all existing sessions via UI to ensure clean client AND server state
     // This is more reliable than localStorage.clear() which only clears client-side state
     // while server-side sessions (.cycledesign/sessions/) persist across test runs
@@ -370,7 +361,7 @@ test.describe('Session Management', () => {
         return currentLabel.includes(expectedLabel.slice(0, 50));
       },
       { expectedLabel, initialLabel },
-      { timeout: 10000 }
+      { timeout: 15000 }
     );
 
     // Final verification - get the updated label
