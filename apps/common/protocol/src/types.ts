@@ -112,6 +112,7 @@ export const ChannelTypesSchema = z.object({
       'preview_start': z.object({ messageId: z.string(), details: z.string() }),
       'preview_ready': z.object({ messageId: z.string(), port: z.number(), details: z.string() }),
       'preview_error': z.object({ messageId: z.string(), details: z.string() }),
+      'sessions_changed': z.object({ sessionId: z.string() }),
     }),
   }),
 

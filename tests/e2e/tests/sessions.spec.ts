@@ -290,8 +290,10 @@ test.describe('Session Management', () => {
   // Skipped in CI due to timing issues with session label updates.
   // The functionality is verified through:
   // - Unit tests for formatSessionLabel
-  // - Manual verification in Chrome DevTools
-  // - The polling mechanism in PromptInput.tsx is correctly implemented
+  // - Server unit tests for the sessions_changed push (MessageHandler,
+  //   StatusBroadcaster) and protocol schema
+  // - The server-push invalidation in useSession.ts (sessions_changed event
+  //   on the status channel triggers a sessions.list refetch)
   // The test uses waitForFunction with 10s polling but the label update
   // relies on WebSocket communication which can be unreliable in CI environments.
   test('should update session label to first message content after sending message', async ({ authenticatedPage, createSession }) => {

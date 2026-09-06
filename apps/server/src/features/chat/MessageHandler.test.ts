@@ -55,11 +55,13 @@ vi.mock('../status/StatusBroadcaster.js', () => ({
     sendGenerationStart: vi.fn(),
     sendGenerationComplete: vi.fn(),
     sendPreviewError: vi.fn(),
+    sendSessionsChanged: vi.fn(),
   },
 }));
 
 import { MessageHandler } from './MessageHandler.js';
 import { addMessage } from '../../sessions/storage.js';
+import { statusBroadcaster } from '../status/StatusBroadcaster.js';
 
 function fakeChannel(): ServerChannel<ChannelTypes['chat']> {
   return { id: 'channel-1', send: vi.fn() } as unknown as ServerChannel<ChannelTypes['chat']>;
@@ -74,6 +76,10 @@ beforeEach(() => {
   state.idCounter = 0;
   state.toolCallQueue.length = 0;
   state.validateCalls.length = 0;
+  vi.mocked(statusBroadcaster.sendSessionsChanged).mockClear();
+  vi.mocked(statusBroadcaster.sendGenerationStart).mockClear();
+  vi.mocked(statusBroadcaster.sendGenerationComplete).mockClear();
+  vi.mocked(statusBroadcaster.sendPreviewError).mockClear();
 });
 
 describe('MessageHandler system message handling', () => {
@@ -213,14 +219,61 @@ describe('MessageHandler session routing (issue #49)', () => {
       expect.objectContaining({ modelMessage: { role: 'user', content: 'Hello, routing test' } }),
     );
   });
-
   it('should reject empty and path-traversal sessionIds without writing', async () => {
     vi.mocked(addMessage).mockClear();
+
     const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
 
     await handler.message({ content: 'evil', sessionId: '../../evil' });
     await handler.message({ content: 'empty', sessionId: '' });
 
     expect(addMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('MessageHandler sessions_changed push (issue #75)', () => {
+  it('should emit sessions_changed once on the first user message', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'first', sessionId: TEST_SESSION_ID });
+
+    expect(statusBroadcaster.sendSessionsChanged).toHaveBeenCalledTimes(1);
+    expect(statusBroadcaster.sendSessionsChanged).toHaveBeenCalledWith(TEST_SESSION_ID);
+  });
+
+  it('should stay silent on the second user message', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'first', sessionId: TEST_SESSION_ID });
+    vi.mocked(statusBroadcaster.sendSessionsChanged).mockClear();
+
+    await handler.message({ content: 'second', sessionId: TEST_SESSION_ID });
+
+    expect(statusBroadcaster.sendSessionsChanged).not.toHaveBeenCalled();
+  });
+
+  it('should not emit when sessionId is rejected', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'evil', sessionId: '../../evil' });
+
+    expect(statusBroadcaster.sendSessionsChanged).not.toHaveBeenCalled();
+  });
+
+  it('should push before the (possibly slow) LLM stream completes', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'first', sessionId: TEST_SESSION_ID });
+
+    // The push fires right after user-message persist, ahead of the
+    // generation_complete that only follows the LLM stream — so the label
+    // can update even under a very slow LLM (issue #75 slow-network case).
+    expect(statusBroadcaster.sendSessionsChanged).toHaveBeenCalledTimes(1);
+    expect(statusBroadcaster.sendGenerationComplete).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(statusBroadcaster.sendSessionsChanged).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(statusBroadcaster.sendGenerationComplete).mock.invocationCallOrder[0],
+    );
   });
 });

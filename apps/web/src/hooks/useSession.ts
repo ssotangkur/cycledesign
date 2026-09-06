@@ -3,6 +3,8 @@ import { useLocalStorage } from 'usehooks-ts';
 import { useCallback, useState, useEffect } from 'react';
 import { trpc } from '../utils/trpc';
 import { formatSessionLabel } from '../utils/formatSessionLabel';
+import { useStatusChannel } from './useStatusChannel';
+import { useChannelSubscription } from './useChannelSubscription';
 
 const STORAGE_KEY = 'cycledesign:currentSessionId';
 
@@ -84,6 +86,28 @@ export function useSessions() {
     error,
     refetch,
   } = trpc.sessions.list.useQuery();
+  const utils = trpc.useUtils();
+  const statusChannel = useStatusChannel();
+
+  // Server-push label invalidation (issue #75): exactly one
+  // sessions.list invalidate per push. Skip when the session already
+  // has firstMessage in cache (stale/duplicate push).
+  const handleSessionsChanged = useCallback(
+    (payload: { sessionId: string }) => {
+      const cached = utils.sessions.list.getData();
+      const known = cached?.find((s) => s.id === payload.sessionId);
+      if (known?.firstMessage) {
+        return;
+      }
+      void utils.sessions.list.invalidate();
+    },
+    [utils],
+  );
+  useChannelSubscription<'status', 'sessions_changed'>({
+    channel: statusChannel,
+    event: 'sessions_changed',
+    handler: handleSessionsChanged,
+  });
 
   // Derived: session labels map
   const sessionLabelsMap = useMemo(() => {
@@ -202,17 +226,4 @@ export function useGetSession() {
   }, [utils]);
 
   return { getSessionById };
-}
-
-/**
- * Hook to invalidate/refetch the sessions list.
- */
-export function useInvalidateSessions() {
-  const utils = trpc.useUtils();
-
-  const invalidateSessions = useCallback(async () => {
-    return utils.sessions.list.invalidate();
-  }, [utils]);
-
-  return { invalidateSessions };
 }
