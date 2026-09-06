@@ -116,6 +116,14 @@ blocked_reason: <only if BLOCKED>"
 - If attempts exhausted or reason needs human judgment → Phase 5.
 - DONE → Phase 4. Preserve `unresolved_findings` verbatim for the PR.
 
+### Base overrides and issue linking
+
+GitHub only honors closing keywords (`Closes`/`Fixes`/`Resolves`) on PRs targeting the **default branch**. If the issue branch was based off another branch (base override) and the PR targets that branch instead of `main`:
+
+- The `Closes #<N>` footer degrades to a plain mention — no link/branch icon on the issue, no auto-close.
+- After the base branch merges into `main`, retarget the PR (`gh api repos/<owner>/<repo>/pulls/<PR> -X PATCH -f base=main` — REST works with `repo` scope where `gh pr edit --base` needs org scopes), then verify the link via `gh issue view <N> --json closedByPullRequestsReferences`.
+- Until retargeted, prefer `Refs #<N>`-style wording awareness: keep `Closes` in the body (it engages on retarget) but note the pending retarget in the PR body so reviewers know the link is not yet live.
+
 ### Phase 4 — PR (delegate, then label)
 
 Reference the `pr-create` skill:
