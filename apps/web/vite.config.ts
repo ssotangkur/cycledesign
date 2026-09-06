@@ -50,4 +50,8 @@ export default defineConfig({
     include: ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
     exclude: ['@trpc/react-query', '@trpc/client', '@trpc/server'],
   },
+  test: {
+    environment: 'happy-dom',
+    setupFiles: ['./src/test-setup.ts'],
+  },
 });
