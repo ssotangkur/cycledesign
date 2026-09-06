@@ -102,7 +102,8 @@ Resilience contract (state this verbatim in the issue plan):
 Also include:
 - **Out of scope:** explicit non-goals settled during grilling.
 - **Verification:** end-to-end checks (commands, tests, manual flow).
-- **Risks / open questions:** anything the implementer should re-confirm.
+
+Accepted risks and trade-offs belong inside their owning KD (Why / Alternatives rejected), not in a separate section. A posted plan has no unresolved open questions — anything load-bearing is a KD or an escalated grilling question.
 
 ### Phase 5 — Implementer review (adversarial pass)
 
