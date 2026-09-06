@@ -287,22 +287,7 @@ test.describe('Session Management', () => {
     expect(selectedValue?.trim()).toBeTruthy();
   });
 
-  // Session label update (issue #77): un-skipped in CI.
-  // Root causes of the old flakiness, now addressed:
-  // - Server-push invalidation (issues #75/#83): MessageHandler emits
-  //   sessions_changed right after the first user message persists (before
-  //   the slow LLM stream); useSession.ts subscribes and refetches
-  //   sessions.list once. No client polling.
-  // - E2E port isolation (issues #76/#80): Playwright boots an E2E-offset
-  //   stack (base + local offset + 50) with reuseExistingServer=false in CI,
-  //   so it can never attach to a stale manual dev server (readiness race).
-  // - Deterministic provider: useMockProvider fixture + ENABLE_MOCK_PROVIDER
-  //   force the mock LLM, so the stream completes fast and reliably.
-  // Also covered by: formatSessionLabel unit tests, MessageHandler /
-  // StatusBroadcaster unit tests, and protocol schema test.
   test('should update session label to first message content after sending message', async ({ authenticatedPage, createSession, useMockProvider }) => {
-    // Switch to mock provider for deterministic LLM responses.
-    // (Fixture setup already reloaded the page with mock provider; no-op call for clarity.)
     await useMockProvider();
     // Delete all existing sessions via UI to ensure clean client AND server state
     // This is more reliable than localStorage.clear() which only clears client-side state
@@ -365,8 +350,6 @@ test.describe('Session Management', () => {
 
     // Wait for the session label to update by polling the session select text
     // The label should change from the session ID to the first message content
-    // via sessions_changed server-push -> sessions.list refetch -> formatSessionLabel.
-    // 15s budget covers CI load (WS push + tRPC refetch + mock LLM stream).
     await authenticatedPage.waitForFunction(
       ({ expectedLabel, initialLabel }) => {
         const combobox = document.querySelector('[data-testid="session-select"] [role="combobox"]');
