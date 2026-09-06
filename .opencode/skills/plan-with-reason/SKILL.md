@@ -129,7 +129,12 @@ Goal: the posted plan must read consistently and completely on first reading. Pr
    gh api graphql -f query='mutation($id:ID!,$classifier:ReportedContentClassifiers!){minimizeComment(input:{subjectId:$id,classifier:$classifier}){minimizedComment{isMinimized}}}' -f id='<node_id>' -f classifier=OUTDATED
    ```
    Only minimize superseded plan comments — never minimize human comments or other agents' non-plan comments. Minimized comments stay expandable; history is preserved.
-5. Reply to the user with the comment URL and a 3-line summary. Do not start implementing until explicitly asked — planning and implementing are separate tasks.
+5. Mark the issue ready: add the `ready to implement` label and remove `question` if present (removal is idempotent — safe when absent):
+   ```bash
+   gh issue edit <number> --repo <owner/repo> --add-label "ready to implement" --remove-label "question"
+   ```
+   Only when planning is done (frontier empty, plan posted).
+6. Reply to the user with the comment URL and a 3-line summary. Do not start implementing until explicitly asked — planning and implementing are separate tasks.
 
 ## Example (abbreviated)
 
