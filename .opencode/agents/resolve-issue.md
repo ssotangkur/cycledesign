@@ -1,7 +1,6 @@
 ---
 description: Fire-and-forget orchestrator that resolves a GitHub issue via sub-agents only - never codes directly
 mode: all
-model: qwen-code/coder-model
 temperature: 0.3
 tools:
   write: false

@@ -1,7 +1,6 @@
 ---
 description: Browser automation and testing agent with Chrome DevTools MCP access. Use this agent to navigate web pages, interact with UI elements, take screenshots, check console errors, monitor network requests, and validate web application behavior.
 mode: subagent
-model: qwen-code/vision-model
 temperature: 0.3
 tools:
   write: false
