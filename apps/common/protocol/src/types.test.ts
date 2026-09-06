@@ -14,3 +14,17 @@ describe('chat channel message payload', () => {
     expect(valid.success).toBe(true);
   });
 });
+
+describe('status channel sessions_changed event (issue #75)', () => {
+  const schema = ChannelTypesSchema.shape.status.shape.server.shape.sessions_changed;
+
+  it('should accept a sessionId payload', () => {
+    const valid = schema.safeParse({ sessionId: 'session-abc123' });
+    expect(valid.success).toBe(true);
+  });
+
+  it('should reject missing or non-string sessionId', () => {
+    expect(schema.safeParse({}).success).toBe(false);
+    expect(schema.safeParse({ sessionId: 42 }).success).toBe(false);
+  });
+});
