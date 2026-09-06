@@ -83,6 +83,10 @@ export class StatusBroadcaster {
   sendPreviewError(messageId: string, details: string) {
     this.broadcast({ event: 'preview_error', data: { messageId, details } });
   }
+
+  sendSessionsChanged(sessionId: string) {
+    this.broadcast({ event: 'sessions_changed', data: { sessionId } });
+  }
 }
 
 /**
