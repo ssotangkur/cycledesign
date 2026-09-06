@@ -2,7 +2,10 @@ import { router, publicProcedure } from '../init.js';
 import { z } from 'zod';
 import { MistralProvider } from '../../llm/providers/mistral.js';
 import { QwenProvider } from '../../llm/providers/qwen.js';
+import { OpenRouterFreeProvider } from '../../llm/providers/openrouter-free.js';
 import { MockProvider } from '../../llm/providers/mock.js';
+import { BaseProvider } from '../../llm/providers/base-provider.js';
+import { clearProviderCache } from '../../llm/providers/provider-factory.js';
 import { IProvider, IProviderClass, IProviderConfig } from '../../llm/types.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -22,6 +25,7 @@ const CONFIG_FILE = join(CONFIG_DIR, 'provider-config.json');
 const providers: IProviderClass[] = [
   QwenProvider,
   MistralProvider,
+  OpenRouterFreeProvider,
   ...(process.env.ENABLE_MOCK_PROVIDER === 'true' ? [MockProvider] : []),
 ];
 const providerMap = new Map(providers.map((p) => [p.name(), p]));
@@ -134,8 +138,14 @@ export const providersRouter = router({
         saveConfig(configState.current);
       }
 
-      // Clear cached provider instance
+      // Clear cached provider instances (router-level + factory-level) plus
+      // any cached agent so a saved key/model reaches the chat path
+      // without a restart.
+      if (cachedProviderInstance instanceof BaseProvider) {
+        cachedProviderInstance.clearCachedAgent();
+      }
       cachedProviderInstance = null;
+      clearProviderCache();
 
       const hasApiKey = providerClass?.hasApiKey?.() ?? false;
       return {
