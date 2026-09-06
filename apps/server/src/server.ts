@@ -13,6 +13,7 @@ import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { ProtocolServer } from '@cycledesign/common-protocol';
 import { statusBroadcaster } from './features/status/StatusBroadcaster.js';
 import { MessageHandler } from './features/chat/MessageHandler.js';
+import { resolveServerPort, resolveWebOrigins, describePortOwner } from './ports.js';
 
 dotenv.config();
 
@@ -28,7 +29,7 @@ global.fetch = ((url: string | URL, options: RequestInit) => {
 }) as typeof global.fetch;
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = resolveServerPort();
 
 // Bootstrap workspace and auto-start preview server
 const WORKSPACE_DIR = join(process.cwd(), '../../workspace');
@@ -69,6 +70,19 @@ if (!existsSync(appTsXPath) && existsSync(templatePath)) {
 const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
+});
+
+// Fail fast on port conflicts instead of crash-looping: name the port and
+// its owning process so authors debug the right layer (issue #76).
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `[BOOT] Port ${PORT} is already in use (${describePortOwner(PORT)}). ` +
+        `If it belongs to another checkout or a stale process, run "node scripts/check-ports.cjs" or "node scripts/kill-ports.cjs".`,
+    );
+    process.exit(1);
+  }
+  throw err;
 });
 
 // Create ProtocolServer for channel-based transport
@@ -161,7 +175,7 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3003', 'http://127.0.0.1:3000', 'http://127.0.0.1:3003'],
+  origin: resolveWebOrigins(),
   credentials: true,
 }));
 

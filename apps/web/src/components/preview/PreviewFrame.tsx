@@ -26,7 +26,9 @@ function PreviewFrame({ url, isLoading = false, error = null, onComponentSelecte
 
   const { sendMessage } = useIframeBridge({
     iframeRef,
-    previewOrigin: url ? new URL(url).origin : 'http://localhost:3002',
+    previewOrigin: url
+      ? new URL(url).origin
+      : ((import.meta.env.VITE_PREVIEW_URL as string | undefined) || 'http://localhost:3002'),
     onMessage: handleMessage,
   });
 

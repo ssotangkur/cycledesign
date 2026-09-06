@@ -1,3 +1,9 @@
+// Offset-aware ports (issue #76): `node scripts/ports.cjs` prints the
+// effective ports for this checkout (base + .ports.local.json/PORT_OFFSET).
+const { getPorts } = require('./scripts/ports.cjs');
+
+const ports = getPorts();
+
 module.exports = {
   apps: [
     {
@@ -6,7 +12,8 @@ module.exports = {
       script: 'npm.cmd',
       args: 'run dev',
       env: {
-        PORT: 3001,
+        PORT: ports.server,
+        SERVER_PORT: ports.server,
         NODE_ENV: 'development',
       },
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
@@ -22,7 +29,13 @@ module.exports = {
       script: 'npm.cmd',
       args: 'run dev',
       env: {
-        PORT: 3000,
+        PORT: ports.web,
+        WEB_PORT: ports.web,
+        SERVER_PORT: ports.server,
+        VITE_API_URL: `http://localhost:${ports.server}`,
+        VITE_WS_URL: `ws://localhost:${ports.server}`,
+        VITE_TOOL_URL: `http://localhost:${ports.web}`,
+        VITE_PREVIEW_URL: `http://localhost:${ports.preview}`,
         NODE_ENV: 'development',
       },
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
@@ -38,7 +51,9 @@ module.exports = {
       script: 'npm.cmd',
       args: 'run dev',
       env: {
-        PORT: 3002,
+        PORT: ports.preview,
+        PREVIEW_PORT: ports.preview,
+        VITE_TOOL_URL: `http://localhost:${ports.web}`,
         NODE_ENV: 'development',
         IN_PREVIEW_SERVER: 'true',
       },

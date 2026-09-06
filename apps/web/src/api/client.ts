@@ -1,4 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// VITE_API_URL is injected by scripts/run-with-ports.cjs (offset-aware).
+// Empty fallback = relative URLs, resolved against the web origin and
+// proxied to the API server by Vite in dev/E2E.
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export interface Message {
   id: string;

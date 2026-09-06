@@ -3,7 +3,20 @@ import { ProtocolClient } from '@cycledesign/common-protocol';
 import type { ProtocolClientOptions } from '@cycledesign/common-protocol';
 import { useSingleton } from './useSingleton';
 
-const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+function resolveWsBaseUrl(): string {
+  const explicit = import.meta.env.VITE_WS_URL as string | undefined;
+  if (explicit) {
+    return explicit;
+  }
+  // Derive ws(s):// from the (offset-aware) injected API URL when present.
+  const apiUrl = import.meta.env.VITE_API_URL as string | undefined;
+  if (apiUrl) {
+    return apiUrl.replace(/^http/, 'ws');
+  }
+  return 'ws://localhost:3001';
+}
+
+const WS_BASE_URL = resolveWsBaseUrl();
 
 // Global connection state - shared across all components
 let _isConnected = false;

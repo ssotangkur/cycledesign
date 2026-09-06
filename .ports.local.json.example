@@ -1,0 +1,4 @@
+{
+  "$comment": "Per-checkout port offset (git-ignored). Copy to .ports.local.json and pick an offset unused by sibling checkouts. Effective ports = 3000/3001/3002 + offset (+ E2E_PORT_OFFSET for Playwright). PORT_OFFSET env var overrides this file.",
+  "offset": 0
+}
