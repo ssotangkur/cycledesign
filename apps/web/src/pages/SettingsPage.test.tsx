@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const { listUseQuery, getConfigUseQuery, listModelsUseQuery, updateConfigUseMutation } =
@@ -94,19 +94,19 @@ function applyScenario(scenario: Scenario) {
   };
 
   listUseQuery.mockImplementation(() => ({
-    data: scenario.providers,
+    data: scenario.loadingProviders ? undefined : scenario.providers,
     isLoading: scenario.loadingProviders ?? false,
     error: null,
     refetch: vi.fn(),
   }));
   getConfigUseQuery.mockImplementation(() => ({
-    data: scenario.config,
+    data: scenario.loadingConfig ? undefined : scenario.config,
     isLoading: scenario.loadingConfig ?? false,
     error: null,
     refetch: vi.fn(),
   }));
   listModelsUseQuery.mockImplementation(() => ({
-    data: scenario.models,
+    data: scenario.loadingModels ? undefined : scenario.models,
     isLoading: scenario.loadingModels ?? false,
     error: scenario.modelsError ?? null,
     refetch: scenario.modelsRefetch ?? vi.fn(),
@@ -116,17 +116,39 @@ function applyScenario(scenario: Scenario) {
   return { mutate };
 }
 
-function renderSettingsPage() {
-  const queryClient = new QueryClient({
+function createQueryClient() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <SettingsPage />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+}
+
+function renderSettingsPage(queryClient = createQueryClient()) {
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+  };
+}
+
+function renderSettingsPageAt(route: string, queryClient = createQueryClient()) {
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[route]}>
+          <Routes>
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/" element={<div data-testid="home-page">Home</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 beforeEach(() => {
@@ -134,6 +156,10 @@ beforeEach(() => {
   getConfigUseQuery.mockReset();
   listModelsUseQuery.mockReset();
   updateConfigUseMutation.mockReset();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function openSelect(testId: string) {
@@ -172,17 +198,89 @@ describe('SettingsPage', () => {
     expect(mutate).toHaveBeenCalledWith({ provider: PROVIDER_B.name });
   });
 
+  it('calls mutate with the new model when the model selection changes', () => {
+    const { mutate } = applyScenario(defaultScenario());
+    renderSettingsPage();
+
+    openModelSelect();
+    const listbox = screen.getByRole('listbox');
+    fireEvent.click(within(listbox).getByText('Model A-2'));
+
+    expect(mutate).toHaveBeenCalledWith({ model: MODEL_A2.id });
+  });
+
+  it('enables the models query only when a provider is configured', () => {
+    applyScenario(defaultScenario());
+    renderSettingsPage();
+    expect(listModelsUseQuery).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ enabled: true }),
+    );
+  });
+
+  it('disables the models query when no provider is configured', () => {
+    applyScenario(
+      defaultScenario({
+        config: { provider: undefined, model: undefined, hasApiKey: false },
+        models: [],
+      }),
+    );
+    renderSettingsPage();
+    expect(listModelsUseQuery).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ enabled: false }),
+    );
+  });
+
+  it('registers an onSuccess handler that invalidates config/models and resets the API key input', () => {
+    applyScenario(defaultScenario());
+    const invalidateSpy = vi
+      .spyOn(QueryClient.prototype, 'invalidateQueries')
+      .mockResolvedValue(undefined as unknown as never);
+    renderSettingsPage();
+
+    const options = updateConfigUseMutation.mock.calls[0][0] as {
+      onSuccess?: () => void;
+    };
+    expect(typeof options?.onSuccess).toBe('function');
+
+    const apiKeyField = screen.getByLabelText('API Key') as HTMLInputElement;
+    fireEvent.change(apiKeyField, { target: { value: 'sk-new-key' } });
+    expect(apiKeyField.value).toBe('sk-new-key');
+
+    act(() => {
+      options.onSuccess?.();
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: [['providerConfig', 'getConfig']],
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: [['providerConfig', 'listModels']],
+    });
+    expect(apiKeyField.value).toBe('**********');
+  });
+
+  it('navigates home when the back button is clicked', () => {
+    applyScenario(defaultScenario());
+    renderSettingsPageAt('/settings');
+
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    const backButton = screen
+      .getAllByRole('button')
+      .find((b) => b.textContent === '');
+    expect(backButton).toBeTruthy();
+    fireEvent.click(backButton!);
+
+    expect(screen.getByTestId('home-page')).toBeTruthy();
+    expect(screen.queryByTestId('settings-page')).toBeNull();
+  });
+
   it('resets the model selection when switching to a provider with different model IDs', () => {
     const { mutate: mutateA } = applyScenario(defaultScenario());
 
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const renderResult = render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SettingsPage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    const queryClient = createQueryClient();
+    const renderResult = renderSettingsPage(queryClient);
 
     // Sanity: provider A renders with model A-1 selected, no auto-mutation yet
     expect(mutateA).not.toHaveBeenCalled();
@@ -268,17 +366,52 @@ describe('SettingsPage', () => {
     expect(screen.queryByLabelText('API Key')).toBeNull();
   });
 
+  it('saves a trimmed API key when the Save button is clicked', () => {
+    const { mutate } = applyScenario(
+      defaultScenario({
+        config: { provider: PROVIDER_A.name, model: MODEL_A1.id, hasApiKey: false },
+      }),
+    );
+    renderSettingsPage();
+
+    const apiKeyField = screen.getByLabelText('API Key');
+    const saveButton = screen.getByRole('button', { name: /save api key/i });
+    expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(apiKeyField, { target: { value: '  sk-live-123  ' } });
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(saveButton);
+    expect(mutate).toHaveBeenCalledWith({ apiKey: 'sk-live-123' });
+  });
+
+  it('keeps Save disabled and does not mutate for a blank API key', () => {
+    const { mutate } = applyScenario(
+      defaultScenario({
+        config: { provider: PROVIDER_A.name, model: MODEL_A1.id, hasApiKey: false },
+      }),
+    );
+    renderSettingsPage();
+
+    const apiKeyField = screen.getByLabelText('API Key');
+    fireEvent.change(apiKeyField, { target: { value: '   ' } });
+
+    const saveButton = screen.getByRole('button', { name: /save api key/i });
+    expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
   it('shows a CircularProgress while providers are loading', () => {
     applyScenario(defaultScenario({ loadingProviders: true }));
-    const { container } = renderSettingsPage();
-    expect(container.querySelector('.MuiCircularProgress-root')).toBeTruthy();
+    renderSettingsPage();
+    expect(screen.getByRole('progressbar')).toBeTruthy();
     expect(screen.queryByTestId('settings-page')).toBeNull();
   });
 
   it('shows a CircularProgress while config is loading', () => {
     applyScenario(defaultScenario({ loadingConfig: true }));
-    const { container } = renderSettingsPage();
-    expect(container.querySelector('.MuiCircularProgress-root')).toBeTruthy();
+    renderSettingsPage();
+    expect(screen.getByRole('progressbar')).toBeTruthy();
   });
 
   it('disables the Model select while models are loading', () => {
