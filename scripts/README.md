@@ -170,9 +170,69 @@ docker build -f sandbox.Dockerfile.gui -t cycledesign-sandbox:gui .
 
 | File | Purpose |
 |------|---------|
+| `agent-daemon.ts` | Polling-first runner: watches `ready to plan` / `ready to implement` labels and invokes fire-and-forget skills via the opencode CLI |
 | `sandbox-start.bat` | Windows CMD launcher (wraps PowerShell) |
 | `sandbox-start.ps1` | Windows PowerShell launcher (recommended) |
 | `sandbox-start.sh` | Linux/macOS launcher |
 | `../.qwen/sandbox.Dockerfile.gui` | Custom sandbox Dockerfile |
 | `../.qwen/settings.json` | Qwen Code settings (MCP config) |
 | `../.qwen/SANDBOX.md` | Full sandbox documentation |
+
+## Agent Daemon
+
+Polling-first runner (`agent-daemon.ts`, TypeScript via `npx tsx`) that watches
+issue labels and invokes the fire-and-forget skills via the opencode CLI,
+resuming after each run. Ref: issue #98.
+
+Label → skill mapping:
+
+| Label | Command |
+|-------|---------|
+| `ready to plan` | `opencode run --command "gh-plan-with-reason" "<N>"` |
+| `ready to implement` | `opencode run --command "resolve-issue" "<N>"` |
+
+`question` / `pr ready` are terminal and never re-triggered (not polled).
+Runs are sequential, oldest-first, one CLI at a time. An issue carrying both
+labels is processed once as `ready to implement` (downstream-most state wins).
+
+### Usage
+
+```bash
+npx tsx scripts/agent-daemon.ts --once --dry-run   # single pass, no spawning
+npm run agent-daemon:once                          # single pass for real
+npm run agent-daemon                               # loop forever (60s default)
+```
+
+### Flags
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--repo OWNER/REPO` | `ssotangkur/cycledesign` | Repository to poll (must match `OWNER/REPO`) |
+| `--interval SECONDS` | `60` | Poll interval, positive integer |
+| `--once` | — | Single poll pass, then exit |
+| `--dry-run` | — | Print planned invocations without spawning opencode |
+| `--help` | — | Show usage and exit |
+
+Warning: `npm run` swallows its own `--dry-run` flag instead of forwarding
+it — `npm run agent-daemon:once -- --dry-run` silently runs a REAL pass and
+spawns opencode (verified: it claimed issue #85 for real). Always pass
+`--dry-run` via direct invocation
+(`npx tsx scripts/agent-daemon.ts --once --dry-run`).
+
+### Interval tuning and rate limits
+
+Polling uses the Issues API (`gh issue list --label`), not the Search API
+(Search is capped at 30 req/min). Two `issue list` calls per 60s poll ≈
+120 req/hr, ~2% of the authenticated REST core quota (5000 req/hr, verified
+via `gh api rate_limit`). Lower `--interval` for latency, raise it to cut
+quota further.
+
+### Follow-up: push triggers
+
+Polling is v1 (simple, no infra). If 60s latency becomes a problem, the
+deferred options are:
+
+1. **Repo webhooks** (`issues: labeled`, `issue_comment`): instant, but needs
+   a public endpoint (tunnel/smee.io) for local dev.
+2. **GitHub Actions** (`on: issues: types: [labeled]`) with a self-hosted
+   runner invoking opencode: best for cloud, no local daemon.
