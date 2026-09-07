@@ -192,7 +192,8 @@ Label → skill mapping:
 | `ready to implement` | `opencode run --command "resolve-issue" "<N>"` |
 
 `question` / `pr ready` are terminal and never re-triggered (not polled).
-Runs are sequential, oldest-first, one CLI at a time.
+Runs are sequential, oldest-first, one CLI at a time. An issue carrying both
+labels is processed once as `ready to implement` (downstream-most state wins).
 
 ### Usage
 
@@ -212,8 +213,10 @@ npm run agent-daemon                               # loop forever (60s default)
 | `--dry-run` | — | Print planned invocations without spawning opencode |
 | `--help` | — | Show usage and exit |
 
-Note: `npm run` swallows its own `--dry-run` flag instead of forwarding it,
-so always pass `--dry-run` via direct invocation
+Warning: `npm run` swallows its own `--dry-run` flag instead of forwarding
+it — `npm run agent-daemon:once -- --dry-run` silently runs a REAL pass and
+spawns opencode (verified: it claimed issue #85 for real). Always pass
+`--dry-run` via direct invocation
 (`npx tsx scripts/agent-daemon.ts --once --dry-run`).
 
 ### Interval tuning and rate limits

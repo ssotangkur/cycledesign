@@ -3,9 +3,9 @@
  * Polling-first daemon that watches issue labels and invokes the right
  * fire-and-forget skill via the opencode CLI, resuming after each run.
  *
- * Label -> skill mapping:
- *   "ready to plan"      -> /gh-plan-with-reason
- *   "ready to implement" -> /resolve-issue
+ * Label -> skill mapping (bare command names, no leading slash):
+ *   "ready to plan"      -> gh-plan-with-reason
+ *   "ready to implement" -> resolve-issue
  *
  * "question" / "pr ready" are terminal and never re-triggered (not polled).
  * Skills claim via label swap, so the next poll naturally skips claimed issues.
