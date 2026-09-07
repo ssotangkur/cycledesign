@@ -41,9 +41,10 @@ Or via command:
 
 1. **Fetches latest main** from origin (without checkout - worktree-safe)
 2. **Auto-generates description** from issue title if not provided
-3. **Creates branch** from `origin/main` with format: `issue/{issue-number}/{description}`
+3. **Creates branch** from `origin/main` with format: `issue/{issue-number}/{description}` (idempotent — reuses existing branch if it already exists locally or on origin)
 4. **Pushes branch** to origin and sets upstream tracking
-5. **Returns the branch name** for use by other agents
+5. **Switches to the branch** in the current worktree (with safety checks)
+6. **Returns the branch name** for use by other agents
 
 ## Implementation
 
@@ -51,11 +52,22 @@ Or via command:
 # Fetch latest origin/main (worktree-safe - no checkout needed)
 git fetch origin main
 
-# Create branch directly from origin/main reference (no checkout required)
+# Create branch directly from origin/main reference (no checkout required).
+# Skip if it already exists locally or on origin (idempotent re-run).
 git branch issue/{issueNumber}/{description} origin/main
-
-# Set upstream and push
 git push -u origin issue/{issueNumber}/{description}
+
+# Switch to the branch in the current worktree.
+# Only when safe: working tree has no staged/unstaged changes,
+# and no other worktree already has the branch checked out.
+git checkout issue/{issueNumber}/{description}
+```
+
+Switch guards (check before checkout):
+
+```bash
+git status --porcelain=v1 --untracked-files=no
+git worktree list --porcelain
 ```
 
 ### Auto-Generating Description from Issue Title
@@ -134,7 +146,8 @@ Output: Branch 'issue/41/create-issue-processing-framework' created and pushed
 
 ## Error Handling
 
-- **Branch already exists**: Returns error with suggestion to use different description
+- **Branch already exists**: Reuses the existing branch (verifies origin tracking) and switches to it if safe, instead of erroring
+- **Checkout unsafe**: If the working tree is dirty or another worktree holds the branch, leaves the current checkout alone and returns the branch name with a warning
 - **Invalid issue number**: Returns error (issue number must be numeric)
 - **Issue not found**: Returns error if `gh` can't fetch the issue
 - **Authentication failure**: Uses GH_TOKEN fallback
@@ -142,14 +155,14 @@ Output: Branch 'issue/41/create-issue-processing-framework' created and pushed
 
 ## Worktree-Safe Branch Creation
 
-**Important:** This skill uses `git branch <name> <ref>` instead of `git checkout -b <name> <ref>` to avoid checking out `main`:
+**Important:** Creation uses `git branch <name> <ref>` instead of `git checkout -b <name> <ref>` to avoid checking out `main`:
 
 ```bash
-# Worktree-safe (used by this skill)
+# Worktree-safe creation (used by this skill)
 git branch issue/41/description origin/main
 
-# NOT used (would conflict with other worktrees)
+# NOT used for creation (would conflict with other worktrees)
 git checkout -b issue/41/description origin/main
 ```
 
-This allows branch creation even when `main` is checked out in another worktree.
+This allows branch creation even when `main` is checked out in another worktree. The follow-up `git checkout <name>` only switches the *current* worktree to the already-created branch, and is skipped with a warning when the tree is dirty or another worktree holds the branch.

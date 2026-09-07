@@ -45,10 +45,16 @@ Only proceed to Phase 0 when both pass. Infrastructure failures must never produ
 ### Phase 0 — Claim the issue (you do this, no sub-agent)
 
 1. Parse issue number. Resolve repo (default `ssotangkur/cycledesign`).
-2. Read issue + all comments for context on re-invocations (answers to prior questions live there):
+2. Read issue + visible comments for context on re-invocations (answers to prior questions live there):
    ```bash
    gh issue view <N> --repo ssotangkur/cycledesign --json title,body,labels,comments
    ```
+   Comment hygiene (saves tokens, avoids stale-plan confusion): minimized/hidden comments are superseded by definition — do not read them. `gh issue view` does not flag minimized state, so list it explicitly (substitute the issue number for `<N>`) and skip those IDs:
+   ```bash
+   gh api graphql -F owner=ssotangkur -F repo=cycledesign -F number=<N> -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){comments(first:100){nodes{databaseId,isMinimized,author{login}}}}}}'
+   ```
+   (Variable form — no quoted literals, so it survives shells that mangle inner double quotes.)
+   When several `## Plan with Reason` comments exist, the newest one (follow its `Supersedes` link) is the only plan that counts — record its comment ID and pass it down so sub-agents don't re-read the older ones.
 3. Check for existing work to resume instead of duplicating:
    ```bash
    git branch -a | grep -E "issue/<N>/"
@@ -82,7 +88,7 @@ blocked_reason: <only if BLOCKED>"
 
 ```
 Delegate to coding sub-agent:
-"Implement issue #<N> on branch <branch>. First read the full issue thread via `gh issue view <N> --repo ssotangkur/cycledesign --json title,body,comments`, including all comments — later comments may contain answers to prior blocking questions and extra context tagged for re-invocation. Follow AGENTS.md and existing patterns. Commit as you go (conventional commits). Do NOT run full validation, E2E, review, or PR creation — wrap-up handles that.
+"Implement issue #<N> on branch <branch>. First read the issue plus visible (non-minimized) comments via `gh issue view <N> --repo ssotangkur/cycledesign --json title,body,comments` — skip minimized/hidden comments; if several `## Plan with Reason` comments exist, read only the newest (comment ID <plan-comment-id>, following its `Supersedes` link). Later comments may contain answers to prior blocking questions and extra context tagged for re-invocation. Follow AGENTS.md and existing patterns. Commit as you go (conventional commits). Do NOT run full validation, E2E, review, or PR creation — wrap-up handles that.
 
 Return contract:
 status: DONE|BLOCKED
