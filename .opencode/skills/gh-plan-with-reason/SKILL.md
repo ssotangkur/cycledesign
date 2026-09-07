@@ -27,7 +27,7 @@ ready to plan <-> question -> ready to implement
 - Human answers in comments, removes `question`, adds `ready to plan`, re-invokes.
 - Done: post `## Plan with Reason`, add `ready to implement`, remove `question`.
 
-Label moves are idempotent — safe when absent.
+Label moves are idempotent in intent — `gh issue edit --remove-label` still exits nonzero with `'label' not found` when absent. Ignore "label not present" errors and continue.
 
 ## Inputs
 
@@ -46,13 +46,15 @@ Require before starting:
 1. Parse issue number and repo.
 2. Read issue + all comments. Find the last visible `## Planning Questions - Round` comment and any human comments after it.
 3. If a hidden state block exists in that Round comment, parse it:
-   `<!-- gh-plan-state {"round":N,"ads":[...],"settled":{...},"pruned":[...]} -->`
-   If missing or corrupt, fall back to parsing prose. Never crash.
-4. No-answer guard: if invoked with `ready to plan` but no new human comments since the last Round, stop with a chat-only note. Do not post a duplicate Round.
-5. Claim:
+   `<!-- gh-plan-state {"v":1,"round":N,"ads":[...],"settled":{...},"pruned":[...]} -->`
+   If missing or corrupt, fall back to parsing prose. Never crash. Ignore blocks with an unknown `"v"` — fall back to prose.
+4. No-answer guard: if a prior Round exists and there are no new human comments since it, stop with a chat-only note — even if invoked with `ready to plan`. Do not post a duplicate Round.
+5. First-run rule: no labels + no prior Round comments = initial planning request. Proceed (do not stop for missing `ready to plan`).
+6. Claim:
    ```bash
    gh issue edit <N> --repo <owner/repo> --remove-label "ready to plan" --remove-label "question"
    ```
+   Ignore "label not present" errors — continue.
 
 ### Phase 1 — Anchor to the issue
 
@@ -68,7 +70,7 @@ For every open question, classify as **fact** (answerable from repo) or **decisi
 
 Rules:
 - Never ask for anything you could look up yourself.
-- Record every auto-answered fact as `AD-n` with evidence `file:line`. AD-IDs are stable, never renumbered once posted. Copy them forward each round.
+- Record every auto-answered fact as `AD-n` with evidence `file:line`. AD-IDs are stable, never renumbered once posted. Copy them forward each round. Superseded ADs stay listed as `AD-n SUPERSEDED by AD-m (<reason>)` — never delete, never reuse the ID.
 - On resume, verify each AD cheaply (`read` the cited `file:line`). If the file changed, mark `AD-n STALE` and re-open as a question. Full search only for new frontier.
 
 ### Phase 3 — Grill via comments
@@ -97,11 +99,10 @@ Rules:
 - Number each question, give your recommended answer.
 - A question depending on a still-open question belongs to a later round.
 - Append hidden state to the same comment:
-  `<!-- gh-plan-state {"round":N,"ads":[...],"settled":{...},"pruned":[...]} -->`
-- Minimize the previous Round comment as OUTDATED so the issue shows exactly one current Round:
+  `<!-- gh-plan-state {"v":1,"round":N,"ads":[...],"settled":{...},"pruned":[...]} -->`
+- Minimize the previous Round comment as OUTDATED so the issue shows exactly one current Round. The `id` field from `gh issue view --json comments` is already a node ID (`IC_...`) — pass it directly, no lookup step:
   ```bash
-  gh api repos/<owner>/<repo>/issues/comments/<comment-id> --jq .node_id
-  gh api graphql -f query='mutation($id:ID!,$classifier:ReportedContentClassifiers!){minimizeComment(input:{subjectId:$id,classifier:$classifier}){minimizedComment{isMinimized}}}' -f id='<node_id>' -f classifier=OUTDATED
+  gh api graphql -f query='mutation($id:ID!,$classifier:ReportedContentClassifiers!){minimizeComment(input:{subjectId:$id,classifier:$classifier}){minimizedComment{isMinimized}}}' -f id='<comment-id>' -f classifier=OUTDATED
   ```
   Only minimize superseded Round comments. Never minimize human replies or plans. Only minimize after verifying Round N carries forward all ADs + Settled from N-1.
 - Overflow: split into `Round N (1/2)`, `(2/2)` follow-up comments. Never use gists.
@@ -146,8 +147,9 @@ Also include **Out of scope** and **Verification**. A posted plan has no unresol
 ### Phase 5 — Implementer review (adversarial pass)
 
 1. Spawn a review subagent (`general` / `review`) with issue + draft plan + repo access.
-2. Triage: ignore gaps closable by trivial search. Flag gaps needing detailed analysis.
-3. Resolve each finding: **Address** (fix plan), **Refute** (reject with evidence), **Escalate** (new decision → back to Phase 3 as a question round).
+2. Triage: ignore gaps closable by trivial code search. Flag gaps needing detailed analysis.
+3. Probe before escalate: if a finding claims something is untestable or ambiguous (CLI syntax, API shape, exit codes), first try a cheap empirical probe yourself — e.g. a deliberately-failing invocation that surfaces usage errors without doing real work. Only findings that survive probing become questions.
+4. Resolve each finding: **Address** (fix plan), **Refute** (reject with evidence), **Escalate** (new decision → back to Phase 3 as a question round).
 4. Loop cap: max 10 rounds. On cap, escalate to user as questions.
 
 ### Phase 6 — Record in the issue
