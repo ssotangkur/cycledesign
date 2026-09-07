@@ -1,4 +1,10 @@
 import { test, expect } from '../fixtures/test-fixtures';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { getPorts } = require('../../../scripts/ports.cjs') as {
+  getPorts: (options?: { e2e?: boolean }) => { web: number; server: number; preview: number };
+};
 
 /**
  * E2E Tests for Settings Page - Provider/Model Selection Flow
@@ -24,12 +30,12 @@ test.describe('Settings - Provider/Model Selection', () => {
   });
 
   test('should update model dropdown when provider changes', async ({ authenticatedPage, useMockProvider }) => {
+    // Select mock first so settings queries load against mock state
+    await useMockProvider();
+
     // Navigate to settings page
     await authenticatedPage.goto('/settings');
     await expect(authenticatedPage.getByTestId('settings-page')).toBeVisible();
-
-    // Use mock provider for deterministic testing
-    await useMockProvider();
 
     // Get the provider select
     const providerSelect = authenticatedPage.getByTestId('provider-select');
@@ -74,12 +80,12 @@ test.describe('Settings - Provider/Model Selection', () => {
   });
 
   test('should reset model selection when provider changes', async ({ authenticatedPage, useMockProvider }) => {
+    // Select mock first so settings queries load against mock state
+    await useMockProvider();
+
     // Navigate to settings page
     await authenticatedPage.goto('/settings');
     await expect(authenticatedPage.getByTestId('settings-page')).toBeVisible();
-
-    // Use mock provider for deterministic testing
-    await useMockProvider();
 
     // Get the provider select
     const providerSelect = authenticatedPage.getByTestId('provider-select');
@@ -123,12 +129,12 @@ test.describe('Settings - Provider/Model Selection', () => {
   });
 
   test('should save settings with valid provider + model pair', async ({ authenticatedPage, useMockProvider }) => {
+    // Select mock first so settings queries load against mock state
+    await useMockProvider();
+
     // Navigate to settings page
     await authenticatedPage.goto('/settings');
     await expect(authenticatedPage.getByTestId('settings-page')).toBeVisible();
-
-    // Use mock provider for deterministic testing
-    await useMockProvider();
 
     // Get the provider select
     const providerSelect = authenticatedPage.getByTestId('provider-select');
@@ -182,12 +188,12 @@ test.describe('Settings - Provider/Model Selection', () => {
   });
 
   test('should load settings with correct provider + model pre-selected', async ({ authenticatedPage, useMockProvider }) => {
+    // Select mock first so settings queries load against mock state
+    await useMockProvider();
+
     // Navigate to settings
     await authenticatedPage.goto('/settings');
     await expect(authenticatedPage.getByTestId('settings-page')).toBeVisible();
-
-    // Use mock provider for deterministic testing
-    await useMockProvider();
 
     // Get the provider select and note the value
     const providerSelect = authenticatedPage.getByTestId('provider-select');
@@ -223,6 +229,39 @@ test.describe('Settings - Provider/Model Selection', () => {
       // Model should have a value after reload (either same model or first available)
       expect(modelAfter && modelAfter.trim().length > 0).toBe(true);
     }
+  });
+
+  test('should round-trip provider selection mock -> qwen -> mock', async ({ authenticatedPage, useMockProvider }) => {
+    // Start from an explicitly selected mock provider
+    await useMockProvider();
+
+    await authenticatedPage.goto('/settings');
+    await expect(authenticatedPage.getByTestId('settings-page')).toBeVisible();
+
+    const { server } = getPorts({ e2e: true });
+    const base = `http://localhost:${server}/trpc`;
+    const emptyInput = encodeURIComponent(JSON.stringify({ '0': { json: null } }));
+    const getServerProvider = async (): Promise<string> => {
+      const res = await authenticatedPage.request.get(
+        `${base}/providerConfig.getConfig?batch=1&input=${emptyInput}`
+      );
+      expect(res.ok()).toBe(true);
+      const json = (await res.json() as Array<{ result?: { data?: { json?: { provider?: string } } } }>)?.[0]?.result?.data?.json;
+      return json?.provider ?? '';
+    };
+
+    // Leg 1: mock (also exercises the SettingsPage model-reset path on each switch)
+    expect(await getServerProvider()).toBe('mock');
+
+    // Leg 2: switch to qwen via the Settings UI
+    await authenticatedPage.getByTestId('provider-select').click();
+    await authenticatedPage.getByRole('option', { name: 'Qwen (OAuth - Free)' }).click();
+    await expect.poll(getServerProvider, { timeout: 10000 }).toBe('qwen');
+
+    // Leg 3: switch back to mock via the Settings UI (leaves state at mock)
+    await authenticatedPage.getByTestId('provider-select').click();
+    await authenticatedPage.getByRole('option', { name: 'Mock Provider' }).click();
+    await expect.poll(getServerProvider, { timeout: 10000 }).toBe('mock');
   });
 
   test('should show error state with retry option when model loading fails', async ({ authenticatedPage }) => {
