@@ -128,7 +128,9 @@ export const providersRouter = router({
       // Save to provider's own config file (e.g., mistral-api-key)
       providerClass?.saveConfig(newProviderConfig);
 
-      if (provider && provider !== previousProvider) {
+      // Unknown providers (e.g. mock without the flag) are a silent no-op:
+      // selection stays on the previous provider, no error path.
+      if (provider && provider !== previousProvider && providerMap.has(provider)) {
         configState.current.provider = provider;
         saveConfig(configState.current);
       }
