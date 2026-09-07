@@ -43,18 +43,25 @@ activity).
    Exit 0 = all free; exit 1 = busy (output names the owning process). If the
    ports you need are already up and healthy (server `/health`, web root),
    reuse them — do not boot.
-2. **Never foreground-boot. Launch detached, then poll.** On Windows
+2. **Never foreground-boot. Launch detached, then poll.** The launch must
+   survive the tool call — PowerShell `Start-Job` does NOT (jobs die with
+   the shell that created them, so the boot never happens). On Windows
    PowerShell:
    ```powershell
-   Start-Job -Name <dev|e2e> -ScriptBlock { Set-Location $using:PWD; npm run <dev|dev:e2e> } | Out-Null
+   Start-Process -FilePath 'cmd' -ArgumentList '/c npm run <dev|dev:e2e> > tmp/<dev|e2e>-boot.log 2>&1' -WorkingDirectory $PWD -WindowStyle Hidden
    ```
-   (POSIX: `nohup … & disown`.) Never block on / await the job or process
-   itself — only on a bounded readiness poll.
+   (POSIX: `nohup npm run <dev|dev:e2e> > tmp/<dev|e2e>-boot.log 2>&1 &` —
+   `disown` is bash-only, omit it under POSIX `sh`.) The command returns
+   immediately; never block on / await the server process itself — only on
+   a bounded readiness poll. For E2E, prefer no manual boot at all:
+   `npx playwright test` manages the E2E stack itself via `webServer`
+   (`reuseExistingServer` locally, 120s timeout) — only boot manually when
+   bypassing `webServer`.
 3. **Bound every boot with a readiness timeout.** Poll port readiness (server
    `/health`, web root; resolve ports via `node scripts/ports.cjs [--e2e]`)
    in a loop that fails after N minutes (3–5 min is typical) if the port never
    opens. A timed-out boot is BLOCKED — report the command plus a log tail
-   (`Receive-Job`, `tmp/server.log` / `tmp/web.log`) — never a silent hang.
+   (`tmp/<dev|e2e>-boot.log`, `tmp/server.log` / `tmp/web.log`) — never a silent hang.
 4. **Scope discipline.** `dev` only kills dev ports, `dev:e2e --kill-first`
    only kills E2E ports — E2E boots never disturb manual dev servers and vice
    versa. Never kill ports owned by another checkout; give this checkout its

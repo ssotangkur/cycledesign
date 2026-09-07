@@ -7,7 +7,8 @@ description: Start the CycleDesign dev server on Windows with proper port killin
 
 > **Agents/subagents:** these commands never exit — never run them in the
 > foreground inside a tool call or the call hangs forever (see #110). Launch
-> detached (`Start-Job` on Windows, `nohup … & disown` on POSIX), then poll
+> detached — `Start-Process` hidden on Windows (`Start-Job` does NOT survive
+> the tool call: jobs die with their shell), `nohup … &` on POSIX — then poll
 > port readiness with a bounded timeout (fail after a few minutes if the port
 > never opens). Reuse first: `node scripts/check-ports.cjs [--e2e]` — only
 > boot when the ports you need are actually free. Details in the `wrap-up`
