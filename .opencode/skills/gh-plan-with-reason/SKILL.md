@@ -11,21 +11,21 @@ Labels are state, the issue thread is memory. Each run is stateless and ends in 
 
 ## Terminal states (only two valid endings)
 
-1. **Ready:** plan posted, issue labeled `ready to implement`.
-2. **Blocked:** questions posted, issue labeled `question`.
+1. **Ready:** plan posted, issue labeled `ready to implement` (`planning` + `question` removed).
+2. **Blocked:** questions posted, issue labeled `question` (`planning` removed).
 
 There is no silent exit. Never use the `question` tool. Never ask the user directly.
 
 ## Label state machine
 
 ```
-ready to plan <-> question -> ready to implement
+ready to plan -> planning <-> question -> ready to implement
 ```
 
-- Claim (you do this): remove `ready to plan` + `question`.
-- Need answers: post Round N comment, add `question`, stop.
+- Claim (you do this): remove `ready to plan` + `question`, add `planning`.
+- Need answers: post Round N comment, remove `planning`, add `question`, stop.
 - Human answers in comments, removes `question`, adds `ready to plan`, re-invokes.
-- Done: post `## Plan with Reason`, add `ready to implement`, remove `question`.
+- Done: post `## Plan with Reason`, add `ready to implement`, remove `planning` + `question`.
 
 Label moves are idempotent in intent — `gh issue edit --remove-label` still exits nonzero with `'label' not found` when absent. Ignore "label not present" errors and continue.
 
@@ -52,7 +52,7 @@ Require before starting:
 5. First-run rule: no labels + no prior Round comments = initial planning request. Proceed (do not stop for missing `ready to plan`).
 6. Claim:
    ```bash
-   gh issue edit <N> --repo <owner/repo> --remove-label "ready to plan" --remove-label "question"
+   gh issue edit <N> --repo <owner/repo> --remove-label "ready to plan" --remove-label "question" --add-label "planning"
    ```
    Ignore "label not present" errors — continue.
 
@@ -108,7 +108,7 @@ Rules:
 - Overflow: split into `Round N (1/2)`, `(2/2)` follow-up comments. Never use gists.
 - Swap labels:
   ```bash
-  gh issue edit <N> --repo <owner/repo> --add-label "question"
+  gh issue edit <N> --repo <owner/repo> --remove-label "planning" --add-label "question"
   ```
   Use a tmp file for long bodies (`gh issue comment <N> --body-file tmp/plan-round-N.md`).
 - Stop. Reply in chat with comment URL + blocker summary.
@@ -159,7 +159,7 @@ Also include **Out of scope** and **Verification**. A posted plan has no unresol
 3. If superseding a prior plan, minimize the old plan comment(s) as OUTDATED (same mutation as Phase 3).
 4. Mark ready:
    ```bash
-   gh issue edit <N> --repo <owner/repo> --add-label "ready to implement" --remove-label "question"
+   gh issue edit <N> --repo <owner/repo> --add-label "ready to implement" --remove-label "planning" --remove-label "question"
    ```
 5. Reply in chat with comment URL + 3-line summary. Do not start implementing — planning and implementing are separate tasks.
 
