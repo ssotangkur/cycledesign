@@ -1,4 +1,10 @@
 import { test as base, expect, type Page } from '@playwright/test';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { getPorts } = require('../../../scripts/ports.cjs') as {
+  getPorts: (options?: { e2e?: boolean }) => { web: number; server: number; preview: number };
+};
 
 /**
  * Extended test fixtures for CycleDesign E2E tests
@@ -45,21 +51,53 @@ export const test = base.extend<TestFixtures>({
   },
 
   /**
-   * Fixture to switch to mock provider for deterministic E2E tests
-   * Sets localStorage and reloads the page to apply the provider change
+   * Fixture to switch to mock provider for deterministic E2E tests.
+   *
+   * Selects mock headlessly via tRPC `providerConfig.updateConfig` and
+   * asserts server truth (`getConfig` + `listModels`) before returning.
+   * Throws on mismatch so tests fail fast instead of silently chatting
+   * against a real provider. Must be called before any chat assertion —
+   * a cold Qwen boot triggers the device-auth flow.
    */
   useMockProvider: async ({ page }, use) => {
-    // Switch to mock provider via localStorage
-    await page.evaluate(() => {
-      localStorage.setItem('cycledesign:provider', 'mock');
-    });
+    const selectMockProvider = async (): Promise<void> => {
+      const { server } = getPorts({ e2e: true });
+      const base = `http://localhost:${server}/trpc`;
 
-    // Reload to apply provider change
-    await page.reload();
-    await page.waitForSelector('[data-testid="app-layout"]', { timeout: 15000 });
+      const updateRes = await page.request.post(
+        `${base}/providerConfig.updateConfig?batch=1`,
+        { data: { '0': { json: { provider: 'mock' } } } }
+      );
+      if (!updateRes.ok()) {
+        throw new Error(`useMockProvider: updateConfig failed with status ${updateRes.status()}`);
+      }
 
-    // Provide a no-op function as the fixture value
-    await use(async () => {});
+      const emptyInput = encodeURIComponent(JSON.stringify({ '0': { json: null } }));
+
+      const configRes = await page.request.get(
+        `${base}/providerConfig.getConfig?batch=1&input=${emptyInput}`
+      );
+      if (!configRes.ok()) {
+        throw new Error(`useMockProvider: getConfig failed with status ${configRes.status()}`);
+      }
+      const configJson = (await configRes.json() as Array<{ result?: { data?: { json?: { provider?: string } } } }>)?.[0]?.result?.data?.json;
+      if (configJson?.provider !== 'mock') {
+        throw new Error(`useMockProvider: expected getConfig().provider 'mock', got '${configJson?.provider}'`);
+      }
+
+      const modelsRes = await page.request.get(
+        `${base}/providerConfig.listModels?batch=1&input=${emptyInput}`
+      );
+      if (!modelsRes.ok()) {
+        throw new Error(`useMockProvider: listModels failed with status ${modelsRes.status()}`);
+      }
+      const models = (await modelsRes.json() as Array<{ result?: { data?: { json?: Array<{ id?: string }> } } }>)?.[0]?.result?.data?.json;
+      if (!Array.isArray(models) || !models.some((m) => m?.id === 'mock-model')) {
+        throw new Error(`useMockProvider: expected listModels() to contain 'mock-model', got '${JSON.stringify(models)}'`);
+      }
+    };
+
+    await use(selectMockProvider);
   },
 });
 
