@@ -33,8 +33,9 @@ export interface GatewayModelOptions {
 
 // Wrap global fetch so each outgoing HTTP request carries fresh dynamic
 // headers. Handles both string-URL and Request inputs; skips undefined
-// values so static creation-time headers are never clobbered.
-function withDynamicHeaders(
+// values so static creation-time headers are never clobbered. Exported for
+// the header-freshness probe (two successive calls must carry different IDs).
+export function withDynamicHeaders(
   dynamicHeaders: () => Record<string, string | undefined>,
 ): FetchFunction {
   return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {

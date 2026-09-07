@@ -1,12 +1,13 @@
 import { QwenProvider } from './qwen.js';
 import { MistralProvider } from './mistral.js';
 import { OpenRouterFreeProvider } from './openrouter-free.js';
+import { ZenFreeProvider } from './zen-free.js';
 import { MockProvider } from './mock.js';
 import { IProvider } from '../types.js';
 import { getProviderConfig } from '../../trpc/routers/providers.js';
 import { BaseProvider } from './base-provider.js';
 
-export type LLMProvider = QwenProvider | MistralProvider | OpenRouterFreeProvider | MockProvider;
+export type LLMProvider = QwenProvider | MistralProvider | OpenRouterFreeProvider | ZenFreeProvider | MockProvider;
 
 let cachedProvider: IProvider | null = null;
 
@@ -42,6 +43,12 @@ export function getLLMProvider(): IProvider {
   if (config.provider === 'openrouter-free') {
     cachedProvider = new OpenRouterFreeProvider();
     console.log('[ProviderFactory] Using OpenRouterFreeProvider');
+    return cachedProvider;
+  }
+
+  if (config.provider === 'zen-free') {
+    cachedProvider = new ZenFreeProvider();
+    console.log('[ProviderFactory] Using ZenFreeProvider');
     return cachedProvider;
   }
 
