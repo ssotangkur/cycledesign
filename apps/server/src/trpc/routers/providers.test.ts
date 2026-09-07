@@ -55,6 +55,13 @@ describe('providers router without ENABLE_MOCK_PROVIDER', () => {
     const after = await caller.getConfig();
     expect(after.provider).toBe(before.provider);
   });
+
+  it('writes no config file on unknown-provider no-op', async () => {
+    const caller = await loadRouter();
+    await caller.updateConfig({ provider: 'mock' });
+    expect(existsSync(join(tmpDir, '.cycledesign', 'provider-config.json'))).toBe(false);
+    expect(existsSync(join(tmpDir, '.cycledesign-e2e'))).toBe(false);
+  });
 });
 
 describe('providers router with ENABLE_MOCK_PROVIDER=true', () => {

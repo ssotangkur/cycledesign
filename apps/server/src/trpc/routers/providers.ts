@@ -117,6 +117,18 @@ export const providersRouter = router({
       const { provider, apiKey, model } = input;
 
       const previousProvider = configState.current.provider;
+
+      // Unknown providers (e.g. mock without the flag) are a silent no-op:
+      // return previous state without writing any config or clearing caches.
+      if (provider && !providerMap.has(provider)) {
+        const previousClass = providerMap.get(previousProvider);
+        return {
+          provider: previousProvider,
+          model: previousClass?.loadConfig()?.model || '',
+          hasApiKey: previousClass?.hasApiKey?.() ?? false,
+        };
+      }
+
       const newProvider = provider && providerMap.has(provider)
         ? provider
         : previousProvider;
@@ -132,9 +144,8 @@ export const providersRouter = router({
       // Save to provider's own config file (e.g., mistral-api-key)
       providerClass?.saveConfig(newProviderConfig);
 
-      // Unknown providers (e.g. mock without the flag) are a silent no-op:
-      // selection stays on the previous provider, no error path.
-      if (provider && provider !== previousProvider && providerMap.has(provider)) {
+      // Selection stays on the previous provider, no error path.
+      if (provider && provider !== previousProvider) {
         configState.current.provider = provider;
         saveConfig(configState.current);
       }

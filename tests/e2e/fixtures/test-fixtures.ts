@@ -64,9 +64,17 @@ export const test = base.extend<TestFixtures>({
       const { server } = getPorts({ e2e: true });
       const base = `http://localhost:${server}/trpc`;
 
+      // NOTE: tRPC v11 batch POST bodies carry raw input per index
+      // ({"0": {...}}), NOT the {"0": {"json": ...}} envelope used for GET
+      // query-string inputs. The {"json": ...} wrapper here yields input {}
+      // and a silent no-op, so tests would chat against Qwen while
+      // attributed to mock. Verified against live E2E server responses.
       const updateRes = await page.request.post(
         `${base}/providerConfig.updateConfig?batch=1`,
-        { data: { '0': { json: { provider: 'mock' } } } }
+        {
+          headers: { 'content-type': 'application/json' },
+          data: JSON.stringify({ '0': { provider: 'mock' } }),
+        }
       );
       if (!updateRes.ok()) {
         throw new Error(`useMockProvider: updateConfig failed with status ${updateRes.status()}`);
@@ -80,7 +88,9 @@ export const test = base.extend<TestFixtures>({
       if (!configRes.ok()) {
         throw new Error(`useMockProvider: getConfig failed with status ${configRes.status()}`);
       }
-      const configJson = (await configRes.json() as Array<{ result?: { data?: { json?: { provider?: string } } } }>)?.[0]?.result?.data?.json;
+      // NOTE: responses are {"result": {"data": <output>}} — no nested
+      // "json" envelope with the default transformer.
+      const configJson = (await configRes.json() as Array<{ result?: { data?: { provider?: string } } }>)?.[0]?.result?.data;
       if (configJson?.provider !== 'mock') {
         throw new Error(`useMockProvider: expected getConfig().provider 'mock', got '${configJson?.provider}'`);
       }
@@ -91,7 +101,7 @@ export const test = base.extend<TestFixtures>({
       if (!modelsRes.ok()) {
         throw new Error(`useMockProvider: listModels failed with status ${modelsRes.status()}`);
       }
-      const models = (await modelsRes.json() as Array<{ result?: { data?: { json?: Array<{ id?: string }> } } }>)?.[0]?.result?.data?.json;
+      const models = (await modelsRes.json() as Array<{ result?: { data?: Array<{ id?: string }> } }>)?.[0]?.result?.data;
       if (!Array.isArray(models) || !models.some((m) => m?.id === 'mock-model')) {
         throw new Error(`useMockProvider: expected listModels() to contain 'mock-model', got '${JSON.stringify(models)}'`);
       }
