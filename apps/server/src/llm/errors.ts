@@ -15,6 +15,18 @@ export class AuthError extends Error {
   }
 }
 
+// Distinct subclass for free-tier daily/quota exhaustion on free providers
+// (Zen Free today; precursor to a future multi-gateway fallback chain that
+// will catch this subclass distinctly while existing `instanceof
+// RateLimitError` checks keep working). Message wording should name the
+// provider, note unpublished per-model daily limits, and suggest retry/reset.
+export class FreeUsageLimitError extends RateLimitError {
+  constructor(message: string, retryAfterMs: number = 60000) {
+    super(message, retryAfterMs);
+    this.name = 'FreeUsageLimitError';
+  }
+}
+
 export class ProviderError extends Error {
   status?: number;
   retryAfterMs?: number;
