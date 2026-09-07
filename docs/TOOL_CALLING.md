@@ -1416,12 +1416,18 @@ ENABLE_MOCK_PROVIDER=true
 ```
 
 **Testing:**
+`ENABLE_MOCK_PROVIDER=true` only registers the mock provider — the server
+still boots to file/default (`qwen`). Tests select mock explicitly via the
+`useMockProvider` fixture, which calls
+`providerConfig.updateConfig({ provider: 'mock' })` over tRPC and asserts
+server truth (`getConfig().provider === 'mock'` and `listModels()` contains
+`mock-model`) before any chat assertion runs:
 ```typescript
-// In E2E test fixture
-await page.evaluate(() => {
-  localStorage.setItem('cycledesign:provider', 'mock');
+// In E2E tests (tests/e2e/fixtures/test-fixtures.ts)
+test('should work with mock provider', async ({ useMockProvider }) => {
+  await useMockProvider(); // explicit select + fail-fast server assert
+  // ... test code
 });
-await page.reload();
 ```
 
 ### When to Use

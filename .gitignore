@@ -65,6 +65,7 @@ coverage/
 
 # App data
 .cycledesign/
+.cycledesign-e2e/
 
 # Generated design files
 workspace/
