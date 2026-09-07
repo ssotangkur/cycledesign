@@ -39,6 +39,11 @@ const ZEN_FREE_CONFIG_FILE = join(CONFIG_DIR, 'zen-free.json');
 
 const ZEN_CATALOG_TTL_MS = 60 * 60 * 1000;
 
+// Upper bound for the live catalog probe: listModels() must never hang
+// Settings (cold path awaits this), so a stalled connection aborts into the
+// normal catch path (stale-serve, or [] with no cache).
+const ZEN_CATALOG_TIMEOUT_MS = 10 * 1000;
+
 interface ZenFreeFileConfig {
   apiKey?: string;
   model?: string;
@@ -128,7 +133,9 @@ interface ZenModelsResponse {
 
 async function fetchZenModelIds(): Promise<string[]> {
   // Catalog endpoint responds unauthenticated — auth only on the chat path.
-  const response = await fetch(`${ZEN_BASE_URL}/models`);
+  const response = await fetch(`${ZEN_BASE_URL}/models`, {
+    signal: AbortSignal.timeout(ZEN_CATALOG_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch Zen model catalog: ${response.status} ${response.statusText}`);
   }

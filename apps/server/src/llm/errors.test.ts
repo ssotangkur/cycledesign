@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { RateLimitError, AuthError, ProviderError } from './errors.js';
+import { RateLimitError, AuthError, ProviderError, FreeUsageLimitError } from './errors.js';
 
 describe('Custom Errors', () => {
   describe('RateLimitError', () => {
@@ -34,6 +34,20 @@ describe('Custom Errors', () => {
 
     it('should create with retryAfterMs', () => {
       const error = new ProviderError('Rate limited', 429, 5000);
+      expect(error.retryAfterMs).toBe(5000);
+    });
+  });
+
+  describe('FreeUsageLimitError', () => {
+    it('should default retryAfterMs to 60s', () => {
+      const error = new FreeUsageLimitError('Zen Free usage limit reached');
+      expect(error.name).toBe('FreeUsageLimitError');
+      expect(error.retryAfterMs).toBe(60000);
+    });
+
+    it('should stay catchable as RateLimitError', () => {
+      const error = new FreeUsageLimitError('limit', 5000);
+      expect(error).toBeInstanceOf(RateLimitError);
       expect(error.retryAfterMs).toBe(5000);
     });
   });
