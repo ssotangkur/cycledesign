@@ -57,6 +57,35 @@ Examples:
 - `Related to` - Tangentially related issues
 - `Refs` - References without implying resolution
 
+**Closes vs partial decision rule:**
+- Use `Closes`/`Fixes`/`Resolves` only when the PR completes every acceptance item on the linked issue.
+- Use `Part of #<orig>` + `Refs #<followup>` when the PR lands only part of the issue and the remainder moves to a followup issue. The followup number must exist before merge (create it first if missing).
+- Partial footer form:
+  ```markdown
+  ## Related Issues
+  Part of #<orig>
+  Refs #<followup> (<what stays open there>)
+  ```
+- Partial case requires the orchestrator (`resolve-issue` Phase 4, canonical owner) to post a status comment on the original issue at PR-ready time — see the forward template below. Canonical template lives in `resolve-issue` Phase 4 — keep this mirror in sync.
+
+**Partial status comment template (mirror of canonical):**
+```markdown
+Partial completion pending merge of #<PR> (head <SHA> at PR-ready; merge SHA will differ).
+Landed: <1-3 bullets>.
+Remaining: <acceptance items> → tracked in #<followup>.
+```
+
+**`pr-creator` return contract (for `resolve-issue` Phase 4 keyword test):**
+```text
+status: DONE|BLOCKED
+pr_url: <full PR URL>
+pr_number: <number>
+footer_keywords: <list of Related-Issues keywords used, e.g. [Part of, Refs]>
+partial: <true if the footer uses Part of|Refs|Related to instead of Closes|Fixes|Resolves, else false>
+followup: <#N of the followup issue when partial, else none>
+blocked_reason: <only if BLOCKED>
+```
+
 ## PR Description Format
 
 When linked to an issue, the PR description includes:
