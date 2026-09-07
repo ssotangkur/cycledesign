@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { MistralProvider } from '../../llm/providers/mistral.js';
 import { QwenProvider } from '../../llm/providers/qwen.js';
 import { OpenRouterFreeProvider } from '../../llm/providers/openrouter-free.js';
+import { ZenFreeProvider } from '../../llm/providers/zen-free.js';
 import { MockProvider } from '../../llm/providers/mock.js';
 import { BaseProvider } from '../../llm/providers/base-provider.js';
 import { clearProviderCache } from '../../llm/providers/provider-factory.js';
@@ -30,6 +31,7 @@ const providers: IProviderClass[] = [
   QwenProvider,
   MistralProvider,
   OpenRouterFreeProvider,
+  ZenFreeProvider,
   ...(process.env.ENABLE_MOCK_PROVIDER === 'true' ? [MockProvider] : []),
 ];
 const providerMap = new Map(providers.map((p) => [p.name(), p]));
