@@ -16,7 +16,11 @@ export function getProviderConfig(): { provider: string } {
   return { provider: configState.current.provider };
 }
 
-const CONFIG_DIR = join(process.cwd(), '.cycledesign');
+const CONFIG_DIR =
+  process.env.CYCLEDESIGN_CONFIG_DIR ??
+  (process.env.CYCLEDESIGN_E2E === '1'
+    ? join(process.cwd(), '.cycledesign-e2e')
+    : join(process.cwd(), '.cycledesign'));
 const CONFIG_FILE = join(CONFIG_DIR, 'provider-config.json');
 
 const providers: IProviderClass[] = [
@@ -50,11 +54,6 @@ function ensureConfigDir(): void {
 }
 
 function loadConfig(): ProviderConfig {
-  // Force mock provider when ENABLE_MOCK_PROVIDER is set (e.g., in E2E tests)
-  if (process.env.ENABLE_MOCK_PROVIDER === 'true') {
-    return { provider: 'mock' };
-  }
-  
   try {
     if (existsSync(CONFIG_FILE)) {
       const data = readFileSync(CONFIG_FILE, 'utf-8');
