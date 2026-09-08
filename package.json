@@ -31,10 +31,11 @@
         "knip": "knip --include files,dependencies,unlisted,unresolved",
         "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit --project apps/server/tsconfig.json && cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit --project apps/web/tsconfig.json",
         "validate": "npm run lint && npm run typecheck && npm run knip",
-        "test": "npm run test --workspaces",
+        "test": "npm run test --workspaces --if-present",
         "test:e2e": "npm run test:e2e --workspace=@cycledesign/e2e",
         "test:e2e:ui": "npm run test:e2e:ui --workspace=@cycledesign/e2e",
         "test:e2e:debug": "npm run test:e2e:debug --workspace=@cycledesign/e2e",
+        "test:daemon": "tsx --test scripts/agent-daemon-classify.test.ts scripts/agent-daemon-policy.test.ts",
         "install:e2e:browsers": "npm run install:browsers --workspace=@cycledesign/e2e"
     },
     "devDependencies": {

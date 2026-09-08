@@ -22,6 +22,9 @@ build/
 # Per-checkout port offset (see .ports.local.json.example)
 .ports.local.json
 
+# Agent daemon settings (see .agent-daemon.env.example)
+.agent-daemon.env
+
 # Logs
 logs
 *.log
