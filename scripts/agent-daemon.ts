@@ -40,6 +40,12 @@
  *   Unknown event types pass through untagged. Only `type`, `sessionID`,
  *   `part.sessionID` are ever parsed structurally. `--dry-run` prints the
  *   full planned command including `--model`.
+ * - Sandbox mode (#121): SANDBOX_MODE=1 runs each worker in a disposable
+ *   Docker Sandbox microVM via attached `sbx exec` (survives host process
+ *   killers like GameGuard). Auth = host auth.json copy, egress =
+ *   per-sandbox allowlist. Killing the host client alone orphans the
+ *   in-VM worker, so every finish path destroys the sandbox. Off by
+ *   default; the watchdog tree section then shows the host sbx proxy.
  *
  * Label -> skill mapping (bare command names, no leading slash):
  *   "ready to plan"      -> gh-plan-with-reason
@@ -52,6 +58,7 @@
  *   npx tsx scripts/agent-daemon.ts [--repo OWNER/REPO] [--interval SECONDS] [--once] [--dry-run] [--update-check-interval SECONDS] [--no-update-check] [--help]
  */
 import { execSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import { loadDaemonConfig, type DaemonConfig } from './agent-daemon-config.js';
 import { classifyLine } from './agent-daemon-classify.js';
@@ -64,6 +71,14 @@ import {
   shouldProbe,
   type ProbeTracker,
 } from './agent-daemon-policy.js';
+import {
+  destroySandbox,
+  execArgs,
+  hostAuthJsonPath,
+  provisionSandbox,
+  sandboxNameFor,
+  sandboxStatus,
+} from './agent-sandbox.js';
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -204,6 +219,11 @@ function planPass(planIssues: ListedIssue[], implementIssues: ListedIssue[]): Pl
 /** KD-2: every spawn gets an explicit `--model`; dry-run shows it. */
 export function plannedCommand(command: string, issueNumber: number, model: string): string {
   return `opencode run --command "${command}" "${issueNumber}" --model ${model} --format json`;
+}
+
+/** #121: dry-run rendering of the sandboxed spawn (attached sbx exec). */
+export function plannedSandboxCommand(sbxBin: string, sandboxName: string, command: string, issueNumber: number, model: string): string {
+  return `${sbxBin} ${execArgs(sandboxName, ['opencode', 'run', '--command', command, String(issueNumber), '--model', model, '--format', 'json'], HEADLESS_CONFIG_CONTENT).join(' ')}`;
 }
 
 /**
@@ -457,13 +477,28 @@ function branchState(): string {
   return `branch: ${branch}\n${log}`;
 }
 
-function buildWatchdogBundle(issueNumber: number, tracker: StreamTracker, childPid: number | undefined): string {
+function buildWatchdogBundle(
+  issueNumber: number,
+  tracker: StreamTracker,
+  childPid: number | undefined,
+  sandbox?: { sbxBin: string; name: string },
+): string {
   const lastActivity = new Date(tracker.lastNonErrorAtMs).toISOString();
   const summary = [
     `last non-error activity: ${lastActivity}`,
     `lines seen: ${tracker.linesSeen} (other=${tracker.otherCount}, upstream-transient=${tracker.upstreamCount}, gateway-quota=${tracker.gatewayCount})`,
     tracker.firstGatewayLine !== null ? `first gateway line: ${tracker.firstGatewayLine.slice(0, 500)}` : 'first gateway line: (none)',
   ].join('\n');
+  const sandboxSection =
+    sandbox === undefined
+      ? ''
+      : [
+          '',
+          '### Sandbox status',
+          // #121: the process tree above shows the host sbx.exe proxy, not
+          // the in-VM worker. This is the VM-side truth.
+          sandboxStatus(sandbox.sbxBin, sandbox.name),
+        ].join('\n');
   return [
     '### Process tree',
     childProcessTree(childPid),
@@ -476,6 +511,7 @@ function buildWatchdogBundle(issueNumber: number, tracker: StreamTracker, childP
     '',
     '### Branch state',
     branchState(),
+    sandboxSection,
     '',
     `_Run had zero non-error stream activity for the full stuck interval; issue #${issueNumber} will be reset for a fresh Phase 0 resume._`,
   ].join('\n');
@@ -504,24 +540,42 @@ interface RunOutcome {
  */
 function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean; model: string; repo: string; state: DaemonState }): Promise<RunOutcome> {
   const { dryRun, model, repo, state } = opts;
+  const sandbox = state.config.sandboxMode;
+  const sandboxName = sandbox ? sandboxNameFor(issueNumber) : null;
+  const opencodeArgv = ['run', '--command', command, String(issueNumber), '--model', model, '--format', 'json'];
   if (dryRun) {
-    console.log(`[agent-daemon] dry-run: ${plannedCommand(command, issueNumber, model)}`);
+    console.log(
+      `[agent-daemon] dry-run: ${sandbox && sandboxName !== null ? plannedSandboxCommand(state.config.sbxBin, sandboxName, command, issueNumber, model) : plannedCommand(command, issueNumber, model)}`,
+    );
     return Promise.resolve({ code: 0, failover: false, watchdogFired: false });
   }
   const spawnIso = new Date().toISOString();
   const tracker = createStreamTracker(Date.now());
   const stuckTimeoutMs = state.config.stuckTimeoutS * 1000;
-  // shell: true so Windows resolves the opencode .ps1/.cmd shim (bare spawn risks ENOENT).
-  const child = spawn(
-    'opencode',
-    ['run', '--command', command, String(issueNumber), '--model', model, '--format', 'json'],
-    {
+  let child: ChildProcess;
+  if (sandbox && sandboxName !== null) {
+    // #121: disposable per-run microVM. Provision first (create -> auth ->
+    // allowlist); the sbx.exe client is a real binary (no shell shim needed).
+    const provisioned = provisionSandbox(state.config.sbxBin, sandboxName, process.cwd(), hostAuthJsonPath(homedir()), state.config.sbxTemplate);
+    if (!provisioned.ok) {
+      console.error(`[agent-daemon] sandbox provision failed for #${issueNumber} at step ${provisioned.step}: ${provisioned.output}`);
+      destroySandbox(state.config.sbxBin, sandboxName);
+      return Promise.resolve({ code: 1, failover: false, watchdogFired: false });
+    }
+    child = spawn(state.config.sbxBin, execArgs(sandboxName, ['opencode', ...opencodeArgv], HEADLESS_CONFIG_CONTENT), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+      env: { ...process.env },
+    });
+  } else {
+    // shell: true so Windows resolves the opencode .ps1/.cmd shim (bare spawn risks ENOENT).
+    child = spawn('opencode', opencodeArgv, {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: true,
       detached: process.platform !== 'win32',
       env: { ...process.env, OPENCODE_CONFIG_CONTENT: HEADLESS_CONFIG_CONTENT },
-    },
-  );
+    });
+  }
   activeChild = child;
 
   return new Promise((resolve) => {
@@ -535,6 +589,12 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         clearInterval(watchdogTimer);
       }
       activeChild = null;
+      if (sandboxName !== null) {
+        // #121: client kill/exit alone orphans the in-VM worker; the
+        // sandbox itself is the kill. Runs on every finish path.
+        treeKill(child);
+        destroySandbox(state.config.sbxBin, sandboxName);
+      }
       resolve(outcome);
     };
 
@@ -577,7 +637,12 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         return;
       }
       console.error(`[agent-daemon] watchdog: no non-error activity for ${state.config.stuckTimeoutS}s on #${issueNumber}; investigating`);
-      const bundle = buildWatchdogBundle(issueNumber, tracker, child.pid);
+      const bundle = buildWatchdogBundle(
+        issueNumber,
+        tracker,
+        child.pid,
+        sandboxName !== null ? { sbxBin: state.config.sbxBin, name: sandboxName } : undefined,
+      );
       // Diagnosis opencode invocations must use Go (KD-6); gh/git need no model.
       // The bundle itself is read-only shell/gh/git, so no model is consumed here.
       postWatchdogComment(repo, issueNumber, bundle);
@@ -651,22 +716,43 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
  */
 async function probeFreeTier(state: DaemonState): Promise<'success' | 'quota' | 'inconclusive'> {
   const { freeModel, probeTimeoutS } = state.config;
-  console.log(`[agent-daemon] probing free tier with ${freeModel}`);
+  console.log(`[agent-daemon] probing free tier with ${freeModel}${state.config.sandboxMode ? ' [sandbox]' : ''}`);
   return new Promise((resolve) => {
     let settled = false;
+    // #121: the probe sandbox is disposable like a run sandbox.
+    const probeSandbox = state.config.sandboxMode ? 'cycledesign-probe' : null;
     const finish = (outcome: 'success' | 'quota' | 'inconclusive'): void => {
       if (!settled) {
         settled = true;
+        if (probeSandbox !== null) {
+          treeKill(child);
+          destroySandbox(state.config.sbxBin, probeSandbox);
+        }
         resolve(outcome);
       }
     };
     let child: ChildProcess;
     try {
-      child = spawn('opencode', ['run', '--model', freeModel, '--format', 'json', PROBE_PROMPT], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true,
-        env: { ...process.env, OPENCODE_CONFIG_CONTENT: HEADLESS_CONFIG_CONTENT },
-      });
+      if (probeSandbox !== null) {
+        const provisioned = provisionSandbox(state.config.sbxBin, probeSandbox, process.cwd(), hostAuthJsonPath(homedir()), state.config.sbxTemplate);
+        if (!provisioned.ok) {
+          console.error(`[agent-daemon] probe sandbox provision failed at step ${provisioned.step}: ${provisioned.output}`);
+          destroySandbox(state.config.sbxBin, probeSandbox);
+          finish('inconclusive');
+          return;
+        }
+        child = spawn(
+          state.config.sbxBin,
+          execArgs(probeSandbox, ['opencode', 'run', '--model', freeModel, '--format', 'json', PROBE_PROMPT], HEADLESS_CONFIG_CONTENT),
+          { stdio: ['ignore', 'pipe', 'pipe'], shell: false, env: { ...process.env } },
+        );
+      } else {
+        child = spawn('opencode', ['run', '--model', freeModel, '--format', 'json', PROBE_PROMPT], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: true,
+          env: { ...process.env, OPENCODE_CONFIG_CONTENT: HEADLESS_CONFIG_CONTENT },
+        });
+      }
     } catch {
       finish('inconclusive');
       return;
@@ -961,7 +1047,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => handleStopSignal('SIGTERM'));
 
   console.log(
-    `[agent-daemon] polling ${repo} every ${interval}s ("${LABEL_PLAN}" -> ${COMMANDS[LABEL_PLAN]}, "${LABEL_IMPLEMENT}" -> ${COMMANDS[LABEL_IMPLEMENT]})${dryRun ? ' [dry-run]' : ''}${updateInterval > 0 ? ` [update-check every ${updateInterval}s]` : ' [update-check disabled]'} [free: ${daemonConfig.freeModel}, go: ${daemonConfig.goModel}]`,
+    `[agent-daemon] polling ${repo} every ${interval}s ("${LABEL_PLAN}" -> ${COMMANDS[LABEL_PLAN]}, "${LABEL_IMPLEMENT}" -> ${COMMANDS[LABEL_IMPLEMENT]})${dryRun ? ' [dry-run]' : ''}${updateInterval > 0 ? ` [update-check every ${updateInterval}s]` : ' [update-check disabled]'} [free: ${daemonConfig.freeModel}, go: ${daemonConfig.goModel}]${daemonConfig.sandboxMode ? ` [sandbox: ${daemonConfig.sbxBin} template: ${daemonConfig.sbxTemplate}]` : ''}`,
   );
 
   for (;;) {

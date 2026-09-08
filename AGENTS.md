@@ -139,7 +139,7 @@ npx playwright screenshot http://localhost:<web-port> tmp/page-screenshot.png
 
 - **Frontend**: React 18, MUI, Vite, TypeScript
 - **Backend**: Express, Vercel AI SDK, Qwen OAuth
-- **LLM**: Qwen coder-model via OAuth Device Flow
+- **LLM**: OpenCode Go subscription (failover) with free Zen models first (free-tier-first daemon; see `.agent-daemon.env.example`)
 - **Testing**: Chrome DevTools MCP
 
 ---
