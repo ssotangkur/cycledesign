@@ -14,9 +14,9 @@ comment. This codifies the thrice-manual checklist from #85 (rate-limit stall),
 
 - **Read-only by default.** Do not kill any process unless unblocking was
   explicitly approved. See §8 for the mandatory pre-kill gate.
-- **Never diagnose on the free tier.** Every `opencode` invocation inside this
-  skill pins `--model opencode-go/muse-spark-1.3-contributor`, so diagnosis
-  cannot wedge on the same quota exhaustion it is diagnosing (#107 §3).
+- **Pin the model.** Every `opencode` invocation inside this skill pins
+  `--model opencode-go/muse-spark-1.3-contributor`, so diagnosis cannot wedge
+  on the same quota exhaustion it is diagnosing (#107 §3).
 - **Windows-first.** All process commands are PowerShell-first
   (`Get-CimInstance Win32_Process`). POSIX alternatives are footnotes only.
 - **Optional fallback args:** `run=<hex>` or `sessionID=<id>` when the
@@ -230,3 +230,22 @@ CLI worked. So: hung test/child process → wrapper chain
 - Branch: tip 2 h ago, stale.
 - Verdict: `wedged (open-handle, held by vitest run PID 7890)` — kill child
   first per §8 (cf. #109 self-resume), wrapper chain next, CLI last.
+
+## §9 Self-improvement (file an issue, never self-modify)
+
+After posting the verdict, consider whether this skill itself needs
+improvement: stale information (moved paths, changed scripts/line refs,
+outdated shapes), steps that were too verbose, or steps that were too
+prescriptive (commands that didn't help or over-constrained the diagnosis).
+
+- If an improvement exists, file it as a GitHub issue with the specific
+  change to make (section, what's wrong, suggested fix):
+  ```powershell
+  gh issue create --repo ssotangkur/cycledesign `
+    --title "diagnose-stuck-run: <short description>" `
+    --body "Section: <§N / Appendix>\nProblem: <stale|verbose|prescriptive — what and why>\nSuggested change: <concrete edit>"
+  ```
+- File one issue per improvement. Keep the verdict post clean — do not mix
+  skill feedback into `## Watchdog investigation`.
+- Never edit `SKILL.md` in-session. Diagnosis runs read-only; skill changes
+  land via a separate issue/PR.
