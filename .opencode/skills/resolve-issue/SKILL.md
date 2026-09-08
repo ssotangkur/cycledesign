@@ -158,6 +158,7 @@ When the `pr-creator` return has `partial: true` (footer uses `Part of`/`Refs`/`
    ```bash
    gh issue create --repo ssotangkur/cycledesign --title "<remaining scope>" --body "<acceptance items carried over>"
    ```
+   If `followup` is `none`/missing while `partial: true`, create the followup issue yourself from the remaining acceptance items first, then use its number below.
    Ordering: the gate passes before `pr-creator` DONE is accepted as PR-ready.
 3. **Original-issue status comment (at Phase 4 DONE / PR-ready time):** post via `gh issue comment <N> --repo ssotangkur/cycledesign --body-file tmp/partial-status.md` using this forward template (pending-merge wording — the orchestrator's terminal state is PR-ready and no skill acts at merge time, so never use past tense here):
    ```markdown
