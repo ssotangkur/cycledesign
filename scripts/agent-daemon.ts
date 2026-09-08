@@ -15,6 +15,7 @@
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { parseArgs } from 'node:util';
+import { loadDaemonConfig, type DaemonConfig } from './agent-daemon-config.js';
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -306,6 +307,14 @@ async function main(): Promise<void> {
   }
   const updateState: UpdateCheckState = { intervalSeconds: updateInterval, lastCheck: 0 };
 
+  let daemonConfig: DaemonConfig;
+  try {
+    daemonConfig = loadDaemonConfig();
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(2);
+  }
+
   function handleStopSignal(signal: 'SIGINT' | 'SIGTERM'): void {
     if (activeChild) {
       // Forward to the running skill; the loop resumes/completes via its close handler.
@@ -324,7 +333,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => handleStopSignal('SIGTERM'));
 
   console.log(
-    `[agent-daemon] polling ${repo} every ${interval}s ("${LABEL_PLAN}" -> ${COMMANDS[LABEL_PLAN]}, "${LABEL_IMPLEMENT}" -> ${COMMANDS[LABEL_IMPLEMENT]})${dryRun ? ' [dry-run]' : ''}${updateInterval > 0 ? ` [update-check every ${updateInterval}s]` : ' [update-check disabled]'}`,
+    `[agent-daemon] polling ${repo} every ${interval}s ("${LABEL_PLAN}" -> ${COMMANDS[LABEL_PLAN]}, "${LABEL_IMPLEMENT}" -> ${COMMANDS[LABEL_IMPLEMENT]})${dryRun ? ' [dry-run]' : ''}${updateInterval > 0 ? ` [update-check every ${updateInterval}s]` : ' [update-check disabled]'} [free: ${daemonConfig.freeModel}, go: ${daemonConfig.goModel}]`,
   );
 
   for (;;) {
