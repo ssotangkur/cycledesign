@@ -17,6 +17,7 @@ import {
   resolveSbxBin,
   sandboxNameFor,
   secretArgs,
+  secretRmArgs,
 } from './agent-sandbox.js';
 
 describe('sbx binary resolution', () => {
@@ -111,13 +112,14 @@ describe('sbx argv builders', () => {
     ]);
   });
 
-  it('scopes the github secret to the sandbox', () => {
+  it('scopes the github secret to the sandbox (overwrite for repeat runs)', () => {
     assert.deepEqual(secretArgs('cycledesign-issue-1', 'tok'), [
       'secret',
       'set',
       'github',
       '--sandbox',
       'cycledesign-issue-1',
+      '-f',
       '-t',
       'tok',
     ]);
@@ -141,5 +143,9 @@ describe('sbx argv builders', () => {
 
   it('forces non-interactive removal', () => {
     assert.deepEqual(removeArgs('cycledesign-issue-1'), ['rm', '--force', 'cycledesign-issue-1']);
+  });
+
+  it('drops the sandbox-scoped github secret on teardown', () => {
+    assert.deepEqual(secretRmArgs('cycledesign-issue-1'), ['secret', 'rm', 'github', '--sandbox', 'cycledesign-issue-1']);
   });
 });

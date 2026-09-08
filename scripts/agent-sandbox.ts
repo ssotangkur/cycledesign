@@ -118,7 +118,14 @@ export function policyArgs(name: string, hosts: string[]): string[] {
 
 /** Per-sandbox GitHub secret: the proxy authenticates `gh`/git HTTPS, the token never enters the VM env (#129). */
 export function secretArgs(name: string, token: string): string[] {
-  return ['secret', 'set', 'github', '--sandbox', name, '-t', token];
+  // -f: sandbox names are per-issue, and a scoped secret outlives `rm` of
+  // the sandbox, so repeat runs for the same issue must overwrite (#129).
+  return ['secret', 'set', 'github', '--sandbox', name, '-f', '-t', token];
+}
+
+/** Drop the sandbox-scoped github secret (outlives `rm`, so teardown owns it, #129). */
+export function secretRmArgs(name: string): string[] {
+  return ['secret', 'rm', 'github', '--sandbox', name];
 }
 
 /** Fresh clone in-VM (proxy-authenticated HTTPS); skills need a functional repo (#129). */
@@ -198,12 +205,14 @@ export function provisionSandbox(sbxBin: string, name: string, workdir: string, 
 }
 
 /**
- * Best-effort teardown: stop (may already be stopped) then forced remove.
+ * Best-effort teardown: stop (may already be stopped) then forced remove,
+ * then drop the sandbox-scoped github secret (it outlives `rm`, #129).
  * Never throws; kill paths call this after tree-killing the host client.
  */
 export function destroySandbox(sbxBin: string, name: string): void {
   runSbx(sbxBin, ['stop', name]);
   runSbx(sbxBin, removeArgs(name));
+  runSbx(sbxBin, secretRmArgs(name));
 }
 
 /** Best-effort one-liner for the watchdog bundle (never throws). */
