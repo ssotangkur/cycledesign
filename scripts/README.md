@@ -258,10 +258,10 @@ never exits `42` on failed evidence. `--dry-run` prints
 | `2` | Usage / arg-parse error | NEVER restart — exit immediately so a bad flag can't hot-loop |
 | anything else | Crash / transient (`gh` auth, OOM) | Plain restart with backoff (1s/2s/4s… cap 30s), no pull; >5 crashes in 5 min bails non-zero |
 
-`--once` mode runs exactly one child pass and exits with the child code —
+`--once` mode runs the child exactly once and exits with the child code —
 no restart loop and no pull (a one-shot scripted invocation must not mutate
 the checkout; `42` under `--once` propagates `42` to the caller with the
-SHAs logged).
+SHAs logged, without the daemon doing a poll pass first when already behind).
 
 ### Dirty-tree rule
 
