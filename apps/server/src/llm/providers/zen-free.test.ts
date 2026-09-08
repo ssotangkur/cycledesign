@@ -238,6 +238,131 @@ describe('ZenFreeProvider.complete error mapping', () => {
   });
 });
 
+describe('resolveZenTransport', () => {
+  it('should route prefixes to the pi-parity transports', () => {
+    expect(mod.resolveZenTransport('gpt-foo-free')).toBe('openai-responses');
+    expect(mod.resolveZenTransport('claude-foo-free')).toBe('anthropic-messages');
+    expect(mod.resolveZenTransport('qwen3-coder-free')).toBe('anthropic-messages');
+    expect(mod.resolveZenTransport('qwen3.5-free')).toBe('anthropic-messages');
+    expect(mod.resolveZenTransport('gemini-foo-free')).toBe('google-generative-ai');
+    expect(mod.resolveZenTransport('deepseek-v4-flash-free')).toBe('openai-completions');
+  });
+
+  it('should be case-sensitive with no vendor-prefix stripping', () => {
+    expect(mod.resolveZenTransport('GPT-foo')).toBe('openai-completions');
+    expect(mod.resolveZenTransport('Claude-foo')).toBe('openai-completions');
+    expect(mod.resolveZenTransport('GEMINI-foo')).toBe('openai-completions');
+    expect(mod.resolveZenTransport('openai/gpt-foo')).toBe('openai-completions');
+    expect(mod.resolveZenTransport('')).toBe('openai-completions');
+  });
+
+  it('should prefer gpt- when an ID matches multiple prefixes', () => {
+    // Contrived overlap guard: precedence gpt- > rest.
+    expect(mod.resolveZenTransport('gpt-claude-free')).toBe('openai-responses');
+  });
+});
+
+describe('normalizeZenBase', () => {
+  it('should keep the canonical base untouched', () => {
+    expect(mod.normalizeZenBase(mod.ZEN_BASE_URL)).toBe('https://opencode.ai/zen/v1');
+  });
+
+  it('should strip slashes and transport suffixes then ensure …/v1', () => {
+    expect(mod.normalizeZenBase('https://opencode.ai/zen/v1/')).toBe('https://opencode.ai/zen/v1');
+    expect(mod.normalizeZenBase('https://opencode.ai/zen/v1/chat/completions')).toBe(
+      'https://opencode.ai/zen/v1'
+    );
+    expect(mod.normalizeZenBase('https://opencode.ai/zen/v1/responses')).toBe(
+      'https://opencode.ai/zen/v1'
+    );
+    expect(mod.normalizeZenBase('https://opencode.ai/zen/v1/messages')).toBe(
+      'https://opencode.ai/zen/v1'
+    );
+    expect(mod.normalizeZenBase('https://opencode.ai/zen/v1/chat/completions/')).toBe(
+      'https://opencode.ai/zen/v1'
+    );
+    expect(mod.normalizeZenBase('https://example.com/api')).toBe('https://example.com/api/v1');
+  });
+});
+
+describe('ZenFreeProvider.getModel dispatch', () => {
+  type ModelShape = {
+    modelId: string;
+    specificationVersion: string;
+    config?: { headers?: () => Promise<Record<string, string>>; fetch?: unknown; baseURL?: unknown };
+  };
+
+  async function modelFor(id: string): Promise<ModelShape> {
+    // Subclass per-call (not at describe scope): `mod` loads in beforeEach.
+    class ExposedZen extends mod.ZenFreeProvider {
+      exposeModel(): Promise<LanguageModel> {
+        return (this as unknown as { getModel: () => Promise<LanguageModel> }).getModel();
+      }
+    }
+    const provider = new ExposedZen('test-key', id);
+    return (await provider.exposeModel()) as unknown as ModelShape;
+  }
+
+  it('should yield v2|v3 models that ToolLoopAgent accepts on every transport', async () => {
+    const { ToolLoopAgent, stepCountIs } = await import('ai');
+    for (const id of [
+      'gpt-foo-free',
+      'claude-foo-free',
+      'qwen3-coder-free',
+      'gemini-foo-free',
+      'deepseek-v4-flash-free',
+    ]) {
+      const shape = await modelFor(id);
+      expect(['v2', 'v3']).toContain(shape.specificationVersion);
+      expect(() => new ToolLoopAgent({ model: shape as never, stopWhen: stepCountIs(1) })).not.toThrow();
+    }
+  });
+
+  it('should send Bearer + CLI headers with fresh ses_/prt_ per request on every transport', async () => {
+    for (const id of [
+      'gpt-foo-free',
+      'claude-foo-free',
+      'gemini-foo-free',
+      'deepseek-v4-flash-free',
+    ]) {
+      const shape = await modelFor(id);
+      const staticHeaders = await shape.config?.headers?.();
+      expect(staticHeaders?.['authorization'] ?? staticHeaders?.['Authorization']).toBe(
+        'Bearer test-key'
+      );
+      expect(staticHeaders?.['x-opencode-client']).toBe('cli');
+      expect(staticHeaders?.['x-opencode-project']).toBe('global');
+      expect(staticHeaders?.['user-agent'] ?? staticHeaders?.['User-Agent']).toMatch(
+        /^opencode\/1\.18\.18/
+      );
+
+      const seen: Array<{ init?: RequestInit }> = [];
+      vi.stubGlobal(
+        'fetch',
+        (async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+          seen.push({ init });
+          return new Response('{}', { status: 200 });
+        }) as typeof fetch
+      );
+      const fetchFn = shape.config?.fetch as (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1]
+      ) => Promise<Response>;
+      expect(typeof fetchFn).toBe('function');
+      await fetchFn('https://example.com/a', { headers: staticHeaders });
+      await fetchFn('https://example.com/b', { headers: staticHeaders });
+      const first = new Headers(seen[0].init?.headers);
+      const second = new Headers(seen[1].init?.headers);
+      expect(first.get('x-opencode-session')).toMatch(/^ses_[0-9a-f]{24}$/);
+      expect(second.get('x-opencode-session')).toMatch(/^ses_[0-9a-f]{24}$/);
+      expect(first.get('x-opencode-session')).not.toBe(second.get('x-opencode-session'));
+      expect(first.get('x-opencode-request')).not.toBe(second.get('x-opencode-request'));
+      expect(first.get('x-opencode-client')).toBe('cli');
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('provider-factory zen-free dispatch', () => {
   it("should return ZenFreeProvider when provider-config selects 'zen-free'", async () => {
     vi.resetModules();
