@@ -146,6 +146,6 @@ describe('sbx argv builders', () => {
   });
 
   it('drops the sandbox-scoped github secret on teardown', () => {
-    assert.deepEqual(secretRmArgs('cycledesign-issue-1'), ['secret', 'rm', 'github', '--sandbox', 'cycledesign-issue-1']);
+    assert.deepEqual(secretRmArgs('cycledesign-issue-1'), ['secret', 'rm', 'github', '--sandbox', 'cycledesign-issue-1', '-f']);
   });
 });

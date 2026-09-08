@@ -125,7 +125,8 @@ export function secretArgs(name: string, token: string): string[] {
 
 /** Drop the sandbox-scoped github secret (outlives `rm`, so teardown owns it, #129). */
 export function secretRmArgs(name: string): string[] {
-  return ['secret', 'rm', 'github', '--sandbox', name];
+  // -f: no confirmation prompt (spawnSync has no stdin; prompting aborts and leaks the secret).
+  return ['secret', 'rm', 'github', '--sandbox', name, '-f'];
 }
 
 /** Fresh clone in-VM (proxy-authenticated HTTPS); skills need a functional repo (#129). */
