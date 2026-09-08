@@ -3,6 +3,44 @@
  * Polling-first daemon that watches issue labels and invokes the right
  * fire-and-forget skill via the opencode CLI, resuming after each run.
  *
+ * Free-tier-first with failover to Go on gateway-quota and probe-based
+ * failback (#107):
+ * - Config: root `.agent-daemon.env` (git-ignored, see
+ *   `.agent-daemon.env.example`) holds FREE_MODEL / GO_MODEL /
+ *   STUCK_TIMEOUT_S / PROBE_INTERVAL_S / PROBE_TIMEOUT_S. Missing file →
+ *   exit 2 with setup instructions (supervisor does not restart).
+ * - Model ownership: every `opencode run` spawn gets an explicit `--model`
+ *   (free by default, Go after failover). The absent static `"model"` pin in
+ *   `opencode.jsonc` stays absent (verify-and-keep-absent); this file never
+ *   edits `opencode.jsonc`.
+ * - Failover (KD-4): a gateway-quota line triggers immediate tree-kill, a
+ *   fenced label reset (`implementing` → `ready to implement` only when no
+ *   terminal state landed since spawn), then respawn on Go. Max 3 failovers
+ *   per issue per daemon lifetime; exhaustion parks the issue at `question`.
+ * - Headless (KD-5): every spawn sets inline `OPENCODE_CONFIG_CONTENT` with
+ *   `{"permission":{"external_directory":"deny","question":"deny"}}`. Never
+ *   pass `--auto`; never write `opencode.jsonc`. Denials that block progress
+ *   become `question` comments per the skill; `asking`-with-no-answer counts
+ *   as stuck for the watchdog.
+ * - Watchdog (KD-6): every STUCK_TIMEOUT_S with zero non-error `--format
+ *   json` lines, build a read-only bundle (process tree, event summary, port
+ *   ownership, branch state), post `## Watchdog investigation`, apply the
+ *   fencing check, reset labels, then tree-kill. Never changes model state;
+ *   diagnosis opencode invocations use GO_MODEL. Daemon comments are exempt
+ *   from the skill's no-progress-comments rule (that rule binds the skill's
+ *   sub-agents, not the daemon).
+ * - Failback probe (KD-7): while on Go, at run boundaries only, spawn
+ *   `opencode run --model <FREE_MODEL> "return the single word OK"` every
+ *   PROBE_INTERVAL_S. First success flips subsequent runs to free and stops
+ *   the timer until the next failover. Never switch mid-run (except the
+ *   failover kill). An in-flight run's watchdog always wins over the probe.
+ * - Observability (KD-8): spawns pipe `--format json`; each raw line is
+ *   printed prefixed `[orchestrator]` (root session) or `[sub:<title|id>]`
+ *   (children via the `session.created` → `parentID` map when present).
+ *   Unknown event types pass through untagged. Only `type`, `sessionID`,
+ *   `part.sessionID` are ever parsed structurally. `--dry-run` prints the
+ *   full planned command including `--model`.
+ *
  * Label -> skill mapping (bare command names, no leading slash):
  *   "ready to plan"      -> gh-plan-with-reason
  *   "ready to implement" -> resolve-issue
@@ -13,9 +51,19 @@
  * Usage:
  *   npx tsx scripts/agent-daemon.ts [--repo OWNER/REPO] [--interval SECONDS] [--once] [--dry-run] [--update-check-interval SECONDS] [--no-update-check] [--help]
  */
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { loadDaemonConfig, type DaemonConfig } from './agent-daemon-config.js';
+import { classifyLine } from './agent-daemon-classify.js';
+import {
+  applyProbeResult,
+  createProbeTracker,
+  noteFailover,
+  recordFailover,
+  shouldFireWatchdog,
+  shouldProbe,
+  type ProbeTracker,
+} from './agent-daemon-policy.js';
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -26,11 +74,28 @@ const ISSUE_LIMIT = 100;
 
 const LABEL_PLAN = 'ready to plan';
 const LABEL_IMPLEMENT = 'ready to implement';
+const LABEL_IMPLEMENTING = 'implementing';
+const LABEL_QUESTION = 'question';
+const LABEL_PR_READY = 'pr ready';
 
 const COMMANDS: Record<string, string> = {
   [LABEL_PLAN]: 'gh-plan-with-reason',
   [LABEL_IMPLEMENT]: 'resolve-issue',
 };
+
+/**
+ * KD-5: headless-safe spawns. Verified mechanism: inline
+ * `OPENCODE_CONFIG_CONTENT` runtime overrides (see opencode docs / config).
+ * Deny-by-default, never `--auto` (explicit `deny` wins over `--auto`, so
+ * deny-without-auto is the safe posture). Never edit `opencode.jsonc`.
+ */
+export const HEADLESS_CONFIG_CONTENT = '{"permission":{"external_directory":"deny","question":"deny"}}';
+
+/** KD-7: minimal-cost free-tier probe prompt (Q2: trivial prompt). */
+export const PROBE_PROMPT = 'return the single word OK';
+
+/** KD-6: how often the watchdog re-checks silence while a run is in flight. */
+const WATCHDOG_POLL_MS = 30_000;
 
 interface ListedIssue {
   number: number;
@@ -42,6 +107,41 @@ interface PlannedRun {
   issue: ListedIssue;
   label: string;
   command: string;
+}
+
+interface DaemonState {
+  config: DaemonConfig;
+  probe: ProbeTracker;
+  failoverCounts: Map<number, number>;
+}
+
+/** KD-6/KD-8: per-run stream tracker fed by each piped JSON line. */
+interface StreamTracker {
+  startMs: number;
+  lastNonErrorAtMs: number;
+  gatewayCount: number;
+  upstreamCount: number;
+  otherCount: number;
+  linesSeen: number;
+  firstGatewayLine: string | null;
+  rootSessionId: string | null;
+  parentBySession: Map<string, string>;
+  titleBySession: Map<string, string>;
+}
+
+function createStreamTracker(nowMs: number): StreamTracker {
+  return {
+    startMs: nowMs,
+    lastNonErrorAtMs: nowMs,
+    gatewayCount: 0,
+    upstreamCount: 0,
+    otherCount: 0,
+    linesSeen: 0,
+    firstGatewayLine: null,
+    rootSessionId: null,
+    parentBySession: new Map(),
+    titleBySession: new Map(),
+  };
 }
 
 let activeChild: ChildProcess | null = null;
@@ -101,26 +201,494 @@ function planPass(planIssues: ListedIssue[], implementIssues: ListedIssue[]): Pl
   return [...byNumber.values()].sort((a, b) => a.issue.number - b.issue.number);
 }
 
-function runSkill(command: string, issueNumber: number, dryRun: boolean): Promise<number> {
-  if (dryRun) {
-    console.log(`[agent-daemon] dry-run: opencode run --command "${command}" "${issueNumber}"`);
-    return Promise.resolve(0);
+/** KD-2: every spawn gets an explicit `--model`; dry-run shows it. */
+export function plannedCommand(command: string, issueNumber: number, model: string): string {
+  return `opencode run --command "${command}" "${issueNumber}" --model ${model} --format json`;
+}
+
+/**
+ * KD-8: extract the session tag for a raw JSON line. Only `type`,
+ * `sessionID`, and `part.sessionID` are parsed structurally; everything else
+ * passes through. Maintains the `session.created` → `parentID` map when the
+ * envelope carries it; degrades to short-ID tags when it does not.
+ */
+export function tagForLine(rawLine: string, tracker: StreamTracker): string {
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const value: unknown = JSON.parse(rawLine);
+    if (typeof value === 'object' && value !== null) {
+      parsed = value as Record<string, unknown>;
+    }
+  } catch {
+    return '';
   }
+  if (parsed === null) {
+    return '';
+  }
+  const sessionId = typeof parsed['sessionID'] === 'string' ? (parsed['sessionID'] as string) : null;
+  const part = parsed['part'];
+  const partSessionId =
+    typeof part === 'object' && part !== null && typeof (part as Record<string, unknown>)['sessionID'] === 'string'
+      ? ((part as Record<string, unknown>)['sessionID'] as string)
+      : null;
+  const activeSession = sessionId ?? partSessionId;
+  if (activeSession === null) {
+    return '';
+  }
+  // Record parent/title edges best-effort (field paths are not locked — see KD-3).
+  const parentId = typeof parsed['parentID'] === 'string' ? (parsed['parentID'] as string) : null;
+  if (parentId !== null) {
+    tracker.parentBySession.set(activeSession, parentId);
+  }
+  const session = parsed['session'];
+  if (typeof session === 'object' && session !== null) {
+    const record = session as Record<string, unknown>;
+    const pid = typeof record['parentID'] === 'string' ? (record['parentID'] as string) : null;
+    if (pid !== null) {
+      tracker.parentBySession.set(activeSession, pid);
+    }
+    const title = typeof record['title'] === 'string' ? (record['title'] as string) : null;
+    if (title !== null && title !== '') {
+      tracker.titleBySession.set(activeSession, title);
+    }
+  }
+  if (tracker.rootSessionId === null) {
+    tracker.rootSessionId = activeSession;
+  }
+  if (activeSession === tracker.rootSessionId) {
+    return '[orchestrator]';
+  }
+  const title = tracker.titleBySession.get(activeSession);
+  const short = activeSession.replace(/^ses_/, '').slice(-6) || activeSession;
+  return `[sub:${title ?? short}]`;
+}
+
+/** Feed one piped line into tagging + classification + watchdog tracking. */
+export function observeLine(rawLine: string, tracker: StreamTracker): { tag: string; cls: ReturnType<typeof classifyLine> } {
+  const tag = tagForLine(rawLine, tracker);
+  const cls = classifyLine(rawLine);
+  tracker.linesSeen += 1;
+  if (cls === 'gateway-quota') {
+    tracker.gatewayCount += 1;
+    if (tracker.firstGatewayLine === null) {
+      // KD-3: log the full JSON line on first hit so field paths can be locked later.
+      tracker.firstGatewayLine = rawLine;
+    }
+  } else if (cls === 'upstream-transient') {
+    tracker.upstreamCount += 1;
+  } else {
+    tracker.otherCount += 1;
+    tracker.lastNonErrorAtMs = Date.now();
+  }
+  return { tag, cls };
+}
+
+/**
+ * KD-4: tree-kill the CLI (`shell:true` wrapper may have grandchildren).
+ * win32 needs `taskkill /T /F`; posix kills the process group.
+ */
+export function treeKill(child: ChildProcess | null): void {
+  if (child === null || child.pid === undefined) {
+    return;
+  }
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        child.kill('SIGKILL');
+      }
+    }
+  } catch {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Best-effort: the process may already be gone.
+    }
+  }
+}
+
+interface IssueState {
+  labels: string[];
+  terminalCommentSince: boolean;
+}
+
+/**
+ * KD-4/KD-6 fencing check: only reset labels when the issue is still
+ * `implementing` AND no terminal state landed since spawn (the skill moves to
+ * `pr ready`/`question` itself, or posts a plan/question comment — racing
+ * those would flap or lose blocker questions).
+ */
+export function checkFencing(repo: string, issueNumber: number, sinceIso: string): IssueState {
+  const result = spawnSync(
+    'gh',
+    ['issue', 'view', String(issueNumber), '--repo', repo, '--json', 'labels,comments'],
+    { encoding: 'utf8' },
+  );
+  if (result.error || result.status !== 0) {
+    // Fencing data unavailable: fail closed (do not reset).
+    return { labels: [], terminalCommentSince: true };
+  }
+  let labels: string[] = [];
+  let terminalCommentSince = false;
+  try {
+    const parsed = JSON.parse(result.stdout || '{}') as {
+      labels?: Array<{ name?: string } | string>;
+      comments?: Array<{ body?: string; createdAt?: string }>;
+    };
+    labels = (parsed.labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? '')));
+    const since = Date.parse(sinceIso || '');
+    for (const comment of parsed.comments ?? []) {
+      const created = Date.parse(comment.createdAt ?? '');
+      if (!Number.isNaN(since) && !Number.isNaN(created) && created < since) {
+        continue;
+      }
+      const body = comment.body ?? '';
+      if (/## Plan with Reason|## Watchdog investigation|## Question|^Q\d+:/m.test(body)) {
+        terminalCommentSince = true;
+        break;
+      }
+    }
+  } catch {
+    return { labels: [], terminalCommentSince: true };
+  }
+  return { labels, terminalCommentSince };
+}
+
+export function isFenceClear(state: IssueState): boolean {
+  return state.labels.includes(LABEL_IMPLEMENTING) && !state.terminalCommentSince;
+}
+
+function resetToReady(repo: string, issueNumber: number): void {
+  const result = spawnSync(
+    'gh',
+    [
+      'issue',
+      'edit',
+      String(issueNumber),
+      '--repo',
+      repo,
+      '--remove-label',
+      LABEL_IMPLEMENTING,
+      '--add-label',
+      LABEL_IMPLEMENT,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (result.error || result.status !== 0) {
+    console.error(
+      `[agent-daemon] label reset failed for #${issueNumber}: ${result.error ? (result.error as Error).message : (result.stderr || '').trim()}`,
+    );
+  }
+}
+
+function parkAtQuestion(repo: string, issueNumber: number, body: string): void {
+  const comment = spawnSync('gh', ['issue', 'comment', String(issueNumber), '--repo', repo, '--body', body], {
+    encoding: 'utf8',
+  });
+  if (comment.error || comment.status !== 0) {
+    console.error(`[agent-daemon] park comment failed for #${issueNumber}`);
+  }
+  const edit = spawnSync(
+    'gh',
+    ['issue', 'edit', String(issueNumber), '--repo', repo, '--remove-label', LABEL_IMPLEMENTING, '--add-label', LABEL_QUESTION],
+    { encoding: 'utf8' },
+  );
+  if (edit.error || edit.status !== 0) {
+    console.error(`[agent-daemon] park label move failed for #${issueNumber}`);
+  }
+}
+
+/** Best-effort shell capture for the watchdog bundle (never throws). */
+function capture(cmd: string): string {
+  try {
+    return execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000 }).trim().slice(0, 4000);
+  } catch {
+    return '(unavailable)';
+  }
+}
+
+function childProcessTree(pid: number | undefined): string {
+  if (pid === undefined) {
+    return '(no child pid)';
+  }
+  if (process.platform === 'win32') {
+    const list = capture(`tasklist /FI "PID eq ${pid}" /FO TABLE /NH`);
+    const children = capture(`wmic process where (ParentProcessId=${pid}) get ProcessId,CommandLine /FORMAT:LIST`);
+    return `PID ${pid}: ${list}\nchildren:\n${children}`.slice(0, 4000);
+  }
+  return capture(`ps --ppid ${pid} -o pid,etime,pcpu,comm; ps -p ${pid} -o pid,etime,pcpu,comm`);
+}
+
+function portOwnership(): string {
+  // Best-effort reuse of the checkout's mode-scoped port helpers (KD AD-8).
+  try {
+    const portsOut = execSync('node scripts/ports.cjs', { encoding: 'utf8', timeout: 10_000 }).trim();
+    const ports = JSON.parse(portsOut) as { web: number; server: number; preview: number };
+    const lines: string[] = [];
+    for (const [name, port] of Object.entries(ports)) {
+      if (name === 'offset' || name === 'e2e') {
+        continue;
+      }
+      lines.push(`${name}:${port} -> ${capture(`node scripts/check-ports.cjs --port ${port}`)}`);
+    }
+    return lines.join('\n').slice(0, 4000);
+  } catch {
+    return '(port lookup unavailable)';
+  }
+}
+
+function branchState(): string {
+  const branch = capture('git rev-parse --abbrev-ref HEAD');
+  const log = capture('git log --oneline -5');
+  return `branch: ${branch}\n${log}`;
+}
+
+function buildWatchdogBundle(issueNumber: number, tracker: StreamTracker, childPid: number | undefined): string {
+  const lastActivity = new Date(tracker.lastNonErrorAtMs).toISOString();
+  const summary = [
+    `last non-error activity: ${lastActivity}`,
+    `lines seen: ${tracker.linesSeen} (other=${tracker.otherCount}, upstream-transient=${tracker.upstreamCount}, gateway-quota=${tracker.gatewayCount})`,
+    tracker.firstGatewayLine !== null ? `first gateway line: ${tracker.firstGatewayLine.slice(0, 500)}` : 'first gateway line: (none)',
+  ].join('\n');
+  return [
+    '### Process tree',
+    childProcessTree(childPid),
+    '',
+    '### Session event summary',
+    summary,
+    '',
+    '### Port ownership',
+    portOwnership(),
+    '',
+    '### Branch state',
+    branchState(),
+    '',
+    `_Run had zero non-error stream activity for the full stuck interval; issue #${issueNumber} will be reset for a fresh Phase 0 resume._`,
+  ].join('\n');
+}
+
+function postWatchdogComment(repo: string, issueNumber: number, bundle: string): void {
+  const body = ['## Watchdog investigation', '', bundle].join('\n');
+  const result = spawnSync('gh', ['issue', 'comment', String(issueNumber), '--repo', repo, '--body', body], {
+    encoding: 'utf8',
+  });
+  if (result.error || result.status !== 0) {
+    console.error(`[agent-daemon] watchdog comment failed for #${issueNumber}`);
+  }
+}
+
+interface RunOutcome {
+  code: number;
+  failover: boolean;
+  watchdogFired: boolean;
+}
+
+/**
+ * KD-2/KD-5/KD-8: spawn with explicit `--model` + `--format json` piped,
+ * headless deny-via-env, raw tagged console output, classifier + watchdog
+ * tracking. Resolves on close; failover/watchdog paths tree-kill first.
+ */
+function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean; model: string; repo: string; state: DaemonState }): Promise<RunOutcome> {
+  const { dryRun, model, repo, state } = opts;
+  if (dryRun) {
+    console.log(`[agent-daemon] dry-run: ${plannedCommand(command, issueNumber, model)}`);
+    return Promise.resolve({ code: 0, failover: false, watchdogFired: false });
+  }
+  const spawnIso = new Date().toISOString();
+  const tracker = createStreamTracker(Date.now());
+  const stuckTimeoutMs = state.config.stuckTimeoutS * 1000;
   // shell: true so Windows resolves the opencode .ps1/.cmd shim (bare spawn risks ENOENT).
-  return new Promise((resolve) => {
-    const child = spawn('opencode', ['run', '--command', command, String(issueNumber)], {
-      stdio: 'inherit',
+  const child = spawn(
+    'opencode',
+    ['run', '--command', command, String(issueNumber), '--model', model, '--format', 'json'],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
       shell: true,
-    });
-    activeChild = child;
+      detached: process.platform !== 'win32',
+      env: { ...process.env, OPENCODE_CONFIG_CONTENT: HEADLESS_CONFIG_CONTENT },
+    },
+  );
+  activeChild = child;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (outcome: RunOutcome): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (watchdogTimer !== null) {
+        clearInterval(watchdogTimer);
+      }
+      activeChild = null;
+      resolve(outcome);
+    };
+
+    const handleGatewayQuota = (): void => {
+      console.error(`[agent-daemon] gateway-quota detected for #${issueNumber}; failing over to Go`);
+      if (tracker.firstGatewayLine !== null) {
+        console.error(`[agent-daemon] first gateway line: ${tracker.firstGatewayLine}`);
+      }
+      // KD-4 ordering: tree-kill → fencing-check → label-reset → respawn.
+      treeKill(child);
+      const fence = checkFencing(repo, issueNumber, spawnIso);
+      const { count, allowed } = recordFailover(state.failoverCounts, issueNumber);
+      if (!allowed) {
+        console.error(`[agent-daemon] failover budget exhausted for #${issueNumber} (${count}); parking at question`);
+        parkAtQuestion(
+          repo,
+          issueNumber,
+          `Failover budget exhausted (${count} gateway-quota failovers this daemon lifetime). Parking for a human; reset to \`ready to implement\` to retry.`,
+        );
+        finish({ code: 1, failover: true, watchdogFired: false });
+        return;
+      }
+      if (isFenceClear(fence)) {
+        resetToReady(repo, issueNumber);
+      } else {
+        console.error(`[agent-daemon] fencing blocked label reset for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
+      }
+      noteFailover(state.probe, Date.now());
+      finish({ code: 1, failover: true, watchdogFired: false });
+    };
+
+    const handleWatchdog = (): void => {
+      console.error(`[agent-daemon] watchdog: no non-error activity for ${state.config.stuckTimeoutS}s on #${issueNumber}; investigating`);
+      const bundle = buildWatchdogBundle(issueNumber, tracker, child.pid);
+      // Diagnosis opencode invocations must use Go (KD-6); gh/git need no model.
+      // The bundle itself is read-only shell/gh/git, so no model is consumed here.
+      postWatchdogComment(repo, issueNumber, bundle);
+      const fence = checkFencing(repo, issueNumber, spawnIso);
+      if (isFenceClear(fence)) {
+        resetToReady(repo, issueNumber);
+      } else {
+        console.error(`[agent-daemon] fencing blocked watchdog label reset for #${issueNumber}`);
+      }
+      // Watchdog never changes model state (KD-6): respawn follows current failover/probe state.
+      treeKill(child);
+      finish({ code: 1, failover: false, watchdogFired: true });
+    };
+
+    const watchdogTimer: ReturnType<typeof setInterval> = setInterval(() => {
+      if (settled) {
+        return;
+      }
+      if (shouldFireWatchdog(tracker.lastNonErrorAtMs, Date.now(), stuckTimeoutMs)) {
+        handleWatchdog();
+      }
+    }, WATCHDOG_POLL_MS);
+
+    let stdoutBuf = '';
+    const pump = (chunk: Buffer, stream: 'stdout' | 'stderr'): void => {
+      stdoutBuf += chunk.toString('utf8');
+      const lines = stdoutBuf.split('\n');
+      stdoutBuf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim() === '') {
+          continue;
+        }
+        const { tag, cls } = observeLine(line, tracker);
+        // Raw JSON passthrough with session tags; unknown types untagged.
+        console.log(tag !== '' ? `${tag} ${line}` : line);
+        if (cls === 'gateway-quota') {
+          handleGatewayQuota();
+          return;
+        }
+      }
+      if (stream === 'stderr' && chunk.length > 0) {
+        // stderr text is already surfaced line-by-line above when JSON;
+        // non-JSON stderr lines are printed by the loop as well.
+      }
+    };
+    child.stdout?.on('data', (chunk: Buffer) => pump(chunk, 'stdout'));
+    child.stderr?.on('data', (chunk: Buffer) => pump(chunk, 'stderr'));
+
     child.on('error', (err) => {
       console.error(`[agent-daemon] failed to spawn opencode for issue #${issueNumber}: ${err.message}`);
-      activeChild = null;
-      resolve(1);
+      finish({ code: 1, failover: false, watchdogFired: false });
     });
     child.on('close', (code) => {
-      activeChild = null;
-      resolve(code ?? 1);
+      if (stdoutBuf.trim() !== '') {
+        const { tag, cls } = observeLine(stdoutBuf, tracker);
+        console.log(tag !== '' ? `${tag} ${stdoutBuf}` : stdoutBuf);
+        if (cls === 'gateway-quota' && !settled) {
+          handleGatewayQuota();
+          return;
+        }
+      }
+      finish({ code: code ?? 1, failover: false, watchdogFired: false });
+    });
+  });
+}
+
+/**
+ * KD-7: minimal-cost probe at a run boundary. Success = clean exit with no
+ * gateway-quota line. Gateway-quota → stay on Go; upstream-transient /
+ * inconclusive → neither success nor failover, timer keeps running.
+ */
+async function probeFreeTier(state: DaemonState): Promise<'success' | 'quota' | 'inconclusive'> {
+  const { freeModel, probeTimeoutS } = state.config;
+  console.log(`[agent-daemon] probing free tier with ${freeModel}`);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (outcome: 'success' | 'quota' | 'inconclusive'): void => {
+      if (!settled) {
+        settled = true;
+        resolve(outcome);
+      }
+    };
+    let child: ChildProcess;
+    try {
+      child = spawn('opencode', ['run', '--model', freeModel, '--format', 'json', PROBE_PROMPT], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,
+        env: { ...process.env, OPENCODE_CONFIG_CONTENT: HEADLESS_CONFIG_CONTENT },
+      });
+    } catch {
+      finish('inconclusive');
+      return;
+    }
+    let sawQuota = false;
+    let buf = '';
+    const onChunk = (chunk: Buffer): void => {
+      buf += chunk.toString('utf8');
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim() === '') {
+          continue;
+        }
+        console.log(`[probe] ${line}`);
+        if (classifyLine(line) === 'gateway-quota') {
+          sawQuota = true;
+        }
+      }
+    };
+    child.stdout?.on('data', onChunk);
+    child.stderr?.on('data', onChunk);
+    const timer = setTimeout(() => {
+      treeKill(child);
+      finish('inconclusive');
+    }, probeTimeoutS * 1000);
+    child.on('error', () => {
+      clearTimeout(timer);
+      finish('inconclusive');
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (buf.trim() !== '' && classifyLine(buf) === 'gateway-quota') {
+        sawQuota = true;
+      }
+      if (sawQuota) {
+        finish('quota');
+      } else if (code === 0) {
+        finish('success');
+      } else {
+        finish('inconclusive');
+      }
     });
   });
 }
@@ -224,8 +792,33 @@ async function maybeCheckForUpdate(state: UpdateCheckState, dryRun: boolean): Pr
   return result.status;
 }
 
-async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckState): Promise<void> {
+/** KD-7: probe only at run boundaries when no run is in flight. */
+async function maybeProbe(state: DaemonState, dryRun: boolean): Promise<void> {
+  const intervalMs = state.config.probeIntervalS * 1000;
+  if (!shouldProbe(state.probe, Date.now(), intervalMs, false)) {
+    return;
+  }
+  if (dryRun) {
+    console.log(`[agent-daemon] dry-run: probe ${state.config.freeModel} "${PROBE_PROMPT}"`);
+    return;
+  }
+  const outcome = await probeFreeTier(state);
+  applyProbeResult(state.probe, outcome, Date.now());
+  if (outcome === 'success') {
+    console.log(`[agent-daemon] free tier recovered; subsequent runs use ${state.config.freeModel}`);
+  } else {
+    console.log(`[agent-daemon] probe ${outcome}; staying on ${state.config.goModel}`);
+  }
+}
+
+function modelForRun(state: DaemonState): string {
+  return state.probe.model === 'go' ? state.config.goModel : state.config.freeModel;
+}
+
+async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckState, state: DaemonState): Promise<void> {
   await maybeCheckForUpdate(updateState, dryRun);
+  // Failback probe fires at this run boundary (no run in flight here).
+  await maybeProbe(state, dryRun);
   let planIssues: ListedIssue[];
   let implementIssues: ListedIssue[];
   try {
@@ -244,14 +837,23 @@ async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckS
   }
 
   for (const run of runs) {
-    console.log(`[agent-daemon] claiming issue #${run.issue.number} ("${run.issue.title}") via ${run.command} [label: ${run.label}]`);
-    const code = await runSkill(run.command, run.issue.number, dryRun);
-    console.log(`[agent-daemon] completed issue #${run.issue.number} via ${run.command} exit code ${code}`);
+    // A respawned failover run re-enters here on the next pass via its reset label.
+    const model = modelForRun(state);
+    console.log(`[agent-daemon] claiming issue #${run.issue.number} ("${run.issue.title}") via ${run.command} [label: ${run.label}] [model: ${model}]`);
+    const outcome = await runSkill(run.command, run.issue.number, { dryRun, model, repo, state });
+    console.log(`[agent-daemon] completed issue #${run.issue.number} via ${run.command} exit code ${outcome.code} [model: ${model}]`);
+    if (outcome.failover) {
+      // KD-4: respawn on Go happens on the next poll via the reset label;
+      // continue the queue rather than recursing mid-pass.
+      console.log(`[agent-daemon] failover armed Go model (${state.config.goModel}); respawn on next poll`);
+    }
     // Behind-check between runs only (never mid-run): a behind result exits
     // 42 inside maybeCheckForUpdate, aborting the remaining queue. Unclaimed
     // queued items keep their labels and are picked up post-restart.
     if (run !== runs[runs.length - 1]) {
       await maybeCheckForUpdate(updateState, dryRun);
+      // Probe between queued runs as well (still a run boundary).
+      await maybeProbe(state, dryRun);
     }
   }
 }
@@ -315,6 +917,12 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  const state: DaemonState = {
+    config: daemonConfig,
+    probe: createProbeTracker(Date.now()),
+    failoverCounts: new Map(),
+  };
+
   function handleStopSignal(signal: 'SIGINT' | 'SIGTERM'): void {
     if (activeChild) {
       // Forward to the running skill; the loop resumes/completes via its close handler.
@@ -337,7 +945,7 @@ async function main(): Promise<void> {
   );
 
   for (;;) {
-    await pollOnce(repo, dryRun, updateState);
+    await pollOnce(repo, dryRun, updateState, state);
     if (once) {
       break;
     }
