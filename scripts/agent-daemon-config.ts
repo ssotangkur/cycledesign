@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolveSbxBin } from './agent-sandbox.js';
 
 export const DAEMON_ENV_FILE = '.agent-daemon.env';
 export const DAEMON_ENV_EXAMPLE = '.agent-daemon.env.example';
@@ -16,6 +17,9 @@ export interface DaemonConfig {
   stuckTimeoutS: number;
   probeIntervalS: number;
   probeTimeoutS: number;
+  /** #121: run each worker in a disposable Docker Sandbox microVM. Off by default. */
+  sandboxMode: boolean;
+  sbxBin: string;
 }
 
 export function missingConfigMessage(cwd: string): string {
@@ -70,12 +74,15 @@ function parsePositiveInt(raw: string | undefined, fallback: number, key: string
 }
 
 export function resolveDaemonConfig(values: Partial<Record<string, string>>): DaemonConfig {
+  const sandboxMode = ['1', 'true', 'yes'].includes((values['SANDBOX_MODE'] || '').trim().toLowerCase());
   return {
     freeModel: values['FREE_MODEL'] || DEFAULT_FREE_MODEL,
     goModel: values['GO_MODEL'] || DEFAULT_GO_MODEL,
     stuckTimeoutS: parsePositiveInt(values['STUCK_TIMEOUT_S'], DEFAULT_STUCK_TIMEOUT_S, 'STUCK_TIMEOUT_S'),
     probeIntervalS: parsePositiveInt(values['PROBE_INTERVAL_S'], DEFAULT_PROBE_INTERVAL_S, 'PROBE_INTERVAL_S'),
     probeTimeoutS: parsePositiveInt(values['PROBE_TIMEOUT_S'], DEFAULT_PROBE_TIMEOUT_S, 'PROBE_TIMEOUT_S'),
+    sandboxMode,
+    sbxBin: resolveSbxBin(values['SBX_BIN']),
   };
 }
 
