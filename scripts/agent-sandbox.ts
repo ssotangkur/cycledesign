@@ -81,7 +81,10 @@ export function policyArgs(name: string, hosts: string[]): string[] {
 
 /** Attached foreground exec (no -t): stdout/stderr separated, exit code propagates. */
 export function execArgs(name: string, command: string[], headlessContent: string): string[] {
-  return ['exec', name, '-e', `OPENCODE_CONFIG_CONTENT=${headlessContent}`, ...command];
+  // Flags precede the sandbox name (docker-exec convention); anything after
+  // the name is the in-VM command (a misplaced -e fails with
+  // "executable file `-e` not found in $PATH", #123).
+  return ['exec', '-e', `OPENCODE_CONFIG_CONTENT=${headlessContent}`, name, ...command];
 }
 
 export function removeArgs(name: string): string[] {
