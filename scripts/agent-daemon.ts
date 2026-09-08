@@ -11,13 +11,16 @@
  * Skills claim via label swap, so the next poll naturally skips claimed issues.
  *
  * Usage:
- *   npx tsx scripts/agent-daemon.ts [--repo OWNER/REPO] [--interval SECONDS] [--once] [--dry-run] [--help]
+ *   npx tsx scripts/agent-daemon.ts [--repo OWNER/REPO] [--interval SECONDS] [--once] [--dry-run] [--update-check-interval SECONDS] [--no-update-check] [--help]
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { parseArgs } from 'node:util';
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
+const DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS = 300;
+const UPDATE_FETCH_TIMEOUT_MS = 60_000;
+export const EXIT_UPDATE = 42;
 const ISSUE_LIMIT = 100;
 
 const LABEL_PLAN = 'ready to plan';
@@ -54,6 +57,8 @@ function usage(): string {
     `  --interval SECONDS    Poll interval in seconds, positive integer (default: ${DEFAULT_INTERVAL_SECONDS})`,
     '  --once                Single poll pass, then exit',
     '  --dry-run             Print planned invocations without spawning opencode',
+    `  --update-check-interval SECONDS  Update-check interval in seconds, 0 disables (default: ${DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS})`,
+    '  --no-update-check     Disable origin/main behind-check (same as --update-check-interval 0)',
     '  --help                Show this help and exit',
   ].join('\n');
 }
@@ -128,7 +133,98 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-async function pollOnce(repo: string, dryRun: boolean): Promise<void> {
+type UpdateStatus = 'current' | 'behind' | 'skipped';
+
+interface UpdateCheckResult {
+  status: UpdateStatus;
+  reason?: string;
+  local?: string;
+  remote?: string;
+}
+
+interface UpdateCheckState {
+  intervalSeconds: number;
+  lastCheck: number;
+}
+
+function runGit(args: string[], timeoutMs?: number): { ok: boolean; stdout: string; status: number | null; error?: string } {
+  const result = spawnSync('git', args, { encoding: 'utf8', timeout: timeoutMs });
+  if (result.error) {
+    return { ok: false, stdout: '', status: result.status ?? null, error: (result.error as Error).message };
+  }
+  return { ok: result.status === 0, stdout: (result.stdout || '').trim(), status: result.status };
+}
+
+function checkForUpdate(): UpdateCheckResult {
+  const branch = runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (!branch.ok || !branch.stdout) {
+    return { status: 'skipped', reason: 'git-error' };
+  }
+  if (branch.stdout !== 'main') {
+    return { status: 'skipped', reason: `not-on-main:${branch.stdout}` };
+  }
+  const upstream = runGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
+  if (!upstream.ok || !upstream.stdout) {
+    return { status: 'skipped', reason: 'no-upstream' };
+  }
+  if (upstream.stdout !== 'origin/main') {
+    return { status: 'skipped', reason: `upstream-${upstream.stdout}` };
+  }
+  const fetch = runGit(['fetch', 'origin', 'main'], UPDATE_FETCH_TIMEOUT_MS);
+  if (!fetch.ok) {
+    return { status: 'skipped', reason: `fetch-failed${fetch.error ? `:${fetch.error}` : ''}` };
+  }
+  const local = runGit(['rev-parse', 'HEAD']);
+  const remote = runGit(['rev-parse', 'origin/main']);
+  if (!local.ok || !remote.ok || !local.stdout || !remote.stdout) {
+    return { status: 'skipped', reason: 'rev-parse-failed' };
+  }
+  if (local.stdout === remote.stdout) {
+    return { status: 'current', local: local.stdout, remote: remote.stdout };
+  }
+  const ancestor = runGit(['merge-base', '--is-ancestor', local.stdout, remote.stdout]);
+  if (ancestor.ok) {
+    return { status: 'behind', local: local.stdout, remote: remote.stdout };
+  }
+  return { status: 'skipped', reason: 'diverged' };
+}
+
+/**
+ * Time-based behind-check. Never kills a run: call only when no run is in
+ * flight (between passes / between individual runs). On behind (non-dry-run)
+ * logs SHAs and exits EXIT_UPDATE; dry-run only reports.
+ */
+async function maybeCheckForUpdate(state: UpdateCheckState, dryRun: boolean): Promise<UpdateStatus | 'disabled' | 'not-due'> {
+  if (state.intervalSeconds <= 0) {
+    if (dryRun) {
+      console.log('[agent-daemon] update-check: skipped (disabled)');
+    }
+    return 'disabled';
+  }
+  const now = Date.now();
+  if (now - state.lastCheck < state.intervalSeconds * 1000) {
+    return 'not-due';
+  }
+  state.lastCheck = now;
+  const result = checkForUpdate();
+  if (result.status === 'behind') {
+    if (dryRun) {
+      console.log(`[agent-daemon] update-check: behind (${result.local} -> ${result.remote})`);
+      return 'behind';
+    }
+    console.log(`[agent-daemon] update available (${result.local} -> ${result.remote}), exiting for supervisor restart`);
+    process.exit(EXIT_UPDATE);
+  }
+  if (dryRun) {
+    console.log(`[agent-daemon] update-check: ${result.status}${result.reason ? ` (${result.reason})` : ''}`);
+  } else if (result.status === 'skipped') {
+    console.log(`[agent-daemon] update-check: skipped (${result.reason})`);
+  }
+  return result.status;
+}
+
+async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckState): Promise<void> {
+  await maybeCheckForUpdate(updateState, dryRun);
   let planIssues: ListedIssue[];
   let implementIssues: ListedIssue[];
   try {
@@ -150,6 +246,12 @@ async function pollOnce(repo: string, dryRun: boolean): Promise<void> {
     console.log(`[agent-daemon] claiming issue #${run.issue.number} ("${run.issue.title}") via ${run.command} [label: ${run.label}]`);
     const code = await runSkill(run.command, run.issue.number, dryRun);
     console.log(`[agent-daemon] completed issue #${run.issue.number} via ${run.command} exit code ${code}`);
+    // Behind-check between runs only (never mid-run): a behind result exits
+    // 42 inside maybeCheckForUpdate, aborting the remaining queue. Unclaimed
+    // queued items keep their labels and are picked up post-restart.
+    if (run !== runs[runs.length - 1]) {
+      await maybeCheckForUpdate(updateState, dryRun);
+    }
   }
 }
 
@@ -162,6 +264,8 @@ async function main(): Promise<void> {
         interval: { type: 'string' },
         once: { type: 'boolean', default: false },
         'dry-run': { type: 'boolean', default: false },
+        'update-check-interval': { type: 'string' },
+        'no-update-check': { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
       },
       strict: true,
@@ -190,10 +294,22 @@ async function main(): Promise<void> {
   const once = Boolean(values.once);
   const dryRun = Boolean(values['dry-run']);
 
-  process.on('SIGINT', () => {
+  let updateInterval: number;
+  if (Boolean(values['no-update-check'])) {
+    updateInterval = 0;
+  } else {
+    const rawUpdateInterval = (values['update-check-interval'] as string | undefined) ?? String(DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS);
+    updateInterval = Number(rawUpdateInterval);
+    if (!Number.isInteger(updateInterval) || updateInterval < 0) {
+      fail(`--update-check-interval must be a non-negative integer (seconds), got "${rawUpdateInterval}"`);
+    }
+  }
+  const updateState: UpdateCheckState = { intervalSeconds: updateInterval, lastCheck: 0 };
+
+  function handleStopSignal(signal: 'SIGINT' | 'SIGTERM'): void {
     if (activeChild) {
       // Forward to the running skill; the loop resumes/completes via its close handler.
-      activeChild.kill('SIGINT');
+      activeChild.kill(signal);
     } else {
       if (sleepTimer) {
         clearTimeout(sleepTimer);
@@ -202,14 +318,17 @@ async function main(): Promise<void> {
       console.log('[agent-daemon] interrupted, exiting');
       process.exit(0);
     }
-  });
+  }
+
+  process.on('SIGINT', () => handleStopSignal('SIGINT'));
+  process.on('SIGTERM', () => handleStopSignal('SIGTERM'));
 
   console.log(
-    `[agent-daemon] polling ${repo} every ${interval}s ("${LABEL_PLAN}" -> ${COMMANDS[LABEL_PLAN]}, "${LABEL_IMPLEMENT}" -> ${COMMANDS[LABEL_IMPLEMENT]})${dryRun ? ' [dry-run]' : ''}`,
+    `[agent-daemon] polling ${repo} every ${interval}s ("${LABEL_PLAN}" -> ${COMMANDS[LABEL_PLAN]}, "${LABEL_IMPLEMENT}" -> ${COMMANDS[LABEL_IMPLEMENT]})${dryRun ? ' [dry-run]' : ''}${updateInterval > 0 ? ` [update-check every ${updateInterval}s]` : ' [update-check disabled]'}`,
   );
 
   for (;;) {
-    await pollOnce(repo, dryRun);
+    await pollOnce(repo, dryRun, updateState);
     if (once) {
       break;
     }
