@@ -49,7 +49,7 @@ describe('sandbox naming + paths', () => {
   });
 
   it('allowlist covers model, git, and npm endpoints', () => {
-    for (const host of ['models.opencode.ai', 'github.com', 'api.github.com', 'registry.npmjs.org']) {
+    for (const host of ['opencode.ai', 'models.opencode.ai', 'github.com', 'api.github.com', 'registry.npmjs.org']) {
       assert.ok(SANDBOX_NETWORK_HOSTS.includes(host), `missing ${host}`);
     }
   });
