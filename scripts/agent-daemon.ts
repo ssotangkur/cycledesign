@@ -424,6 +424,8 @@ function childProcessTree(pid: number | undefined): string {
 
 function portOwnership(): string {
   // Best-effort reuse of the checkout's mode-scoped port helpers (KD AD-8).
+  // check-ports.cjs exits 1 when a port is busy and reports BUSY on stderr,
+  // so read output regardless of exit status — busy is the interesting case.
   try {
     const portsOut = execSync('node scripts/ports.cjs', { encoding: 'utf8', timeout: 10_000 }).trim();
     const ports = JSON.parse(portsOut) as { web: number; server: number; preview: number };
@@ -432,7 +434,16 @@ function portOwnership(): string {
       if (name === 'offset' || name === 'e2e') {
         continue;
       }
-      lines.push(`${name}:${port} -> ${capture(`node scripts/check-ports.cjs --port ${port}`)}`);
+      try {
+        const result = spawnSync('node', ['scripts/check-ports.cjs', '--port', String(port)], {
+          encoding: 'utf8',
+          timeout: 10_000,
+        });
+        const out = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim().replace(/\s+/g, ' ');
+        lines.push(`${name}:${port} -> ${out.slice(0, 500) || '(no output)'}`);
+      } catch {
+        lines.push(`${name}:${port} -> (unavailable)`);
+      }
     }
     return lines.join('\n').slice(0, 4000);
   } catch {
@@ -528,6 +539,11 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     };
 
     const handleGatewayQuota = (): void => {
+      // Guard: piped lines keep flowing until the tree-kill lands; without
+      // this a second gateway line would double-count the failover budget.
+      if (settled) {
+        return;
+      }
       console.error(`[agent-daemon] gateway-quota detected for #${issueNumber}; failing over to Go`);
       if (tracker.firstGatewayLine !== null) {
         console.error(`[agent-daemon] first gateway line: ${tracker.firstGatewayLine}`);
@@ -556,6 +572,10 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     };
 
     const handleWatchdog = (): void => {
+      // Guard: a gateway-quota failover may have already settled the run.
+      if (settled) {
+        return;
+      }
       console.error(`[agent-daemon] watchdog: no non-error activity for ${state.config.stuckTimeoutS}s on #${issueNumber}; investigating`);
       const bundle = buildWatchdogBundle(issueNumber, tracker, child.pid);
       // Diagnosis opencode invocations must use Go (KD-6); gh/git need no model.
