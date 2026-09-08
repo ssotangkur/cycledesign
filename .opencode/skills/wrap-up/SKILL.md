@@ -26,6 +26,23 @@ Take the current branch from "code done" to "PR ready with green CI".
 - Verify PR status with the `gh` CLI, never local results alone.
 - If no PR exists yet, create a draft PR so CI runs and `gh pr checks` has a target; `pr-create` will finalize the description later. Never leave a branch with green local checks but no PR behind.
 
+## Test commands — never watch, never guess
+
+1. **Run unit suites as `vitest run` scoped per workspace dir** (e.g.
+   `npx vitest run` in `apps/server`, `apps/web`, `apps/common/protocol`).
+   Bare `vitest` enters watch mode here and never exits — the tool call never
+   returns and the run wedges with zero output. Precedent: #118 (a wrap-up
+   subagent wedged 2h on a watch-mode pipe).
+2. **Never run `npm run test --workspaces` without `--if-present`.** The bare
+   form resolves per-workspace `test` scripts (any one of which may watch)
+   and fails on workspaces with no `test` script (`apps/preview`).
+   The blessed root form is `npm run test` (which runs
+   `npm run test --workspaces --if-present` — every workspace `test` script
+   is `vitest run`, so it runs once and exits).
+3. **`npm run` has no `--dry-run` that skips scripts.** Appending `--dry-run`
+   still executes every script — it does not preview. Never use it to
+   "preview" test or build commands.
+
 ## Long-lived servers (dev/E2E) — never boot in the foreground
 
 `npm run dev`, `npm run dev:e2e`, `dev:server`, and `dev:web` are long-lived:

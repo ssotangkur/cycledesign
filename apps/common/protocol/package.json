@@ -22,7 +22,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "eslint src",
-    "test": "vitest",
+    "test": "vitest run",
     "prepare": "npm run build"
   },
   "dependencies": {
