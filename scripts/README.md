@@ -171,6 +171,7 @@ docker build -f sandbox.Dockerfile.gui -t cycledesign-sandbox:gui .
 | File | Purpose |
 |------|---------|
 | `agent-daemon.ts` | Polling-first runner: watches `ready to plan` / `ready to implement` labels and invokes fire-and-forget skills via the opencode CLI |
+| `agent-supervisor.ts` | Tiny supervisor: restarts the daemon on crash, pulls ff-only on exit 42 |
 | `sandbox-start.bat` | Windows CMD launcher (wraps PowerShell) |
 | `sandbox-start.ps1` | Windows PowerShell launcher (recommended) |
 | `sandbox-start.sh` | Linux/macOS launcher |
@@ -182,7 +183,9 @@ docker build -f sandbox.Dockerfile.gui -t cycledesign-sandbox:gui .
 
 Polling-first runner (`agent-daemon.ts`, TypeScript via `npx tsx`) that watches
 issue labels and invokes the fire-and-forget skills via the opencode CLI,
-resuming after each run. Ref: issue #98.
+resuming after each run. Ref: issue #98. `npm run agent-daemon` runs it under
+a tiny supervisor (`agent-supervisor.ts`) that restarts the daemon on crash
+and pulls updates when the daemon reports them. Ref: issue #114.
 
 Label → skill mapping:
 
@@ -199,8 +202,9 @@ labels is processed once as `ready to implement` (downstream-most state wins).
 
 ```bash
 npx tsx scripts/agent-daemon.ts --once --dry-run   # single pass, no spawning
-npm run agent-daemon:once                          # single pass for real
-npm run agent-daemon                               # loop forever (60s default)
+npm run agent-daemon:once                          # single supervised pass for real
+npm run agent-daemon                               # supervised loop forever (60s default)
+npx tsx scripts/agent-daemon.ts --once             # raw daemon, one pass, no supervisor
 ```
 
 ### Flags
@@ -211,13 +215,62 @@ npm run agent-daemon                               # loop forever (60s default)
 | `--interval SECONDS` | `60` | Poll interval, positive integer |
 | `--once` | — | Single poll pass, then exit |
 | `--dry-run` | — | Print planned invocations without spawning opencode |
+| `--update-check-interval SECONDS` | `300` | Update-check interval, `0` disables |
+| `--no-update-check` | — | Disable update check (same as `--update-check-interval 0`) |
 | `--help` | — | Show usage and exit |
 
 Warning: `npm run` swallows its own `--dry-run` flag instead of forwarding
 it — `npm run agent-daemon:once -- --dry-run` silently runs a REAL pass and
 spawns opencode (verified: it claimed issue #85 for real). Always pass
 `--dry-run` via direct invocation
-(`npx tsx scripts/agent-daemon.ts --once --dry-run`).
+(`npx tsx scripts/agent-daemon.ts --once --dry-run`). The same applies to any
+other flag: use the `--` separator with `npm run`
+(`npm run agent-daemon -- --update-check-interval 0`), or invoke
+`npx tsx` directly. E2E invokes via direct `npx tsx`, never bare `npm run`
+with flags.
+
+### Supervisor vs daemon (self-update)
+
+The supervisor is dumb and stable (~100 lines, changes almost never): it
+spawns the daemon as a child (`npx tsx scripts/agent-daemon.ts` with all
+flags passed through verbatim), inherits stdio, and restarts it on exit.
+The daemon is smart: every `--update-check-interval` seconds (default 5 min,
+checked between passes and between individual runs — never mid-run) it
+`git fetch origin main` and compares `HEAD` to `origin/main`. When behind,
+it finishes the current run, aborts the remaining queue (unclaimed items
+keep their labels and are picked up post-restart), logs
+`update available (<local> -> <remote>)`, and exits `42`. The supervisor
+then pulls and restarts. The supervisor never needs to self-update itself.
+
+The update check is active only when `HEAD` is on `main` tracking
+`origin/main`; on any other branch, detached `HEAD`, or missing upstream it
+logs `update-check: skipped (<reason>)` and keeps polling. A failed
+`git fetch` (or its 60s hang-guard timeout) also skips the pass — the daemon
+never exits `42` on failed evidence. `--dry-run` prints
+`update-check: behind|current|skipped(<reason>)` without exiting.
+
+### Exit-code contract
+
+| Exit code | Meaning | Supervisor action |
+|---|---|---|
+| `0` | Intentional stop (`--once` done, clean SIGINT/SIGTERM while idle) | Do NOT restart |
+| `42` | Update available | `git pull --ff-only` if clean, then restart |
+| `2` | Usage / arg-parse error | NEVER restart — exit immediately so a bad flag can't hot-loop |
+| anything else | Crash / transient (`gh` auth, OOM) | Plain restart with backoff (1s/2s/4s… cap 30s), no pull; >5 crashes in 5 min bails non-zero |
+
+`--once` mode runs exactly one child pass and exits with the child code —
+no restart loop and no pull (a one-shot scripted invocation must not mutate
+the checkout; `42` under `--once` propagates `42` to the caller with the
+SHAs logged).
+
+### Dirty-tree rule
+
+The daemon's own `opencode run` children dirty the checkout (branches,
+uncommitted work), so the supervisor checks `git status --porcelain` before
+pulling: if non-empty it **skips the pull, warns, and restarts the same
+code**, retrying the pull on the next update exit (with a 60s cooldown so a
+diverged tree can't `42`-loop). Pulls are always `git pull --ff-only` —
+never merge, rebase, or stash (auto-resolving dirty trees is out of scope).
 
 ### Interval tuning and rate limits
 
