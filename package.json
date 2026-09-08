@@ -16,6 +16,7 @@
         "dev:check": "node scripts/check-ports.cjs",
         "agent-daemon": "npx tsx scripts/agent-supervisor.ts",
         "agent-daemon:once": "npx tsx scripts/agent-supervisor.ts --once",
+        "agent-daemon:raw": "npx tsx scripts/agent-daemon.ts",
         "dev:check:e2e": "node scripts/check-ports.cjs --e2e",
         "dev:server": "node scripts/run-with-ports.cjs npm run dev --workspace=@cycledesign/server",
         "dev:web": "node scripts/run-with-ports.cjs npm run dev --workspace=@cycledesign/web",
