@@ -56,10 +56,25 @@ npm run agent-daemon                     # supervised loop (supervisor unchanged
 
 ## Environment Definition
 
-Stock `opencode` agent image (no custom build for v1). Verified present:
-`opencode` CLI, `node`, `gh` 2.x, `git`, `npx`. No Chromium/Playwright
-browsers yet — wrap-up UI verification stays on the host until the env
-gains them (work item in #121).
+Universal worker image **`cycledesign-worker`**, built from
+`sbx/sandbox.Dockerfile` (IaC, pinned base digest): stock opencode agent
+template + GUI stack (Xvfb, openbox, x11vnc on 5900, noVNC on 6080) +
+Chromium via Playwright (CDP on 9222) + `chrome-devtools-mcp`. GUI services
+autostart backgrounded on every boot, so all workers are wrap-up capable
+with no per-run template decision. Daemon selects it via `SBX_TEMPLATE`
+(default `cycledesign-worker`).
+
+Build + load (after Dockerfile changes):
+
+```powershell
+docker build -f sbx/sandbox.Dockerfile -t cycledesign-worker .
+docker save cycledesign-worker -o $env:TEMP\opencode\cycledesign-worker.tar
+sbx template load $env:TEMP\opencode\cycledesign-worker.tar
+sbx template ls   # expect cycledesign-worker / latest / opencode flavor
+```
+
+Verified in-VM: noVNC 200, VNC RFB handshake, Chrome CDP
+(`Chrome/153`, protocol 1.3), `chrome-devtools-mcp` 1.9.0.
 
 ---
 

@@ -57,7 +57,15 @@ describe('sandbox naming + paths', () => {
 
 describe('sbx argv builders', () => {
   it('creates an opencode sandbox mounting the workdir', () => {
-    assert.deepEqual(createArgs('cycledesign-issue-1', 'D:\\work'), ['create', '--name', 'cycledesign-issue-1', 'opencode', 'D:\\work']);
+    assert.deepEqual(createArgs('cycledesign-issue-1', 'D:\\work', 'cycledesign-worker'), [
+      'create',
+      '-t',
+      'cycledesign-worker',
+      '--name',
+      'cycledesign-issue-1',
+      'opencode',
+      'D:\\work',
+    ]);
   });
 
   it('copies host auth into the VM', () => {

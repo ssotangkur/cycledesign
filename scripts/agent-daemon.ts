@@ -556,7 +556,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
   if (sandbox && sandboxName !== null) {
     // #121: disposable per-run microVM. Provision first (create -> auth ->
     // allowlist); the sbx.exe client is a real binary (no shell shim needed).
-    const provisioned = provisionSandbox(state.config.sbxBin, sandboxName, process.cwd(), hostAuthJsonPath(homedir()));
+    const provisioned = provisionSandbox(state.config.sbxBin, sandboxName, process.cwd(), hostAuthJsonPath(homedir()), state.config.sbxTemplate);
     if (!provisioned.ok) {
       console.error(`[agent-daemon] sandbox provision failed for #${issueNumber} at step ${provisioned.step}: ${provisioned.output}`);
       destroySandbox(state.config.sbxBin, sandboxName);
@@ -734,7 +734,7 @@ async function probeFreeTier(state: DaemonState): Promise<'success' | 'quota' | 
     let child: ChildProcess;
     try {
       if (probeSandbox !== null) {
-        const provisioned = provisionSandbox(state.config.sbxBin, probeSandbox, process.cwd(), hostAuthJsonPath(homedir()));
+        const provisioned = provisionSandbox(state.config.sbxBin, probeSandbox, process.cwd(), hostAuthJsonPath(homedir()), state.config.sbxTemplate);
         if (!provisioned.ok) {
           console.error(`[agent-daemon] probe sandbox provision failed at step ${provisioned.step}: ${provisioned.output}`);
           destroySandbox(state.config.sbxBin, probeSandbox);
@@ -1047,7 +1047,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => handleStopSignal('SIGTERM'));
 
   console.log(
-    `[agent-daemon] polling ${repo} every ${interval}s ("${LABEL_PLAN}" -> ${COMMANDS[LABEL_PLAN]}, "${LABEL_IMPLEMENT}" -> ${COMMANDS[LABEL_IMPLEMENT]})${dryRun ? ' [dry-run]' : ''}${updateInterval > 0 ? ` [update-check every ${updateInterval}s]` : ' [update-check disabled]'} [free: ${daemonConfig.freeModel}, go: ${daemonConfig.goModel}]${daemonConfig.sandboxMode ? ` [sandbox: ${daemonConfig.sbxBin}]` : ''}`,
+    `[agent-daemon] polling ${repo} every ${interval}s ("${LABEL_PLAN}" -> ${COMMANDS[LABEL_PLAN]}, "${LABEL_IMPLEMENT}" -> ${COMMANDS[LABEL_IMPLEMENT]})${dryRun ? ' [dry-run]' : ''}${updateInterval > 0 ? ` [update-check every ${updateInterval}s]` : ' [update-check disabled]'} [free: ${daemonConfig.freeModel}, go: ${daemonConfig.goModel}]${daemonConfig.sandboxMode ? ` [sandbox: ${daemonConfig.sbxBin} template: ${daemonConfig.sbxTemplate}]` : ''}`,
   );
 
   for (;;) {

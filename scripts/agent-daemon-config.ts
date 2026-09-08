@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveSbxBin } from './agent-sandbox.js';
+import { resolveSbxBin, DEFAULT_SBX_TEMPLATE } from './agent-sandbox.js';
 
 export const DAEMON_ENV_FILE = '.agent-daemon.env';
 export const DAEMON_ENV_EXAMPLE = '.agent-daemon.env.example';
@@ -20,6 +20,8 @@ export interface DaemonConfig {
   /** #121: run each worker in a disposable Docker Sandbox microVM. Off by default. */
   sandboxMode: boolean;
   sbxBin: string;
+  /** #121: sandbox template (universal worker image from sbx/sandbox.Dockerfile). */
+  sbxTemplate: string;
 }
 
 export function missingConfigMessage(cwd: string): string {
@@ -83,6 +85,7 @@ export function resolveDaemonConfig(values: Partial<Record<string, string>>): Da
     probeTimeoutS: parsePositiveInt(values['PROBE_TIMEOUT_S'], DEFAULT_PROBE_TIMEOUT_S, 'PROBE_TIMEOUT_S'),
     sandboxMode,
     sbxBin: resolveSbxBin(values['SBX_BIN']),
+    sbxTemplate: values['SBX_TEMPLATE'] || DEFAULT_SBX_TEMPLATE,
   };
 }
 

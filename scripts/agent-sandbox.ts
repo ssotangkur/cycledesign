@@ -23,6 +23,9 @@ import { join } from 'node:path';
 /** In-VM path where the opencode agent reads provider auth. */
 export const SANDBOX_AUTH_PATH = '/home/agent/.local/share/opencode/auth.json';
 
+/** Default universal worker template (built from sbx/sandbox.Dockerfile). */
+export const DEFAULT_SBX_TEMPLATE = 'cycledesign-worker';
+
 /**
  * Minimal egress allowlist for a worker run. Discovered via
  * `sbx policy log` (Zen model traffic = models.opencode.ai).
@@ -64,8 +67,8 @@ export function hostAuthJsonPath(homeDir: string): string {
   return join(homeDir, '.local', 'share', 'opencode', 'auth.json');
 }
 
-export function createArgs(name: string, workdir: string): string[] {
-  return ['create', '--name', name, 'opencode', workdir];
+export function createArgs(name: string, workdir: string, template: string): string[] {
+  return ['create', '-t', template, '--name', name, 'opencode', workdir];
 }
 
 export function cpAuthArgs(hostAuthPath: string, name: string): string[] {
@@ -106,9 +109,9 @@ export interface ProvisionResult {
 }
 
 /** Create -> auth copy -> network allowlist. Fails fast with the blaming step. */
-export function provisionSandbox(sbxBin: string, name: string, workdir: string, hostAuthPath: string): ProvisionResult {
+export function provisionSandbox(sbxBin: string, name: string, workdir: string, hostAuthPath: string, template: string): ProvisionResult {
   const steps: Array<[string, string[]]> = [
-    ['create', createArgs(name, workdir)],
+    ['create', createArgs(name, workdir, template)],
     ['cp-auth', cpAuthArgs(hostAuthPath, name)],
     ['allow-network', policyArgs(name, SANDBOX_NETWORK_HOSTS)],
   ];
