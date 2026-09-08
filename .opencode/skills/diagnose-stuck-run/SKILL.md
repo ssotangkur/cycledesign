@@ -72,7 +72,9 @@ Get-CimInstance Win32_Process | Where-Object {
 } | Select-Object ProcessId, ParentProcessId, Name, CommandLine, CreationDate,
     @{n='CpuSeconds';e={[double]($_.KernelModeTime + $_.UserModeTime) / 1e7}}
 # Repeat for each child PID to walk the full wrapper chain
-# (concurrently / npm / shell:true wrappers per scripts/agent-daemon.ts:103-108).
+# (daemon spawns via shell:true per scripts/agent-daemon.ts:103-108, so expect
+# a shell/shim level; #104 additionally showed concurrently/npm levels —
+# walk whatever levels actually exist).
 ```
 
 - High child CPU + recent output = "long test running".
@@ -210,8 +212,8 @@ CLI worked. So: hung test/child process → wrapper chain
 
 ### Fixture B — rate-limited (expected: `rate-limited (gateway-quota)`)
 
-- `Get-CimInstance`: CLI PID 2345 age 3.5 h, CPU +1.6 s total (~1m40s
-  lifetime, ~0 over last 15 min); no live children.
+- `Get-CimInstance`: CLI PID 2345 age 3.5 h, CPU +1.6 s total (~0 gained over
+  last 15 min); no live children.
 - Log tail: ~20 consecutive `Rate limit exceeded` (no `Upstream` marker),
   last stream 3 h ago (#85 shape).
 - Ports: all free.
