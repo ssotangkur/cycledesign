@@ -89,7 +89,7 @@ describe('sbx argv builders', () => {
 
   it('builds attached foreground exec with headless env (no -t)', () => {
     const args = execArgs('cycledesign-issue-1', ['opencode', 'run', '--format', 'json', 'hi'], 'DENY');
-    assert.deepEqual(args, ['exec', 'cycledesign-issue-1', '-e', 'OPENCODE_CONFIG_CONTENT=DENY', 'opencode', 'run', '--format', 'json', 'hi']);
+    assert.deepEqual(args, ['exec', '-e', 'OPENCODE_CONFIG_CONTENT=DENY', 'cycledesign-issue-1', 'opencode', 'run', '--format', 'json', 'hi']);
     assert.ok(!args.includes('-t') && !args.includes('-d'));
   });
 
