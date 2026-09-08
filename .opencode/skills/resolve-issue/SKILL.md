@@ -140,8 +140,33 @@ Return contract:
 status: DONE|BLOCKED
 pr_url: <full PR URL>
 pr_number: <number>
+footer_keywords: <list of Related-Issues keywords used, e.g. [Part of, Refs]>
+partial: <true if the footer uses Part of|Refs|Related to instead of Closes|Fixes|Resolves, else false>
+followup: <#N of the followup issue when partial, else none>
 blocked_reason: <only if BLOCKED>"
 ```
+
+### Partial-PR rule (canonical — `pr-create` mirrors this)
+
+When the `pr-creator` return has `partial: true` (footer uses `Part of`/`Refs`/`Related to` instead of `Closes`/`Fixes`/`Resolves`):
+1. **Keyword test:** trust the returned `footer_keywords`/`partial` fields. If the return lacks them (legacy/BLOCKED shape), fall back to parsing the PR body yourself:
+   ```bash
+   gh pr view <pr_number> --repo ssotangkur/cycledesign --json body --jq .body
+   ```
+   `Part of|Refs|Related to` → partial; `Closes|Fixes|Resolves` → complete.
+2. **Followup-exists gate (you do this, no sub-agent):** resolve `followup` via `gh issue view #<followup> --repo ssotangkur/cycledesign`. If it does not exist, create it yourself before accepting `pr-creator` DONE:
+   ```bash
+   gh issue create --repo ssotangkur/cycledesign --title "<remaining scope>" --body "<acceptance items carried over>"
+   ```
+   If `followup` is `none`/missing while `partial: true`, create the followup issue yourself from the remaining acceptance items first, then use its number below.
+   Ordering: the gate passes before `pr-creator` DONE is accepted as PR-ready.
+3. **Original-issue status comment (at Phase 4 DONE / PR-ready time):** post via `gh issue comment <N> --repo ssotangkur/cycledesign --body-file tmp/partial-status.md` using this forward template (pending-merge wording — the orchestrator's terminal state is PR-ready and no skill acts at merge time, so never use past tense here):
+   ```markdown
+   Partial completion pending merge of #<PR> (head <SHA> at PR-ready; merge SHA will differ).
+   Landed: <1-3 bullets>.
+   Remaining: <acceptance items> → tracked in #<followup>.
+   ```
+   No post-merge updater exists; the wording above documents that gap in the comment itself.
 
 On DONE (you do this, no sub-agent):
 
