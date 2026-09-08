@@ -2,15 +2,20 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import type { LanguageModel } from 'ai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
 import { BaseProvider, type AgentConfig } from './base-provider.js';
-import { createGatewayModel } from './openai-compatible-helper.js';
+import { createGatewayModel, withDynamicHeaders } from './openai-compatible-helper.js';
 import { FreeUsageLimitError, RateLimitError } from '../errors.js';
 import { IProviderConfig, LLMResponse } from '../types.js';
 
-// Zen Free (OpenCode) — Phase 2 free provider, single-transport MVP.
-// Ports pi-free's Zen pattern (no @earendil-works/pi-* dependency, no Pi
-// ExtensionAPI import): the OpenCode `opencode` catalog re-registered at
-// baseUrl https://opencode.ai/zen/v1 over OpenAI-completions transport.
+// Zen Free (OpenCode) — Phase 2 free provider with per-model transport dispatch.
+// Ports pi-free's `resolveOpenCodeModelApi` table:
+// - `gpt-*` -> openai-responses (`/v1/responses`)
+// - `claude-*` / `qwen3-*` / `qwen3.*` -> anthropic-messages (`/v1/messages`)
+// - `gemini-*` -> google-generative-ai (`/v1/models/...:generateContent`)
+// - rest -> openai-completions (`/v1/chat/completions`) via the shared gateway.
 //
 // Header caveat — headers are the whole Zen trick:
 // - Availability rotates (the free set is ~7 models, all "limited time").
@@ -21,17 +26,14 @@ import { IProviderConfig, LLMResponse } from '../types.js';
 // - Keyless (`apiKey: "none"`) is deliberately NOT supported here: Zen's
 //   free tier 401s on any Bearer and the backend header gate could be
 //   re-enabled anytime. A key from https://opencode.ai/auth is required.
-// - Full per-model transport dispatch (gpt-* -> /v1/responses,
-//   claude-*/qwen3-* -> /v1/messages, gemini-* -> google) is deferred to a
-//   followup issue; this MVP serves the majority of free models over
-//   openai-completions via the shared gateway helper.
 // - Never log the API key.
 
 export const ZEN_BASE_URL = 'https://opencode.ai/zen/v1';
 export const ZEN_FREE_DISPLAY_NAME = 'Zen Free (OpenCode)';
 
-// Bare MVP form of the CLI User-Agent. The full CLI string also appends
-// `ai-sdk/... runtime/...` segments — noted as an optional followup.
+// Bare CLI User-Agent. The full `opencode/<version> ai-sdk/...` form is
+// produced automatically by each SDK's `withUserAgentSuffix` — never
+// hand-roll the suffix (it would double-append).
 const ZEN_USER_AGENT = 'opencode/1.18.18';
 
 const CONFIG_DIR = join(process.cwd(), '.cycledesign');
@@ -92,6 +94,62 @@ export function createZenDynamicHeaders(): Record<string, string> {
   return {
     'x-opencode-session': `ses_${randomId()}`,
     'x-opencode-request': `prt_${randomId()}`,
+  };
+}
+
+export type ZenTransport =
+  | 'openai-responses'
+  | 'anthropic-messages'
+  | 'google-generative-ai'
+  | 'openai-completions';
+
+// Per-model transport dispatch (pi-free `resolveOpenCodeModelApi` parity).
+// Case-sensitive `startsWith` on the raw full model ID, no vendor-prefix
+// stripping. Precedence: `gpt-` > `claude-`/`qwen3-`/`qwen3.` > `gemini-` >
+// rest. The `qwen3.` dot-variant is a pi-parity superset preventing silent
+// `rest` fallback for `qwen3.5`-style IDs.
+export function resolveZenTransport(modelId: string): ZenTransport {
+  if (modelId.startsWith('gpt-')) return 'openai-responses';
+  if (
+    modelId.startsWith('claude-') ||
+    modelId.startsWith('qwen3-') ||
+    modelId.startsWith('qwen3.')
+  ) {
+    return 'anthropic-messages';
+  }
+  if (modelId.startsWith('gemini-')) return 'google-generative-ai';
+  return 'openai-completions';
+}
+
+// Guard normalizer for the Zen base URL (ZEN_BASE_URL already ends `…/v1`).
+// Strips trailing slashes plus any trailing `/chat/completions`, `/responses`,
+// or `/messages` suffixes, then ensures the result ends with `…/v1`. Takes
+// input so it stays table-testable over varied inputs.
+export function normalizeZenBase(input: string): string {
+  let base = input.trim().replace(/\/+$/, '');
+  const suffixes = ['/chat/completions', '/responses', '/messages'];
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const suffix of suffixes) {
+      if (base.endsWith(suffix)) {
+        base = base.slice(0, -suffix.length).replace(/\/+$/, '');
+        stripped = true;
+      }
+    }
+  }
+  base = base.replace(/\/+$/, '');
+  if (!base.endsWith('/v1')) {
+    base = `${base}/v1`;
+  }
+  return base;
+}
+
+function zenStaticHeaders(): Record<string, string> {
+  return {
+    'x-opencode-client': 'cli',
+    'x-opencode-project': 'global',
+    'User-Agent': ZEN_USER_AGENT,
   };
 }
 
@@ -194,17 +252,38 @@ export class ZenFreeProvider extends BaseProvider {
     if (!this.model || this.model === 'default') {
       throw new Error('No Zen Free model selected. Pick a model from the live Zen Free list in Settings.');
     }
-    return createGatewayModel({
-      baseURL: ZEN_BASE_URL,
-      apiKey: this.apiKey,
-      model: this.model,
-      headers: {
-        'x-opencode-client': 'cli',
-        'x-opencode-project': 'global',
-        'User-Agent': ZEN_USER_AGENT,
-      },
-      dynamicHeaders: createZenDynamicHeaders,
-    });
+    const transport = resolveZenTransport(this.model);
+    const baseURL = normalizeZenBase(ZEN_BASE_URL);
+    const headers = zenStaticHeaders();
+    const fetch = withDynamicHeaders(createZenDynamicHeaders);
+    switch (transport) {
+      case 'openai-responses':
+        return createOpenAI({ baseURL, apiKey: this.apiKey, headers, fetch }).responses(this.model);
+      case 'anthropic-messages':
+        // `authToken` sends `Authorization: Bearer` (Zen's gateway gate);
+        // `apiKey` would send `x-api-key` instead.
+        return createAnthropic({ baseURL, authToken: this.apiKey, headers, fetch }).messages(
+          this.model
+        );
+      case 'google-generative-ai':
+        // `apiKey` lands as `x-goog-api-key`; the explicit Bearer beside it
+        // is what the Zen gateway checks. Header merge preserves both.
+        return createGoogleGenerativeAI({
+          baseURL,
+          apiKey: this.apiKey,
+          headers: { Authorization: `Bearer ${this.apiKey}`, ...headers },
+          fetch,
+        })(this.model);
+      case 'openai-completions':
+      default:
+        return createGatewayModel({
+          baseURL,
+          apiKey: this.apiKey,
+          model: this.model,
+          headers,
+          dynamicHeaders: createZenDynamicHeaders,
+        });
+    }
   }
 
   // No beforeComplete override: inherit base SDK retry defaults. No
