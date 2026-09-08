@@ -28,9 +28,11 @@ export const DEFAULT_SBX_TEMPLATE = 'cycledesign-worker';
 
 /**
  * Minimal egress allowlist for a worker run. Discovered via
- * `sbx policy log` (Zen model traffic = models.opencode.ai).
+ * `sbx policy log`: Go models hit models.opencode.ai, free-tier Zen hits
+ * bare opencode.ai (`*.opencode.ai` does NOT cover the bare domain, #126).
  */
 export const SANDBOX_NETWORK_HOSTS = [
+  'opencode.ai',
   'models.opencode.ai',
   '*.opencode.ai',
   'github.com',
