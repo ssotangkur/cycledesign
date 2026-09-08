@@ -72,10 +72,12 @@ import {
   type ProbeTracker,
 } from './agent-daemon-policy.js';
 import {
+  SANDBOX_REPO_DIR,
   destroySandbox,
   execArgs,
   hostAuthJsonPath,
   provisionSandbox,
+  resolveGithubToken,
   sandboxNameFor,
   sandboxStatus,
 } from './agent-sandbox.js';
@@ -554,15 +556,21 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
   const stuckTimeoutMs = state.config.stuckTimeoutS * 1000;
   let child: ChildProcess;
   if (sandbox && sandboxName !== null) {
-    // #121: disposable per-run microVM. Provision first (create -> auth ->
-    // allowlist); the sbx.exe client is a real binary (no shell shim needed).
-    const provisioned = provisionSandbox(state.config.sbxBin, sandboxName, process.cwd(), hostAuthJsonPath(homedir()), state.config.sbxTemplate);
+    // #121: disposable per-run microVM. Provision first (create -> github
+    // secret -> auth -> allowlist -> clone); the sbx.exe client is a real
+    // binary (no shell shim needed). #129: the worker runs in the in-VM
+    // clone (the workdir mount's `.git` is a host-path worktree pointer).
+    const githubToken = resolveGithubToken(process.env['GH_TOKEN']);
+    const provisioned = provisionSandbox(state.config.sbxBin, sandboxName, process.cwd(), hostAuthJsonPath(homedir()), state.config.sbxTemplate, {
+      repoSlug: repo,
+      githubToken,
+    });
     if (!provisioned.ok) {
       console.error(`[agent-daemon] sandbox provision failed for #${issueNumber} at step ${provisioned.step}: ${provisioned.output}`);
       destroySandbox(state.config.sbxBin, sandboxName);
       return Promise.resolve({ code: 1, failover: false, watchdogFired: false });
     }
-    child = spawn(state.config.sbxBin, execArgs(sandboxName, ['opencode', ...opencodeArgv], HEADLESS_CONFIG_CONTENT), {
+    child = spawn(state.config.sbxBin, execArgs(sandboxName, ['opencode', ...opencodeArgv], HEADLESS_CONFIG_CONTENT, SANDBOX_REPO_DIR), {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       env: { ...process.env },
