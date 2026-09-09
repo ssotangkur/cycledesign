@@ -45,8 +45,15 @@ node scripts/ports.cjs --e2e    # Playwright-owned ports
 
 ---
 
-## Knip Configuration Rule
+## gh Body Composition Rule
 
+Backtick is PowerShell's escape character inside `"..."`, so `gh ... --body "..."` mangles backticks, `$`, embedded quotes, and newlines before `gh` ever sees the text.
+
+- Compose every `gh pr/issue create|edit|comment` body with the `Write` tool to `tmp/<kind>-<N>.md` (unique per issue/PR, e.g. `tmp/pr-body-125.md`), then pass `--body-file`. Never use inline `--body "..."`, shell heredocs (`cat << 'EOF'`), `echo`, or `printf` for bodies. `tmp/` is gitignored.
+- Keep `--title "..."` inline (no `--title-file` flag exists) but plain-ASCII only: no backticks, fences, `$`, or embedded double-quotes. Put code/symbols in the body.
+- Verify with `gh pr view <n> --json body --jq .body` (or `gh issue view`) and confirm backticks/fences render with no stray `\`.
+
+## Knip Configuration Rule
 **Do not add files to `knip.json` ignore list without explicit user permission**.
 
 When Knip reports unused files/exports:

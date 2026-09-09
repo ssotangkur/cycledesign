@@ -139,25 +139,26 @@ New Flow: A → D → C
 
 ### 4. Write to Temp File
 
-```bash
-# Create description file
-cat > tmp/pr-body.md << 'EOF'
-[Your markdown content]
-EOF
-```
+Use the `Write` tool to compose the description to `tmp/pr-body-<N>.md`
+(unique per PR; never shell heredoc, `echo`, or `printf` — the
+`cat << 'EOF'` form is POSIX-only and mangles bodies under PowerShell 5.1,
+where backtick is the escape character). If this Qwen context lacks a file
+writer, note the limitation and compose via `gh ... --body-file` from an
+existing file instead of inline `--body`. Then pass
+`--body-file tmp/pr-body-<N>.md` in step 5.
 
 ### 5. Update PR via gh API
 
 ```bash
 # For existing PR
 gh api -X PATCH repos/ssotangkur/cycledesign/pulls/<number> \
-  -F body=@tmp/pr-body.md \
+  -F body=@tmp/pr-body-<N>.md \
   -F title="[updated title]"
 
 # For new PR (if needed)
 gh pr create \
   --title "type: concise description" \
-  --body-file tmp/pr-body.md \
+  --body-file tmp/pr-body-<N>.md \
   --base main \
   --head <branch-name>
 ```

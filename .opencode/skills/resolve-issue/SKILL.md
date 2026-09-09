@@ -16,7 +16,7 @@ There is no silent exit, no partial completion, no asking the user directly.
 
 ## Rules
 
-- **Never implement directly.** No `edit`/`write` of code files. No `npm run validate`, no `vitest`, no Playwright runs. Delegate all of it.
+- **Never implement directly.** No `edit`/`write` of code files. No `npm run validate`, no `vitest`, no Playwright runs. Delegate all of it. Exception: `tmp/*.md` Write allowed (body composition only, cf. pr-creator permissions) so you can compose `gh` bodies via `--body-file` in the steps below.
 - **Reference skills in every delegation** instead of re-explaining the workflow. The skill body lives with the sub-agent, saving your context.
 - **Never ask the user anything.** Do not use the `question` tool. Do not stop for confirmation. This is fire-and-forget.
 - **Every `Task` delegation must demand a structured return** (see contracts below). You decide next steps from those returns, not from reading code yourself.
@@ -161,13 +161,13 @@ When the `pr-creator` return has `partial: true` (footer uses `Part of`/`Refs`/`
    gh pr view <pr_number> --repo ssotangkur/cycledesign --json body --jq .body
    ```
    `Part of|Refs|Related to` → partial; `Closes|Fixes|Resolves` → complete.
-2. **Followup-exists gate (you do this, no sub-agent):** resolve `followup` via `gh issue view #<followup> --repo ssotangkur/cycledesign`. If it does not exist, create it yourself before accepting `pr-creator` DONE:
+2. **Followup-exists gate (you do this, no sub-agent):** resolve `followup` via `gh issue view #<followup> --repo ssotangkur/cycledesign`. If it does not exist, create it yourself before accepting `pr-creator` DONE. Compose the body with the `Write` tool to `tmp/followup-<N>.md` first (never inline `--body "..."` — backtick is PowerShell's escape character), then:
    ```bash
-   gh issue create --repo ssotangkur/cycledesign --title "<remaining scope>" --body "<acceptance items carried over>"
+   gh issue create --repo ssotangkur/cycledesign --title "<remaining scope>" --body-file tmp/followup-<N>.md
    ```
    If `followup` is `none`/missing while `partial: true`, create the followup issue yourself from the remaining acceptance items first, then use its number below.
    Ordering: the gate passes before `pr-creator` DONE is accepted as PR-ready.
-3. **Original-issue status comment (at Phase 4 DONE / PR-ready time):** post via `gh issue comment <N> --repo ssotangkur/cycledesign --body-file tmp/partial-status.md` using this forward template (pending-merge wording — the orchestrator's terminal state is PR-ready and no skill acts at merge time, so never use past tense here):
+3. **Original-issue status comment (at Phase 4 DONE / PR-ready time):** create the file with the `Write` tool first, then post via `gh issue comment <N> --repo ssotangkur/cycledesign --body-file tmp/partial-status.md` using this forward template (pending-merge wording — the orchestrator's terminal state is PR-ready and no skill acts at merge time, so never use past tense here):
    ```markdown
    Partial completion pending merge of #<PR> (head <SHA> at PR-ready; merge SHA will differ).
    Landed: <1-3 bullets>.
@@ -188,7 +188,7 @@ Then stop. Reply in chat with branch + PR URL + unresolved-findings count.
 
 Triggered by any BLOCKED return, or an unrecoverable error in a sub-agent.
 
-1. Compose a comment containing: what was attempted (branch, phases completed), the exact blocker, the specific question for the human, and any extra context the next `resolve-issue` invocation will need (it will re-read this comment):
+1. Compose a comment containing: what was attempted (branch, phases completed), the exact blocker, the specific question for the human, and any extra context the next `resolve-issue` invocation will need (it will re-read this comment). Create the file with the `Write` tool first, then:
    ```bash
    gh issue comment <N> --repo ssotangkur/cycledesign --body-file tmp/resolve-blocked.md
    ```

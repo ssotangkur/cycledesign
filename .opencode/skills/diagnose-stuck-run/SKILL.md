@@ -239,11 +239,14 @@ outdated shapes), steps that were too verbose, or steps that were too
 prescriptive (commands that didn't help or over-constrained the diagnosis).
 
 - If an improvement exists, file it as a GitHub issue with the specific
-  change to make (section, what's wrong, suggested fix):
+  change to make (section, what's wrong, suggested fix). Compose the body
+  with the `Write` tool to `tmp/diagnose-<N>.md` with real newlines first
+  (never inline `--body "..."` — backtick is PowerShell's escape character
+  and `\n` stays literal), then:
   ```powershell
   gh issue create --repo ssotangkur/cycledesign `
     --title "diagnose-stuck-run: <short description>" `
-    --body "Section: <§N / Appendix>\nProblem: <stale|verbose|prescriptive — what and why>\nSuggested change: <concrete edit>"
+    --body-file tmp/diagnose-<N>.md
   ```
 - File one issue per improvement. Keep the verdict post clean — do not mix
   skill feedback into `## Watchdog investigation`.

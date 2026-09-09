@@ -151,23 +151,22 @@ New Flow: A → D → C
 
 ### 4. Write to Temp File
 
-```bash
-# Create description file
-cat > tmp/pr-body.md << 'EOF'
-[Your markdown content]
-EOF
-```
+Use the `Write` tool to compose the description to `tmp/pr-body-<N>.md`
+(unique per PR — never a shared singleton; never shell heredoc, `echo`, or
+`printf`: the `cat << 'EOF'` form is POSIX-only and mangles bodies under
+PowerShell 5.1, where backtick is the escape character). Then pass
+`--body-file tmp/pr-body-<N>.md` in step 5.
 
 ### 5. Update PR via gh CLI
 
 ```bash
 # For existing PR
-gh pr edit <number> --body-file tmp/pr-body.md --title "[updated title]"
+gh pr edit <number> --body-file tmp/pr-body-<N>.md --title "[updated title]"
 
 # For new PR (if needed)
 gh pr create \
   --title "type: concise description" \
-  --body-file tmp/pr-body.md \
+  --body-file tmp/pr-body-<N>.md \
   --base main \
   --head <branch-name>
 ```
