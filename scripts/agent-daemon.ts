@@ -79,6 +79,7 @@ import {
   sandboxNameFor,
   sandboxStatus,
 } from './agent-sandbox.js';
+import { tryReturnToMain } from './agent-daemon-return-main.js';
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -822,12 +823,12 @@ interface UpdateCheckState {
   lastCheck: number;
 }
 
-function runGit(args: string[], timeoutMs?: number): { ok: boolean; stdout: string; status: number | null; error?: string } {
+function runGit(args: string[], timeoutMs?: number): { ok: boolean; stdout: string; stderr: string; status: number | null; error?: string } {
   const result = spawnSync('git', args, { encoding: 'utf8', timeout: timeoutMs });
   if (result.error) {
-    return { ok: false, stdout: '', status: result.status ?? null, error: (result.error as Error).message };
+    return { ok: false, stdout: '', stderr: (result.stderr as string | undefined) ?? '', status: result.status ?? null, error: (result.error as Error).message };
   }
-  return { ok: result.status === 0, stdout: (result.stdout || '').trim(), status: result.status };
+  return { ok: result.status === 0, stdout: (result.stdout || '').trim(), stderr: (result.stderr as string | undefined) ?? '', status: result.status };
 }
 
 function checkForUpdate(): UpdateCheckResult {
@@ -923,6 +924,8 @@ function modelForRun(state: DaemonState): string {
 
 async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckState, state: DaemonState): Promise<void> {
   await maybeCheckForUpdate(updateState, dryRun);
+  // #120: heal crash/empty-queue stranded state (no runSkill may run this pass).
+  tryReturnToMain(dryRun);
   // Failback probe fires at this run boundary (no run in flight here).
   await maybeProbe(state, dryRun);
   let planIssues: ListedIssue[];
@@ -942,6 +945,7 @@ async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckS
     return;
   }
 
+  let lastHealReturned = false;
   for (const run of runs) {
     // A respawned failover run re-enters here on the next pass via its reset label.
     const model = modelForRun(state);
@@ -953,6 +957,13 @@ async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckS
       // continue the queue rather than recursing mid-pass.
       console.log(`[agent-daemon] failover armed Go model (${state.config.goModel}); respawn on next poll`);
     }
+    // #120: best-effort return to main before the inter-run update check
+    // (try-then-check lets a just-returned main exit 42 same-pass). Heal
+    // failures never block the queue, failover accounting, or probe.
+    const heal = tryReturnToMain(dryRun);
+    if (run === runs[runs.length - 1]) {
+      lastHealReturned = heal.action === 'returned-to-main';
+    }
     // Behind-check between runs only (never mid-run): a behind result exits
     // 42 inside maybeCheckForUpdate, aborting the remaining queue. Unclaimed
     // queued items keep their labels and are picked up post-restart.
@@ -961,6 +972,11 @@ async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckS
       // Probe between queued runs as well (still a run boundary).
       await maybeProbe(state, dryRun);
     }
+  }
+  // #120: the inter-run check is skipped for the last run, so a single-run
+  // pass would otherwise wait a full interval before self-updating.
+  if (lastHealReturned) {
+    await maybeCheckForUpdate(updateState, dryRun);
   }
 }
 
