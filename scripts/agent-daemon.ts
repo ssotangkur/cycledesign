@@ -84,6 +84,7 @@ import {
   sandboxStatus,
 } from './agent-sandbox.js';
 import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease, type IssueLease } from './agent-daemon-lease.js';
+import { syncStatusForLabel } from './agent-project.js';
 import { tryReturnToMain } from './agent-daemon-return-main.js';
 import { treeKill } from './agent-tree-kill.js';
 
@@ -441,6 +442,8 @@ function resetToReady(repo: string, issueNumber: number): void {
     console.error(
       `[agent-daemon] label reset failed for #${issueNumber}: ${result.error ? (result.error as Error).message : (result.stderr || '').trim()}`,
     );
+  } else if (syncStatusForLabel(repo, issueNumber, LABEL_IMPLEMENT) === 'failed') {
+    console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${LABEL_IMPLEMENT})`);
   }
 }
 
@@ -459,6 +462,8 @@ function parkAtQuestion(repo: string, issueNumber: number, body: string): void {
   );
   if (edit.error || edit.status !== 0) {
     console.error(`[agent-daemon] park label move failed for #${issueNumber}`);
+  } else if (syncStatusForLabel(repo, issueNumber, LABEL_QUESTION) === 'failed') {
+    console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${LABEL_QUESTION})`);
   }
 }
 

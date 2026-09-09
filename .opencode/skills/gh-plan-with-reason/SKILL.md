@@ -29,6 +29,14 @@ ready to plan -> planning <-> question -> ready to implement
 
 Label moves are idempotent in intent — `gh issue edit --remove-label` still exits nonzero with `'label' not found` when absent. Ignore "label not present" errors and continue.
 
+After every label move, mirror to the Project board (best-effort, warn-only — never block the workflow on it):
+```bash
+npx tsx scripts/agent-project.ts --issue <N> --status "Planning"  # claim
+npx tsx scripts/agent-project.ts --issue <N> --status "Blocked"  # need answers
+npx tsx scripts/agent-project.ts --issue <N> --status "Ready to implement"  # done
+```
+It prints `synced|skipped|failed`; only `failed` deserves a chat warning line.
+
 ## Inputs
 
 Require before starting:
@@ -53,6 +61,7 @@ Require before starting:
 6. Claim:
    ```bash
    gh issue edit <N> --repo <owner/repo> --remove-label "ready to plan" --remove-label "question" --add-label "planning"
+   npx tsx scripts/agent-project.ts --issue <N> --status "Planning"
    ```
    Ignore "label not present" errors — continue.
 
@@ -109,6 +118,7 @@ Rules:
 - Swap labels:
   ```bash
   gh issue edit <N> --repo <owner/repo> --remove-label "planning" --add-label "question"
+  npx tsx scripts/agent-project.ts --issue <N> --status "Blocked"
   ```
   Use a tmp file for long bodies (`gh issue comment <N> --body-file tmp/plan-round-N.md`).
 - Stop. Reply in chat with comment URL + blocker summary.
@@ -160,6 +170,7 @@ Also include **Out of scope** and **Verification**. A posted plan has no unresol
 4. Mark ready:
    ```bash
    gh issue edit <N> --repo <owner/repo> --add-label "ready to implement" --remove-label "planning" --remove-label "question"
+   npx tsx scripts/agent-project.ts --issue <N> --status "Ready to implement"
    ```
 5. Reply in chat with comment URL + 3-line summary. Do not start implementing — planning and implementing are separate tasks.
 
