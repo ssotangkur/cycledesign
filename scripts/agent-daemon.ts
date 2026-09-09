@@ -83,7 +83,7 @@ import {
   sandboxNameFor,
   sandboxStatus,
 } from './agent-sandbox.js';
-import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease } from './agent-daemon-lease.js';
+import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease, type IssueLease } from './agent-daemon-lease.js';
 import { tryReturnToMain } from './agent-daemon-return-main.js';
 import { treeKill } from './agent-tree-kill.js';
 
@@ -171,6 +171,14 @@ function createStreamTracker(nowMs: number): StreamTracker {
 
 let activeChild: ChildProcess | null = null;
 let sleepTimer: ReturnType<typeof setTimeout> | null = null;
+// #127: run context owned by the daemon (sandbox name + lease live here, so
+// the signal path can tear down what the supervisor cannot reach).
+let currentSandbox: { sbxBin: string; name: string } | null = null;
+let currentLease: { repo: string; issueNumber: number; lease: IssueLease; spawnIso: string } | null = null;
+// #127: probe context (function-local child never published before; the
+// probe sandbox is disposable like a run sandbox). Run and probe never
+// overlap (sequential awaits in pollOnce), so one slot each suffices.
+let activeProbe: { child: ChildProcess; sbxBin: string | null; name: string | null } | null = null;
 
 function usage(): string {
   return [
@@ -635,6 +643,11 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     });
   }
   activeChild = child;
+  // #127: publish run context for the signal teardown (set next to
+  // activeChild; cleared in finish below so a stale name can never leak
+  // into the next run's signal path).
+  currentSandbox = sandboxName !== null ? { sbxBin: state.config.sbxBin, name: sandboxName } : null;
+  currentLease = lease !== null ? { repo, issueNumber, lease, spawnIso } : null;
 
   return new Promise((resolve) => {
     let settled = false;
@@ -647,6 +660,10 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         clearInterval(watchdogTimer);
       }
       activeChild = null;
+      // #127: run context belongs to this finish — clear before the sync
+      // lease/sandbox teardown so a signal landing mid-teardown sees null.
+      currentSandbox = null;
+      currentLease = null;
       // #132: guaranteed lease release on every finish path. Failover and
       // watchdog paths already reset labels themselves, so this suppresses
       // there; terminal moves by the worker suppress it everywhere else.
@@ -795,6 +812,8 @@ async function probeFreeTier(state: DaemonState): Promise<'success' | 'quota' | 
     const finish = (outcome: 'success' | 'quota' | 'inconclusive'): void => {
       if (!settled) {
         settled = true;
+        // #127: probe context belongs to this finish — clear first.
+        activeProbe = null;
         if (probeSandbox !== null) {
           treeKill(child);
           destroySandbox(state.config.sbxBin, probeSandbox);
@@ -828,6 +847,13 @@ async function probeFreeTier(state: DaemonState): Promise<'success' | 'quota' | 
       finish('inconclusive');
       return;
     }
+    // #127: publish probe context for the signal teardown (bare-opencode
+    // branch tracks the child with name:null — nothing to destroy there).
+    activeProbe = {
+      child,
+      sbxBin: probeSandbox !== null ? state.config.sbxBin : null,
+      name: probeSandbox,
+    };
     let sawQuota = false;
     let buf = '';
     const onChunk = (chunk: Buffer): void => {
@@ -1116,17 +1142,59 @@ async function main(): Promise<void> {
   };
 
   function handleStopSignal(signal: 'SIGINT' | 'SIGTERM'): void {
-    if (activeChild) {
-      // Forward to the running skill; the loop resumes/completes via its close handler.
-      activeChild.kill(signal);
-    } else {
-      if (sleepTimer) {
-        clearTimeout(sleepTimer);
-        sleepTimer = null;
-      }
-      console.log('[agent-daemon] interrupted, exiting');
-      process.exit(0);
+    console.log(`[agent-daemon] received ${signal}, tearing down`);
+    // #127 run-first, then probe, then exit. treeKill before the sync
+    // teardown so the in-VM worker cannot outlive the sandbox destroy
+    // (killing the host sbx.exe client alone orphans it).
+    if (activeChild !== null) {
+      treeKill(activeChild);
+      activeChild = null;
     }
+    if (activeProbe !== null) {
+      const probe = activeProbe;
+      activeProbe = null;
+      treeKill(probe.child);
+      if (probe.sbxBin !== null && probe.name !== null) {
+        try {
+          destroySandbox(probe.sbxBin, probe.name);
+        } catch (err) {
+          console.error(`[agent-daemon] probe sandbox destroy threw for ${probe.name}: ${(err as Error).message}`);
+        }
+      }
+    }
+    // Sync lease release (all-spawnSync, signal-safe): without it the issue
+    // strands at planning/implementing — no reaper exists.
+    if (currentLease !== null) {
+      const { repo: leaseRepo, issueNumber, lease, spawnIso: leaseSpawnIso } = currentLease;
+      currentLease = null;
+      try {
+        const { result, fence } = releaseLeaseWithRetry(leaseRepo, issueNumber, lease, leaseSpawnIso);
+        if (result === 'released') {
+          console.log(`[agent-daemon] lease released for #${issueNumber} (back to ${lease.trigger})`);
+        } else if (result === 'failed') {
+          console.error(`[agent-daemon] lease release failed for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
+        }
+      } catch (err) {
+        console.error(`[agent-daemon] lease release threw for #${issueNumber}: ${(err as Error).message} (fail-closed, may need manual reset)`);
+      }
+    }
+    if (currentSandbox !== null) {
+      const { sbxBin, name } = currentSandbox;
+      currentSandbox = null;
+      try {
+        destroySandbox(sbxBin, name);
+      } catch (err) {
+        console.error(`[agent-daemon] sandbox destroy threw for ${name}: ${(err as Error).message}`);
+      }
+    }
+    if (sleepTimer) {
+      clearTimeout(sleepTimer);
+      sleepTimer = null;
+    }
+    // Signal path always exits 0 (intentional stop, never restart) — even
+    // mid-run and even under --once (deliberately not 130).
+    console.log('[agent-daemon] interrupted, exiting');
+    process.exit(0);
   }
 
   process.on('SIGINT', () => handleStopSignal('SIGINT'));
