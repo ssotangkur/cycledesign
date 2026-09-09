@@ -53,8 +53,10 @@ git remote set-url origin git@github.com:ssotangkur/cycledesign.git
 The `gh` CLI handles authentication internally when `GH_TOKEN` is set:
 
 ```bash
-# Create a pull request
-gh pr create --title "Your title" --body "Your description" --base main
+# Create a pull request (compose the body with the Write tool first —
+# never pass --body "..." inline: backtick is PowerShell's escape
+# character and mangles code spans, fences, $, and quotes)
+gh pr create --title "Your title" --body-file tmp/pr-body-<N>.md --base main
 
 # Check PR status
 gh pr status
@@ -111,9 +113,11 @@ git push -f origin branch-name
 ### Creating a PR via CLI
 
 ```bash
+# Compose the body with the Write tool to tmp/pr-body-<N>.md first (unique
+# per PR; never inline --body "..." — see note above), then:
 gh pr create \
   --title "Add new feature" \
-  --body "Description of changes" \
+  --body-file tmp/pr-body-<N>.md \
   --base main \
   --label "feature"
 ```
@@ -179,7 +183,7 @@ GIT_SSL_NO_VERIFY=true git push
 | Set remote with token | `git remote set-url origin https://$GH_TOKEN@github.com/owner/repo.git` |
 | Push branch | `git push -u origin branch-name` |
 | Force push | `git push -f origin branch-name` |
-| Create PR | `gh pr create --title "..." --body "..."` |
+| Create PR | Write body to `tmp/pr-body-<N>.md`, then `gh pr create --title "..." --body-file tmp/pr-body-<N>.md` |
 | Check PR status | `gh pr checks <NUMBER>` |
 | Merge PR | `gh pr merge --merge --admin` |
 
