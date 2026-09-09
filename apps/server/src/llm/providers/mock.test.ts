@@ -73,7 +73,7 @@ describe('MockProvider', () => {
       expect(result.toolCalls[0].name).toBe('edit_file');
       expect(result.toolCalls[0].args).toEqual({
         filename: 'test.tsx',
-        code: 'export default function Updated() { return <div>Updated</div>; }',
+        patch: expect.stringContaining('Updated'),
       });
     });
 
