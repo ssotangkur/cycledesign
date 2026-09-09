@@ -88,13 +88,22 @@ free `opencode/muse-spark-1.3-contributor-free` first, Go
 `opencode-go/muse-spark-1.3-contributor` after gateway-quota failover.
 
 Egress allowlist (applied per sandbox, see `SANDBOX_NETWORK_HOSTS` in
-`scripts/agent-sandbox.ts`): `models.opencode.ai`, `*.opencode.ai`,
+`scripts/agent-sandbox.ts`): `opencode.ai`, `models.opencode.ai`,
+`*.opencode.ai`,
 `github.com`, `api.github.com`, `raw.githubusercontent.com`,
 `registry.npmjs.org`.
 
-`GH_TOKEN` for `gh`/git inside the VM: pass through host env
-(`sbx exec -e` / `SBX_BIN` env inheritance) or `sbx secret set -g github`
-(proxy follow-up).
+`GH_TOKEN` for `gh`/git inside the VM (#129): the daemon resolves the host
+token (`GH_TOKEN` env, else `gh auth token`) and stores it per sandbox via
+`sbx secret set github --sandbox <name>` during provision. The proxy
+authenticates `gh` and git HTTPS; the token never enters the VM env. Do NOT
+pass an empty `GH_TOKEN` with `sbx exec -e` — the runtime injects an empty
+one itself and it poisons `gh` ("The token in GH_TOKEN is invalid").
+
+Repo in the VM (#129): the daemon clones `https://github.com/<owner>/<repo>.git`
+to `/home/agent/repo` during provision and runs the worker with
+`sbx exec -w /home/agent/repo`, because the workdir mount's `.git` is a
+linked-worktree pointer to a host path and unusable in-VM.
 
 **Proxy-migration follow-up:** `sbx secret set-custom -g --host
 models.opencode.ai --env OPENCODE_API_KEY` (Zen API domain confirmed via

@@ -4,14 +4,20 @@ import { join } from 'node:path';
 import {
   SANDBOX_AUTH_PATH,
   SANDBOX_NETWORK_HOSTS,
+  SANDBOX_REPO_DIR,
+  cloneArgs,
+  cloneUrl,
   cpAuthArgs,
   createArgs,
   execArgs,
   hostAuthJsonPath,
   policyArgs,
   removeArgs,
+  resolveGithubToken,
   resolveSbxBin,
   sandboxNameFor,
+  secretArgs,
+  secretRmArgs,
 } from './agent-sandbox.js';
 
 describe('sbx binary resolution', () => {
@@ -93,7 +99,53 @@ describe('sbx argv builders', () => {
     assert.ok(!args.includes('-t') && !args.includes('-d'));
   });
 
+  it('points exec at the in-VM clone with -w before the name', () => {
+    assert.deepEqual(execArgs('cycledesign-issue-1', ['opencode', 'run'], 'DENY', SANDBOX_REPO_DIR), [
+      'exec',
+      '-e',
+      'OPENCODE_CONFIG_CONTENT=DENY',
+      '-w',
+      '/home/agent/repo',
+      'cycledesign-issue-1',
+      'opencode',
+      'run',
+    ]);
+  });
+
+  it('scopes the github secret to the sandbox (overwrite for repeat runs)', () => {
+    assert.deepEqual(secretArgs('cycledesign-issue-1', 'tok'), [
+      'secret',
+      'set',
+      'github',
+      '--sandbox',
+      'cycledesign-issue-1',
+      '-f',
+      '-t',
+      'tok',
+    ]);
+  });
+
+  it('clones the polled repo to the stable in-VM path', () => {
+    assert.equal(cloneUrl('ssotangkur/cycledesign'), 'https://github.com/ssotangkur/cycledesign.git');
+    assert.deepEqual(cloneArgs('cycledesign-issue-1', 'ssotangkur/cycledesign'), [
+      'exec',
+      'cycledesign-issue-1',
+      'git',
+      'clone',
+      'https://github.com/ssotangkur/cycledesign.git',
+      '/home/agent/repo',
+    ]);
+  });
+
+  it('prefers a non-empty GH_TOKEN env value (trimmed)', () => {
+    assert.equal(resolveGithubToken('  abc  '), 'abc');
+  });
+
   it('forces non-interactive removal', () => {
     assert.deepEqual(removeArgs('cycledesign-issue-1'), ['rm', '--force', 'cycledesign-issue-1']);
+  });
+
+  it('drops the sandbox-scoped github secret on teardown', () => {
+    assert.deepEqual(secretRmArgs('cycledesign-issue-1'), ['secret', 'rm', 'github', '--sandbox', 'cycledesign-issue-1', '-f']);
   });
 });
