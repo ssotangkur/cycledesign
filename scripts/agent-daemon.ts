@@ -28,7 +28,11 @@
  *   fencing check, reset labels, then tree-kill. Never changes model state;
  *   diagnosis opencode invocations use GO_MODEL. Daemon comments are exempt
  *   from the skill's no-progress-comments rule (that rule binds the skill's
- *   sub-agents, not the daemon).
+ *   sub-agents, not the daemon). #139: the fire log and bundle carry the
+ *   full liveness evidence (silence elapsed, last-activity time, line
+ *   breakdown, last-chunk age, pending bytes), a heartbeat status line is
+ *   logged every third of the window while a run is in flight, and every
+ *   non-zero exit carries a one-line causal detail instead of a bare code.
  * - Failback probe (KD-7): while on Go, at run boundaries only, spawn
  *   `opencode run --model <FREE_MODEL> "return the single word OK"` every
  *   PROBE_INTERVAL_S. First success flips subsequent runs to free and stops
@@ -67,7 +71,11 @@ import { classifyLine } from './agent-daemon-classify.js';
 import {
   applyProbeResult,
   createProbeTracker,
+  exitDetailFor,
+  heartbeatIntervalMs,
+  livenessSummary,
   noteFailover,
+  oneLine,
   recordFailover,
   shouldFireWatchdog,
   shouldProbe,
@@ -145,11 +153,19 @@ interface DaemonState {
 interface StreamTracker {
   startMs: number;
   lastNonErrorAtMs: number;
+  /** #139: wall-clock of the last stdout/stderr bytes (even a partial line). */
+  lastChunkAtMs: number;
+  /** #139: bytes currently buffered without a trailing newline. */
+  pendingBytes: number;
   gatewayCount: number;
   upstreamCount: number;
   otherCount: number;
   linesSeen: number;
   firstGatewayLine: string | null;
+  /** #139: last error-class line (gateway-quota/upstream-transient), truncated. */
+  lastErrorLine: string | null;
+  /** #139: last raw line of any class, truncated (exit diagnosis). */
+  lastLine: string | null;
   rootSessionId: string | null;
   parentBySession: Map<string, string>;
   titleBySession: Map<string, string>;
@@ -159,11 +175,15 @@ function createStreamTracker(nowMs: number): StreamTracker {
   return {
     startMs: nowMs,
     lastNonErrorAtMs: nowMs,
+    lastChunkAtMs: nowMs,
+    pendingBytes: 0,
     gatewayCount: 0,
     upstreamCount: 0,
     otherCount: 0,
     linesSeen: 0,
     firstGatewayLine: null,
+    lastErrorLine: null,
+    lastLine: null,
     rootSessionId: null,
     parentBySession: new Map(),
     titleBySession: new Map(),
@@ -307,14 +327,17 @@ export function observeLine(rawLine: string, tracker: StreamTracker): { tag: str
   const tag = tagForLine(rawLine, tracker);
   const cls = classifyLine(rawLine);
   tracker.linesSeen += 1;
+  tracker.lastLine = rawLine.slice(0, 500);
   if (cls === 'gateway-quota') {
     tracker.gatewayCount += 1;
+    tracker.lastErrorLine = rawLine.slice(0, 500);
     if (tracker.firstGatewayLine === null) {
       // KD-3: log the full JSON line on first hit so field paths can be locked later.
       tracker.firstGatewayLine = rawLine;
     }
   } else if (cls === 'upstream-transient') {
     tracker.upstreamCount += 1;
+    tracker.lastErrorLine = rawLine.slice(0, 500);
   } else {
     tracker.otherCount += 1;
     tracker.lastNonErrorAtMs = Date.now();
@@ -527,12 +550,18 @@ function buildWatchdogBundle(
   issueNumber: number,
   tracker: StreamTracker,
   childPid: number | undefined,
+  stuckTimeoutMs: number,
   sandbox?: { sbxBin: string; name: string },
 ): string {
+  const nowMs = Date.now();
   const lastActivity = new Date(tracker.lastNonErrorAtMs).toISOString();
   const summary = [
+    `spawned: ${new Date(tracker.startMs).toISOString()}`,
+    `stuck timeout: ${Math.round(stuckTimeoutMs / 1000)}s; silence at fire: ${Math.round((nowMs - tracker.lastNonErrorAtMs) / 1000)}s; run elapsed: ${Math.round((nowMs - tracker.startMs) / 1000)}s`,
     `last non-error activity: ${lastActivity}`,
+    `last stream bytes: ${new Date(tracker.lastChunkAtMs).toISOString()} (pending unflushed: ${tracker.pendingBytes}B)`,
     `lines seen: ${tracker.linesSeen} (other=${tracker.otherCount}, upstream-transient=${tracker.upstreamCount}, gateway-quota=${tracker.gatewayCount})`,
+    tracker.lastErrorLine !== null ? `last error line: ${tracker.lastErrorLine.slice(0, 500)}` : 'last error line: (none)',
     tracker.firstGatewayLine !== null ? `first gateway line: ${tracker.firstGatewayLine.slice(0, 500)}` : 'first gateway line: (none)',
   ].join('\n');
   const sandboxSection =
@@ -578,6 +607,8 @@ interface RunOutcome {
   code: number;
   failover: boolean;
   watchdogFired: boolean;
+  /** #139: one-line human cause for non-zero exits (null on clean exit). */
+  detail: string | null;
 }
 
 /**
@@ -594,7 +625,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     console.log(
       `[agent-daemon] dry-run: ${sandbox && sandboxName !== null ? plannedSandboxCommand(state.config.sbxBin, sandboxName, command, issueNumber, model) : plannedCommand(command, issueNumber, model)}`,
     );
-    return Promise.resolve({ code: 0, failover: false, watchdogFired: false });
+    return Promise.resolve({ code: 0, failover: false, watchdogFired: false, detail: null });
   }
   const spawnIso = new Date().toISOString();
   const tracker = createStreamTracker(Date.now());
@@ -604,7 +635,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
   const lease = leaseForCommand(command);
   if (lease !== null && !claimIssue(repo, issueNumber, lease)) {
     console.log(`[agent-daemon] lease not acquired for #${issueNumber} (${lease.trigger} already gone); skipping run`);
-    return Promise.resolve({ code: 1, failover: false, watchdogFired: false });
+    return Promise.resolve({ code: 1, failover: false, watchdogFired: false, detail: 'lease not acquired (trigger label already gone)' });
   }
   let child: ChildProcess;
   if (sandbox && sandboxName !== null) {
@@ -631,7 +662,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         }
       }
       destroySandbox(state.config.sbxBin, sandboxName);
-      return Promise.resolve({ code: 1, failover: false, watchdogFired: false });
+      return Promise.resolve({ code: 1, failover: false, watchdogFired: false, detail: `sandbox provision failed at step ${provisioned.step}: ${oneLine(provisioned.output)}` });
     }
     child = spawn(state.config.sbxBin, execArgs(sandboxName, ['opencode', ...opencodeArgv], HEADLESS_CONFIG_CONTENT, SANDBOX_REPO_DIR), {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -712,7 +743,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
           issueNumber,
           `Failover budget exhausted (${count} gateway-quota failovers this daemon lifetime). Parking for a human; reset to \`ready to implement\` to retry.`,
         );
-        finish({ code: 1, failover: true, watchdogFired: false });
+        finish({ code: 1, failover: true, watchdogFired: false, detail: `failover budget exhausted (${count}); parked at question` });
         return;
       }
       if (isFenceClear(fence)) {
@@ -721,7 +752,12 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         console.error(`[agent-daemon] fencing blocked label reset for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
       }
       noteFailover(state.probe, Date.now());
-      finish({ code: 1, failover: true, watchdogFired: false });
+      finish({
+        code: 1,
+        failover: true,
+        watchdogFired: false,
+        detail: `gateway-quota failover #${count} (${oneLine(tracker.firstGatewayLine ?? tracker.lastErrorLine ?? '')})`,
+      });
     };
 
     const handleWatchdog = (): void => {
@@ -729,11 +765,14 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       if (settled) {
         return;
       }
-      console.error(`[agent-daemon] watchdog: no non-error activity for ${state.config.stuckTimeoutS}s on #${issueNumber}; investigating`);
+      // #139: log the full liveness evidence at fire time so a "not enough
+      // time passed" dispute can be settled from the logs alone.
+      console.error(`[agent-daemon] watchdog: no non-error activity on #${issueNumber}; ${livenessSummary(tracker, Date.now(), stuckTimeoutMs)}; investigating`);
       const bundle = buildWatchdogBundle(
         issueNumber,
         tracker,
         child.pid,
+        stuckTimeoutMs,
         sandboxName !== null ? { sbxBin: state.config.sbxBin, name: sandboxName } : undefined,
       );
       // Diagnosis opencode invocations must use Go (KD-6); gh/git need no model.
@@ -747,23 +786,44 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       }
       // Watchdog never changes model state (KD-6): respawn follows current failover/probe state.
       treeKill(child);
-      finish({ code: 1, failover: false, watchdogFired: true });
+      finish({
+        code: 1,
+        failover: false,
+        watchdogFired: true,
+        detail: `watchdog fired (${livenessSummary(tracker, Date.now(), stuckTimeoutMs)})`,
+      });
     };
 
+    // #139: heartbeat proves liveness between spawn and finish — one status
+    // line per third of the stuck window (bounded 60s..300s) while a run is
+    // in flight, so silence duration is always visible in recent logs.
+    const heartbeatMs = heartbeatIntervalMs(stuckTimeoutMs);
+    let lastHeartbeatMs = Date.now();
     const watchdogTimer: ReturnType<typeof setInterval> = setInterval(() => {
       if (settled) {
         return;
       }
-      if (shouldFireWatchdog(tracker.lastNonErrorAtMs, Date.now(), stuckTimeoutMs)) {
+      const nowMs = Date.now();
+      if (shouldFireWatchdog(tracker.lastNonErrorAtMs, nowMs, stuckTimeoutMs)) {
         handleWatchdog();
+      } else if (nowMs - lastHeartbeatMs >= heartbeatMs) {
+        lastHeartbeatMs = nowMs;
+        console.log(`[agent-daemon] run #${issueNumber} alive; ${livenessSummary(tracker, nowMs, stuckTimeoutMs)}`);
       }
     }, WATCHDOG_POLL_MS);
 
     let stdoutBuf = '';
     const pump = (chunk: Buffer, stream: 'stdout' | 'stderr'): void => {
+      // #139: raw-byte liveness — a run streaming a giant partial line (no
+      // newline yet) is alive but invisible to line-based tracking. Record
+      // it for the bundle; the fire predicate stays line-based on purpose
+      // (an upstream retry storm must still count as stuck).
+      tracker.lastChunkAtMs = Date.now();
       stdoutBuf += chunk.toString('utf8');
+      tracker.pendingBytes = Buffer.byteLength(stdoutBuf, 'utf8');
       const lines = stdoutBuf.split('\n');
       stdoutBuf = lines.pop() ?? '';
+      tracker.pendingBytes = Buffer.byteLength(stdoutBuf, 'utf8');
       for (const line of lines) {
         if (line.trim() === '') {
           continue;
@@ -786,9 +846,9 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
 
     child.on('error', (err) => {
       console.error(`[agent-daemon] failed to spawn opencode for issue #${issueNumber}: ${err.message}`);
-      finish({ code: 1, failover: false, watchdogFired: false });
+      finish({ code: 1, failover: false, watchdogFired: false, detail: `spawn failed: ${oneLine(err.message)}` });
     });
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (stdoutBuf.trim() !== '') {
         const { tag, cls } = observeLine(stdoutBuf, tracker);
         console.log(tag !== '' ? `${tag} ${stdoutBuf}` : stdoutBuf);
@@ -797,7 +857,9 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
           return;
         }
       }
-      finish({ code: code ?? 1, failover: false, watchdogFired: false });
+      const exitCode = code ?? 1;
+      // #139: never report a bare exit code — attach the causal detail.
+      finish({ code: exitCode, failover: false, watchdogFired: false, detail: exitDetailFor(tracker, code, signal ?? null) });
     });
   });
 }
@@ -1050,9 +1112,11 @@ async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckS
   for (const run of runs) {
     // A respawned failover run re-enters here on the next pass via its reset label.
     const model = modelForRun(state);
-    console.log(`[agent-daemon] claiming issue #${run.issue.number} ("${run.issue.title}") via ${run.command} [label: ${run.label}] [model: ${model}]`);
+    console.log(`[agent-daemon] claiming issue #${run.issue.number} ("${run.issue.title}") via ${run.command} [label: ${run.label}] [model: ${model}] [stuck-timeout: ${state.config.stuckTimeoutS}s]`);
     const outcome = await runSkill(run.command, run.issue.number, { dryRun, model, repo, state });
-    console.log(`[agent-daemon] completed issue #${run.issue.number} via ${run.command} exit code ${outcome.code} [model: ${model}]`);
+    console.log(
+      `[agent-daemon] completed issue #${run.issue.number} via ${run.command} exit code ${outcome.code} [model: ${model}]${outcome.detail !== null ? ` (${outcome.detail})` : ''}`,
+    );
     if (outcome.failover) {
       // KD-4: respawn on Go happens on the next poll via the reset label;
       // continue the queue rather than recursing mid-pass.
