@@ -4,11 +4,15 @@ import {
   MAX_FAILOVERS_PER_ISSUE,
   applyProbeResult,
   createProbeTracker,
+  exitDetailFor,
   failoverSteps,
+  livenessSummary,
   noteFailover,
+  oneLine,
   recordFailover,
   shouldFireWatchdog,
   shouldProbe,
+  type LivenessSnapshot,
 } from './agent-daemon-policy.js';
 
 describe('failover ordering + circuit breaker', () => {
@@ -94,5 +98,62 @@ describe('probe state machine', () => {
     applyProbeResult(tracker, 'inconclusive', 1_800_000);
     assert.equal(tracker.model, 'go');
     assert.equal(shouldProbe(tracker, 2_700_000, 900_000, false), true);
+  });
+});
+
+describe('watchdog liveness summary (#139)', () => {
+  function snapshot(): LivenessSnapshot {
+    return {
+      startMs: 0,
+      lastNonErrorAtMs: 0,
+      lastChunkAtMs: 0,
+      pendingBytes: 0,
+      gatewayCount: 0,
+      upstreamCount: 0,
+      otherCount: 1,
+      linesSeen: 1,
+      lastErrorLine: null,
+      lastLine: '{"type":"step_start"}',
+    };
+  }
+
+  it('reports silence, timeout, elapsed, counts, and chunk age', () => {
+    const text = livenessSummary(snapshot(), 900_000, 900_000);
+    assert.match(text, /silent 900s \(timeout 900s\)/);
+    assert.match(text, /run elapsed 900s/);
+    assert.match(text, /lines=1 \(other=1, upstream-transient=0, gateway-quota=0\)/);
+    assert.match(text, /last chunk 900s ago, pending 0B/);
+    assert.match(text, /last non-error 1970-01-01T00:00:00\.000Z/);
+  });
+
+  it('clamps negative deltas to zero', () => {
+    const snap = snapshot();
+    snap.lastNonErrorAtMs = 2_000;
+    assert.match(livenessSummary(snap, 1_000, 900_000), /silent 0s/);
+  });
+});
+
+describe('exit detail (#139)', () => {
+  it('returns null for clean exits', () => {
+    assert.equal(exitDetailFor({ lastErrorLine: 'x', lastLine: 'y' }, 0, null), null);
+  });
+
+  it('prefers the last classified error line', () => {
+    const detail = exitDetailFor({ lastErrorLine: '{"error":"Rate limit exceeded"}', lastLine: 'other' }, 1, null);
+    assert.equal(detail, 'last error: {"error":"Rate limit exceeded"}');
+  });
+
+  it('falls back to the last raw line with code/signal', () => {
+    const detail = exitDetailFor({ lastErrorLine: null, lastLine: '{"type":"step_start"}' }, 1, 'SIGTERM');
+    assert.equal(detail, 'last line before exit(1/SIGTERM): {"type":"step_start"}');
+  });
+
+  it('falls back to code/signal with no stream output', () => {
+    assert.equal(exitDetailFor({ lastErrorLine: null, lastLine: null }, null, 'SIGKILL'), 'exit(null/SIGKILL) with no stream output');
+  });
+
+  it('oneLine collapses whitespace and truncates', () => {
+    assert.equal(oneLine('a\n  b\tc'), 'a b c');
+    assert.equal(oneLine('x'.repeat(400), 300).length, 300);
   });
 });

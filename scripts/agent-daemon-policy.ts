@@ -96,3 +96,69 @@ export function failoverSteps(exhausted: boolean): string[] {
   }
   return ['tree-kill', 'fencing-check', 'label-reset', 'respawn-on-go'];
 }
+
+/**
+ * #139: minimal liveness surface for watchdog observability. The daemon's
+ * StreamTracker satisfies this structurally; the helpers below stay pure so
+ * `node:test` can pin the log/exit-detail wording without spawning.
+ */
+export interface LivenessSnapshot {
+  startMs: number;
+  lastNonErrorAtMs: number;
+  lastChunkAtMs: number;
+  pendingBytes: number;
+  gatewayCount: number;
+  upstreamCount: number;
+  otherCount: number;
+  linesSeen: number;
+  lastErrorLine: string | null;
+  lastLine: string | null;
+}
+
+/** #139: single-line truncation for log/error-detail strings. */
+export function oneLine(value: string, max = 300): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+/**
+ * #139: auditable one-line summary of run liveness. Logged on watchdog
+ * fire, on periodic heartbeats, and posted into the watchdog bundle, so a
+ * future "not enough time passed" dispute can be settled from logs alone.
+ */
+export function livenessSummary(tracker: LivenessSnapshot, nowMs: number, stuckTimeoutMs: number): string {
+  const silenceS = Math.max(0, Math.round((nowMs - tracker.lastNonErrorAtMs) / 1000));
+  const elapsedS = Math.max(0, Math.round((nowMs - tracker.startMs) / 1000));
+  const chunkAgeS = Math.max(0, Math.round((nowMs - tracker.lastChunkAtMs) / 1000));
+  return (
+    `silent ${silenceS}s (timeout ${Math.round(stuckTimeoutMs / 1000)}s)` +
+    `; run elapsed ${elapsedS}s` +
+    `; last non-error ${new Date(tracker.lastNonErrorAtMs).toISOString()}` +
+    `; lines=${tracker.linesSeen} (other=${tracker.otherCount}, upstream-transient=${tracker.upstreamCount}, gateway-quota=${tracker.gatewayCount})` +
+    `; last chunk ${chunkAgeS}s ago, pending ${tracker.pendingBytes}B`
+  );
+}
+
+/**
+ * #139: pick the most informative one-line error detail for a non-zero
+ * exit. Prefers the last classified error line; falls back to the last raw
+ * line; falls back to the close code/signal. Null for clean exits.
+ */
+export function exitDetailFor(
+  tracker: Pick<LivenessSnapshot, 'lastErrorLine' | 'lastLine'>,
+  code: number | null,
+  signal: string | null,
+): string | null {
+  if (code === 0) {
+    return null;
+  }
+  if (tracker.lastErrorLine !== null) {
+    return `last error: ${oneLine(tracker.lastErrorLine)}`;
+  }
+  if (tracker.lastLine !== null) {
+    return `last line before exit(${code ?? 'null'}${signal ? `/${signal}` : ''}): ${oneLine(tracker.lastLine)}`;
+  }
+  return `exit(${code ?? 'null'}${signal ? `/${signal}` : ''}) with no stream output`;
+}
