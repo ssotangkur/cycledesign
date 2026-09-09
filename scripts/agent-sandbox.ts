@@ -135,14 +135,75 @@ export function cloneArgs(name: string, repoSlug: string): string[] {
 }
 
 /** Attached foreground exec (no -t): stdout/stderr separated, exit code propagates. */
-export function execArgs(name: string, command: string[], headlessContent: string, workdir?: string): string[] {
+export function execArgs(name: string, command: string[], headlessContent: string, workdir?: string, extraEnv?: Record<string, string>): string[] {
   // Flags precede the sandbox name (docker-exec convention); anything after
   // the name is the in-VM command (a misplaced -e fails with
   // "executable file `-e` not found in $PATH", #123).
   // -w points the worker at the in-VM clone; omitted the exec inherits the
   // workdir mount cwd (probe path, where no clone exists).
+  // #140: extraEnv forwards PROJECT_OWNER/PROJECT_NUMBER so the in-VM
+  // Status mirror uses the host board instead of defaults.
   const flagArgs = workdir === undefined ? [] : ['-w', workdir];
-  return ['exec', '-e', `OPENCODE_CONFIG_CONTENT=${headlessContent}`, ...flagArgs, name, ...command];
+  const extraFlags: string[] = [];
+  if (extraEnv !== undefined) {
+    for (const [key, value] of Object.entries(extraEnv)) {
+      extraFlags.push('-e', `${key}=${value}`);
+    }
+  }
+  return ['exec', '-e', `OPENCODE_CONFIG_CONTENT=${headlessContent}`, ...extraFlags, ...flagArgs, name, ...command];
+}
+
+/** #140: explicit board env for the in-VM worker (defaults match agent-project.ts). */
+export function vmProjectEnv(owner?: string, number?: string): Record<string, string> {
+  return {
+    PROJECT_OWNER: owner ?? process.env['PROJECT_OWNER'] ?? 'ssotangkur',
+    PROJECT_NUMBER: number ?? process.env['PROJECT_NUMBER'] ?? '1',
+  };
+}
+
+/** #140: cached per-token project-scope probe (one validation per daemon lifetime). */
+let cachedTokenScope: { token: string; ok: boolean; output: string } | null = null;
+
+/** Test hook: reset the cached scope probe. */
+export function clearTokenScopeCache(): void {
+  cachedTokenScope = null;
+}
+
+/**
+ * Validate that `token` carries the `project` scope via a read-only
+ * `project view` probe. GH_TOKEN travels via env (never argv — argv leaks
+ * via `ps`). Returns ok=true unless the probe proves auth/scope failure;
+ * transport/ambiguous failures allow the provision to proceed (mirror
+ * warns at runtime; KD-2 keeps claims non-blocking).
+ */
+export function checkGithubTokenScope(token: string, owner?: string, projectNo?: string): { ok: boolean; output: string } {
+  if (cachedTokenScope !== null && cachedTokenScope.token === token) {
+    return { ok: cachedTokenScope.ok, output: cachedTokenScope.output };
+  }
+  const projOwner = owner ?? process.env['PROJECT_OWNER'] ?? 'ssotangkur';
+  const projNumber = projectNo ?? process.env['PROJECT_NUMBER'] ?? '1';
+  try {
+    const result = spawnSync('gh', ['project', 'view', projNumber, '--owner', projOwner, '--format', 'json'], {
+      encoding: 'utf8',
+      env: { ...process.env, GH_TOKEN: token },
+    });
+    const stderr = result.error ? (result.error as Error).message : (result.stderr || '').trim();
+    if (result.error || result.status !== 0) {
+      const text = stderr || '';
+      const isAuth = /401|403|bad credentials|unknown owner type|forbidden|unauthorized|missing.*scope|requires?.*scope|need.*scope|scope.*required|insufficient.*scope|project.*scope|gh auth refresh|http 401|http 403/i.test(text);
+      if (isAuth) {
+        const output = `token lacks 'project' scope for ${projOwner}/${projNumber} [step: project view] ${text}`.trim();
+        cachedTokenScope = { token, ok: false, output };
+        return { ok: false, output };
+      }
+      // Transport/ambiguous: do not cache (re-probe next provision), allow run.
+      return { ok: true, output: '' };
+    }
+    cachedTokenScope = { token, ok: true, output: '' };
+    return { ok: true, output: '' };
+  } catch {
+    return { ok: true, output: '' };
+  }
 }
 
 export function removeArgs(name: string): string[] {
@@ -183,6 +244,18 @@ export interface ProvisionOptions {
 export function provisionSandbox(sbxBin: string, name: string, workdir: string, hostAuthPath: string, template: string, opts: ProvisionOptions = {}): ProvisionResult {
   if (opts.githubToken !== undefined && opts.githubToken === '') {
     return { ok: false, step: 'github-token', output: 'unresolvable: set GH_TOKEN or log host gh in (`gh auth login`)' };
+  }
+  // #140: fail fast when the resolved token provably lacks the project scope.
+  if (opts.githubToken !== undefined && opts.githubToken !== '') {
+    const scope = checkGithubTokenScope(opts.githubToken);
+    if (!scope.ok) {
+      const redacted = scope.output.split(opts.githubToken).join('***');
+      return {
+        ok: false,
+        step: 'github-scope',
+        output: `${redacted} — grant 'project' scope (gh auth refresh -s project) or set GH_TOKEN with it (see .agent-daemon.env.example)`,
+      };
+    }
   }
   const steps: Array<[string, string[]]> = [['create', createArgs(name, workdir, template)]];
   if (opts.githubToken !== undefined) {
