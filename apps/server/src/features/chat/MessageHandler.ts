@@ -283,9 +283,16 @@ export class MessageHandler {
 
           console.log('[MessageHandler] Executing', toolCallArray.length, 'tool calls');
           await executeToolCalls(toolCallArray, userMessageId);
-          console.log('[MessageHandler] All tool calls completed');
+           console.log('[MessageHandler] All tool calls completed');
 
            // Build new messages for next turn
+           //
+           // Known follow-up (issue #138, KD-6): tool results are not fed
+           // back as `tool`-role messages — the AI SDK handles tool
+           // messages internally, so the next turn only sees the assistant
+           // text. If multi-turn tool chaining misbehaves, feed explicit
+           // tool results here. `loopCount` below is also unbounded; add a
+           // max-turn guard if the agent ever loops on tools.
            const newMessages: ModelMessage[] = [];
 
            if (fullResponseContent.trim()) {
@@ -330,6 +337,14 @@ export class MessageHandler {
       // The just-handled user message is the validation target — use its id
       // directly instead of re-deriving it from the pre-loop snapshot, which
       // can be stale under concurrency or contain skipped corrupt rows.
+      //
+      // Known follow-up (issue #138, KD-6): validation can trigger twice —
+      // once in `executeToolCalls` on `submit_work` and again here on any
+      // `toolCallsMade`. Kept as-is here; unifying ownership needs a
+      // preview-routing decision. Workspace paths also diverge 3 ways
+      // (tools + validation-service use resolve(cwd,'apps/server/workspace'),
+      // preview-manager uses repo-root `workspace`, server bootstrap uses
+      // join(cwd,'../../workspace')) — unify separately.
       if (toolCallsMade) {
         const autoMessageId = userMessageId;
 

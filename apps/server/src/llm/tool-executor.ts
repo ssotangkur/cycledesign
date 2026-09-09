@@ -133,7 +133,9 @@ async function executeTool(toolCall: ToolCall, messageId?: string): Promise<unkn
 
   console.log('[TOOL] executeTool called for:', toolName, rawToolName !== toolName ? `(normalized from ${rawToolName})` : '');
 
-  if (!argsString || argsString.trim() === '' || argsString === '{}') {
+  // submit_work takes no arguments — `{}` is valid for it (issue #138).
+  const isEmptyArgs = !argsString || argsString.trim() === '' || argsString === '{}';
+  if (isEmptyArgs && toolName !== 'submit_work') {
     return {
       success: false,
       error: `Tool '${toolName}' requires arguments but none were provided. Please ask the user to provide the necessary details.`,

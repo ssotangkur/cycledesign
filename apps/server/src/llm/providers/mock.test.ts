@@ -140,6 +140,49 @@ describe('MockProvider', () => {
     });
   });
 
+  describe('scripted queue (issue #138, KD-5)', () => {
+    it('should return scripted tool calls in order with fallback afterwards', async () => {
+      provider.setScript([
+        { name: 'create_file', args: { filename: 'test.tsx', code: 'x' }, id: 's-1' },
+        { name: 'submit_work', args: {}, id: 's-2' },
+      ]);
+
+      const first = await provider.complete([{ role: 'user' as const, content: 'anything' }]);
+      expect(first.toolCalls).toHaveLength(1);
+      expect(first.toolCalls[0]).toMatchObject({ id: 's-1', name: 'create_file' });
+
+      const second = await provider.complete([{ role: 'user' as const, content: 'anything' }]);
+      expect(second.toolCalls[0]).toMatchObject({ id: 's-2', name: 'submit_work' });
+
+      provider.clearScript();
+      const fallback = await provider.complete([{ role: 'user' as const, content: 'Hello, how are you?' }]);
+      expect(fallback.toolCalls).toHaveLength(0);
+    });
+
+    it('should normalize hyphenated script names to underscores', async () => {
+      provider.setScript([{ name: 'create-file', args: { filename: 'test.tsx', code: 'x' } }]);
+      const result = await provider.complete([{ role: 'user' as const, content: 'anything' }]);
+      expect(result.toolCalls[0].name).toBe('create_file');
+      provider.clearScript();
+    });
+
+    it('should reject scripted tools not in the requested ToolSet', async () => {
+      provider.setScript([{ name: 'create_file', args: { filename: 'test.tsx', code: 'x' } }]);
+      await expect(
+        provider.complete([{ role: 'user' as const, content: 'anything' }], { tools: {} })
+      ).rejects.toThrow('not in requested tools');
+      provider.clearScript();
+    });
+
+    it('should inject provider failures via error entries', async () => {
+      provider.setScript([{ name: 'create_file', error: 'boom-rate-limit' }]);
+      await expect(
+        provider.complete([{ role: 'user' as const, content: 'anything' }])
+      ).rejects.toThrow('boom-rate-limit');
+      provider.clearScript();
+    });
+  });
+
   describe('listModels()', () => {
     it('should return mock model', async () => {
       const models = await provider.listModels();
