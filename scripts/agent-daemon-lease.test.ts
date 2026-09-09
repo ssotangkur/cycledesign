@@ -32,6 +32,14 @@ describe('release decision', () => {
   it('suppresses release for a foreign in-progress label', () => {
     assert.equal(shouldReleaseLease({ labels: ['planning'], terminalCommentSince: false }, 'implementing'), false);
   });
+
+  it('suppresses when a terminal label coexists with the lease (pr ready)', () => {
+    assert.equal(shouldReleaseLease({ labels: ['implementing', 'pr ready'], terminalCommentSince: false }, 'implementing'), false);
+  });
+
+  it('suppresses when a terminal label coexists with the lease (question)', () => {
+    assert.equal(shouldReleaseLease({ labels: ['planning', 'question'], terminalCommentSince: false }, 'planning'), false);
+  });
 });
 
 describe('gh-backed lease ops degrade without gh', () => {

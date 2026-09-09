@@ -41,12 +41,22 @@ export interface LeaseState {
 }
 
 /**
- * Pure release decision: the in-progress label is still held and nothing
- * terminal (plan / watchdog / question comment, or a worker terminal label
- * move which removes the in-progress label) landed since spawn.
+ * Worker terminal labels: success/blocked moves that coexist with the
+ * in-progress label (the skills add without always removing, #132).
+ * A `ready to implement` landing means plan success, but the plan flow
+ * always removes `planning` with it, so it needs no entry here.
+ */
+const TERMINAL_LABELS = ['pr ready', 'question'];
+
+/**
+ * Pure release decision: the in-progress label is still held, no terminal
+ * comment landed since spawn, and no terminal label is present.
  */
 export function shouldReleaseLease(state: LeaseState, inProgress: string): boolean {
-  return state.labels.includes(inProgress) && !state.terminalCommentSince;
+  if (!state.labels.includes(inProgress) || state.terminalCommentSince) {
+    return false;
+  }
+  return !state.labels.some((label) => TERMINAL_LABELS.includes(label));
 }
 
 function ghEdit(repo: string, issueNumber: number, remove: string, add: string): { ok: boolean; output: string } {
