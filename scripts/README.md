@@ -229,6 +229,26 @@ other flag: use the `--` separator with `npm run`
 `npx tsx` directly. E2E invokes via direct `npx tsx`, never bare `npm run`
 with flags.
 
+### Ctrl+C / SIGTERM contract
+
+On SIGINT/SIGTERM the supervisor forwards the signal to the daemon child,
+waits ~12s for the daemon's synchronous teardown, tree-kills only on
+timeout, and exits `0` (never restarts). A second signal force-tree-kills
+and exits non-zero. The daemon's signal teardown owns the active run and
+probe: it tree-kills the child(ren), synchronously releases the issue
+lease (fail-closed with a manual-reset note when the fence is
+unreachable), destroys the current run/probe sandbox (killing the host
+`sbx.exe` client alone would orphan the in-VM worker), then exits `0`.
+Idle signals skip straight to exit `0`. Every first-signal path exits
+`0` — including mid-run and under `--once` (deliberately not `130`, which
+would re-enter the supervisor's crash-restart logic).
+
+Verify on a Windows console via BOTH `npm run agent-daemon` and direct
+`npx tsx scripts/agent-supervisor.ts` (idle Ctrl+C and, when sandbox
+mode is available, mid-run Ctrl+C). The launch chain is unchanged: if
+`npm run` demonstrably swallows SIGINT on your setup, invoke
+`npx tsx scripts/agent-supervisor.ts` directly as the fallback.
+
 ### Supervisor vs daemon (self-update)
 
 The supervisor is dumb and stable (~100 lines, changes almost never): it
@@ -253,7 +273,7 @@ never exits `42` on failed evidence. `--dry-run` prints
 
 | Exit code | Meaning | Supervisor action |
 |---|---|---|
-| `0` | Intentional stop (`--once` done, clean SIGINT/SIGTERM while idle) | Do NOT restart |
+| `0` | Intentional stop (`--once` done, any first SIGINT/SIGTERM: idle, mid-run, or `--once` — always `0`, never `130`) | Do NOT restart |
 | `42` | Update available | `git pull --ff-only` if clean, then restart |
 | `2` | Usage / arg-parse error | NEVER restart — exit immediately so a bad flag can't hot-loop |
 | anything else | Crash / transient (`gh` auth, OOM) | Plain restart with backoff (1s/2s/4s… cap 30s), no pull; >5 crashes in 5 min bails non-zero |
