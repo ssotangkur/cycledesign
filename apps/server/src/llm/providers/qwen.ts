@@ -5,6 +5,7 @@ import { QwenAuth } from '../qwen-auth.js';
 import { requestQueue } from '../request-queue.js';
 import { RateLimitError, AuthError } from '../errors.js';
 import { BaseProvider, type AgentConfig } from './base-provider.js';
+import { toAgentTools } from '../tools/tools.js';
 import { IProviderConfig, LLMResponse } from '../types.js';
 
 const qwenAuth = new QwenAuth();
@@ -46,19 +47,20 @@ export class QwenProvider extends BaseProvider {
 
   // Qwen overrides getAgent to handle async initialization
   protected async getAgentAsync(options?: { tools?: ToolSet; systemText?: string }): Promise<ToolLoopAgent> {
-    // If tools are provided, create a new scoped agent (not cached)
+    // If tools are provided, create a new scoped agent (not cached).
+    // Strip `execute` so the agent only returns tool calls; manual
+    // `executeToolCalls` is the single owner of execution (issue #138, KD-2).
     if (options?.tools) {
       // getModel() assigns this.qwenProvider (and handles auth); without it
       // a cold start takes this branch with a null provider and crashes.
       const model = await this.getModel();
+      const config = this.createAgentConfig();
       return new ToolLoopAgent({
         model,
-        instructions: options.systemText,
-        tools: options.tools,
+        ...config,
+        instructions: options.systemText ?? config.instructions,
+        tools: toAgentTools(options.tools),
         stopWhen: stepCountIs(10),
-        temperature: 0.1,
-        maxOutputTokens: 8192,
-        maxRetries: 2,
       });
     }
 
