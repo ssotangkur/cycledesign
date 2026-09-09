@@ -454,6 +454,7 @@ function resetToReady(repo: string, issueNumber: number): void {
 }
 
 function parkAtQuestion(repo: string, issueNumber: number, body: string): void {
+  // NOTE: '--body' here is safe — spawnSync arg-array (no shell), so backticks/$/quotes bypass PowerShell escaping. Do NOT "fix" to --body-file.
   const comment = spawnSync('gh', ['issue', 'comment', String(issueNumber), '--repo', repo, '--body', body], {
     encoding: 'utf8',
   });
@@ -568,6 +569,7 @@ function buildWatchdogBundle(
 
 function postWatchdogComment(repo: string, issueNumber: number, bundle: string): void {
   const body = ['## Watchdog investigation', '', bundle].join('\n');
+  // NOTE: '--body' here is safe — spawnSync arg-array (no shell), so backticks/$/quotes bypass PowerShell escaping. Do NOT "fix" to --body-file.
   const result = spawnSync('gh', ['issue', 'comment', String(issueNumber), '--repo', repo, '--body', body], {
     encoding: 'utf8',
   });
