@@ -1,5 +1,6 @@
 import { ToolLoopAgent, stepCountIs, type ToolSet, type ModelMessage, LanguageModel } from 'ai';
 import { IProvider, LLMResponse } from '../types.js';
+import { toAgentTools } from '../tools/tools.js';
 
 export interface BaseProviderOptions {
   tools?: ToolSet;
@@ -40,14 +41,17 @@ export abstract class BaseProvider implements IProvider {
   }
 
   protected async getAgent(options?: BaseProviderOptions): Promise<ToolLoopAgent> {
-    // If tools provided → create scoped agent (not cached)
+    // If tools provided → create scoped agent (not cached).
+    // Strip `execute` so the agent only returns tool calls; manual
+    // `executeToolCalls` is the single owner of execution (issue #138, KD-2).
     if (options?.tools) {
+      const config = this.createAgentConfig();
       return new ToolLoopAgent({
         model: await this.getModel(),
-        instructions: options.systemText,
-        tools: options.tools,
+        ...config,
+        instructions: options.systemText ?? config.instructions,
+        tools: toAgentTools(options.tools),
         stopWhen: stepCountIs(10),
-        ...this.createAgentConfig(),
       });
     }
 

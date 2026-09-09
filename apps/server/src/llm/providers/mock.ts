@@ -1,5 +1,24 @@
 import { ModelMessage, ToolSet } from 'ai';
 import { IProvider, IProviderConfig, LLMResponse } from '../types.js';
+import { normalizeToolName } from '../tools/tools.js';
+
+export interface MockScriptEntry {
+  name: string;
+  args?: Record<string, unknown>;
+  id?: string;
+  error?: string;
+  content?: string;
+}
+
+const MOCK_CREATE_CODE = 'export default function Test() { return <div>Hello</div>; }';
+
+const MOCK_EDIT_PATCH = [
+  '--- a/test.tsx',
+  '+++ b/test.tsx',
+  '@@ -1 +1 @@',
+  '-export default function Test() { return <div>Hello</div>; }',
+  '+export default function Updated() { return <div>Updated</div>; }',
+].join('\n');
 
 export class MockProvider implements IProvider {
   readonly name = 'mock' as const;
@@ -28,14 +47,58 @@ export class MockProvider implements IProvider {
     return { model: 'mock-model' };
   }
 
+  private scriptQueue: MockScriptEntry[] = [];
+
+  /**
+   * Queue scripted tool calls for deterministic tests (issue #138, KD-5).
+   * Empty queue falls back to keyword behavior so existing suites keep passing.
+   */
+  setScript(entries: MockScriptEntry[]): void {
+    this.scriptQueue = [...entries];
+  }
+
+  clearScript(): void {
+    this.scriptQueue = [];
+  }
+
   async complete(
     messages: ModelMessage[],
-    _options?: {
+    options?: {
       stream?: boolean;
       maxRetries?: number;
       tools?: ToolSet;
     }
   ): Promise<LLMResponse> {
+    // Scripted queue takes precedence for deterministic tests (issue #138, KD-5).
+    if (this.scriptQueue.length > 0) {
+      const entry = this.scriptQueue.shift()!;
+      if (entry.error) {
+        throw new Error(entry.error);
+      }
+      const normalizedName = normalizeToolName(entry.name);
+      if (options?.tools) {
+        const requested = new Set(
+          Object.keys(options.tools).map((k) => normalizeToolName(k))
+        );
+        if (!requested.has(normalizedName)) {
+          throw new Error(
+            `Mock script tool '${entry.name}' not in requested tools (${[...requested].join(', ') || 'none'})`
+          );
+        }
+      }
+      const content = entry.content ?? `Mock scripted ${normalizedName}`;
+      console.log('[MockProvider] Returning scripted tool call:', normalizedName);
+      return {
+        content,
+        stream: this.generateChunks(content),
+        toolCalls: [{
+          id: entry.id ?? 'mock-script-1',
+          name: normalizedName,
+          args: entry.args ?? {},
+        }],
+      };
+    }
+
     const lastMessage = messages[messages.length - 1];
     const prompt = typeof lastMessage.content === 'string'
       ? lastMessage.content
@@ -61,7 +124,7 @@ export class MockProvider implements IProvider {
           name: 'create_file',
           args: {
             filename: 'test.tsx',
-            code: 'export default function Test() { return <div>Hello</div>; }',
+            code: MOCK_CREATE_CODE,
           },
         }],
       };
@@ -77,7 +140,7 @@ export class MockProvider implements IProvider {
           name: 'edit_file',
           args: {
             filename: 'test.tsx',
-            code: 'export default function Updated() { return <div>Updated</div>; }',
+            patch: MOCK_EDIT_PATCH,
           },
         }],
       };

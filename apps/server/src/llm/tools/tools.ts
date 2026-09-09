@@ -51,3 +51,31 @@ export const allTools = {
 };
 
 export type { ToolExecutionResult } from './types.js';
+
+import type { ToolSet } from 'ai';
+
+/**
+ * Normalize tool names across hyphen/underscore variants.
+ * The registry and executor use underscores (`create_file`), but some
+ * callers/LLMs emit hyphens (`create-file`). See issue #138.
+ */
+export function normalizeToolName(name: string): string {
+  return name.replace(/-/g, '_');
+}
+
+/**
+ * Strip `execute` from a ToolSet before handing it to `ToolLoopAgent`.
+ * The agent auto-executes any tool that defines `execute` — without
+ * `messageId`, so `trackFileCreation` never runs and validation sees
+ * zero files. Manual `executeToolCalls` in `tool-executor.ts` is the
+ * single owner of execution (issue #138, KD-2).
+ */
+export function toAgentTools(tools: ToolSet): ToolSet {
+  const stripped: ToolSet = {};
+  for (const [name, toolDef] of Object.entries(tools)) {
+    const { execute, ...rest } = toolDef as { execute?: unknown } & Record<string, unknown>;
+    void execute;
+    stripped[name] = rest as ToolSet[string];
+  }
+  return stripped;
+}
