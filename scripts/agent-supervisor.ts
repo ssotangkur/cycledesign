@@ -16,12 +16,81 @@
  *   npx tsx scripts/agent-supervisor.ts [--repo OWNER/REPO] [--interval SECONDS] [--once] ...
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { treeKill } from './agent-tree-kill.js';
 
 const EXIT_UPDATE = 42;
 const EXIT_USAGE = 2;
 const MAX_CRASH_RESTARTS = 5;
 const CRASH_WINDOW_MS = 5 * 60 * 1000;
 const UPDATE_RETRY_COOLDOWN_MS = 60_000;
+// #127: grace wait for the daemon's synchronous teardown (sync lease
+// release + `stop` + `rm --force` + `secret rm`). Windows console Ctrl+C is
+// broadcast to all attached processes, so an immediate tree-kill here would
+// truncate the daemon's own cleanup — wait first, tree-kill only on timeout.
+const SIGNAL_GRACE_MS = 12_000;
+
+let daemonChild: ChildProcess | null = null;
+let signalReceived = false;
+let graceTimer: ReturnType<typeof setTimeout> | null = null;
+let childCloseResolve: ((code: number) => void) | null = null;
+
+function waitForCloseOrTimeout(): Promise<'closed' | 'timeout'> {
+  return new Promise((resolve) => {
+    graceTimer = setTimeout(() => {
+      graceTimer = null;
+      childCloseResolve = null;
+      resolve('timeout');
+    }, SIGNAL_GRACE_MS);
+    childCloseResolve = () => {
+      if (graceTimer !== null) {
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+      childCloseResolve = null;
+      resolve('closed');
+    };
+  });
+}
+
+function clearGraceTimer(): void {
+  if (graceTimer !== null) {
+    clearTimeout(graceTimer);
+    graceTimer = null;
+  }
+  childCloseResolve = null;
+}
+
+async function handleSupervisorSignal(signal: NodeJS.Signals): Promise<void> {
+  if (signalReceived) {
+    // Second signal: force tree-kill and exit non-zero.
+    clearGraceTimer();
+    treeKill(daemonChild);
+    daemonChild = null;
+    process.exit(1);
+  }
+  signalReceived = true;
+  const child = daemonChild;
+  if (child === null) {
+    // Between runs: nothing to wait for.
+    process.exit(0);
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // Best-effort: child may already be gone.
+  }
+  const outcome = await waitForCloseOrTimeout();
+  if (outcome === 'timeout') {
+    console.error('[agent-supervisor] daemon did not exit within grace period, tree-killing');
+    treeKill(daemonChild);
+    daemonChild = null;
+  }
+  // First-signal path always exits 0 (intentional stop, never restart).
+  process.exit(0);
+}
+
+process.on('SIGINT', () => void handleSupervisorSignal('SIGINT'));
+process.on('SIGTERM', () => void handleSupervisorSignal('SIGTERM'));
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,9 +122,11 @@ function runChild(args: string[]): Promise<number> {
     let child: ChildProcess;
     try {
       // shell: true so Windows resolves the npx/tsx shims (same precedent as the daemon).
+      // detached (posix only) gives the group-kill fallback a group leader to target.
       child = spawn('npx', ['tsx', 'scripts/agent-daemon.ts', ...args], {
         stdio: 'inherit',
         shell: true,
+        detached: process.platform !== 'win32',
       });
     } catch (err) {
       console.error(`[agent-supervisor] failed to spawn daemon: ${(err as Error).message}`);
@@ -63,27 +134,26 @@ function runChild(args: string[]): Promise<number> {
       return;
     }
 
-    const forward = (signal: NodeJS.Signals): void => {
-      try {
-        child.kill(signal);
-      } catch {
-        // Best-effort: child may already be gone.
-      }
-    };
-    const onSigint = (): void => forward('SIGINT');
-    const onSigterm = (): void => forward('SIGTERM');
-    process.on('SIGINT', onSigint);
-    process.on('SIGTERM', onSigterm);
+    daemonChild = child;
 
     child.on('error', (err) => {
       console.error(`[agent-supervisor] daemon spawn error: ${err.message}`);
-      process.removeListener('SIGINT', onSigint);
-      process.removeListener('SIGTERM', onSigterm);
+      if (daemonChild === child) {
+        daemonChild = null;
+      }
+      if (signalReceived && childCloseResolve !== null) {
+        childCloseResolve(1);
+      }
       resolve(1);
     });
     child.on('close', (code) => {
-      process.removeListener('SIGINT', onSigint);
-      process.removeListener('SIGTERM', onSigterm);
+      // Null before resolving so a late signal can't kill the next child.
+      if (daemonChild === child) {
+        daemonChild = null;
+      }
+      if (signalReceived && childCloseResolve !== null) {
+        childCloseResolve(code ?? 1);
+      }
       resolve(code ?? 1);
     });
   });
