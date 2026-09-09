@@ -50,6 +50,11 @@
  *   per-sandbox allowlist. Killing the host client alone orphans the
  *   in-VM worker, so every finish path destroys the sandbox. Off by
  *   default; the watchdog tree section then shows the host sbx proxy.
+ * - Project mirror (#140): GH_TOKEN (or host `gh` login) needs the
+ *   `project` scope or the board Status mirror fails. The daemon
+ *   preflights read-only `project view` + `field-list` at boot (exit 2 on
+ *   auth/scope with the `gh auth refresh -s project` fix, warn-and-continue
+ *   on transport, re-checked every 30 min). See `.agent-daemon.env.example`.
  *
  * Label -> skill mapping (bare command names, no leading slash):
  *   "ready to plan"      -> gh-plan-with-reason
@@ -90,9 +95,10 @@ import {
   resolveGithubToken,
   sandboxNameFor,
   sandboxStatus,
+  vmProjectEnv,
 } from './agent-sandbox.js';
 import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease, type IssueLease } from './agent-daemon-lease.js';
-import { syncStatusForLabel } from './agent-project.js';
+import { checkProjectRead, projectNumber, projectOwner, syncStatusForLabelDetailed } from './agent-project.js';
 import { tryReturnToMain } from './agent-daemon-return-main.js';
 import { treeKill } from './agent-tree-kill.js';
 
@@ -465,8 +471,11 @@ function resetToReady(repo: string, issueNumber: number): void {
     console.error(
       `[agent-daemon] label reset failed for #${issueNumber}: ${result.error ? (result.error as Error).message : (result.stderr || '').trim()}`,
     );
-  } else if (syncStatusForLabel(repo, issueNumber, LABEL_IMPLEMENT) === 'failed') {
-    console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${LABEL_IMPLEMENT})`);
+  } else {
+    const mirror = syncStatusForLabelDetailed(repo, issueNumber, LABEL_IMPLEMENT);
+    if (mirror.result === 'failed') {
+      console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${LABEL_IMPLEMENT}) [step: ${mirror.step}] [kind: ${mirror.kind}] ${mirror.stderr}`);
+    }
   }
 }
 
@@ -485,9 +494,62 @@ function parkAtQuestion(repo: string, issueNumber: number, body: string): void {
   );
   if (edit.error || edit.status !== 0) {
     console.error(`[agent-daemon] park label move failed for #${issueNumber}`);
-  } else if (syncStatusForLabel(repo, issueNumber, LABEL_QUESTION) === 'failed') {
-    console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${LABEL_QUESTION})`);
+  } else {
+    const mirror = syncStatusForLabelDetailed(repo, issueNumber, LABEL_QUESTION);
+    if (mirror.result === 'failed') {
+      console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${LABEL_QUESTION}) [step: ${mirror.step}] [kind: ${mirror.kind}] ${mirror.stderr}`);
+    }
   }
+}
+
+/**
+ * KD-1 (#140): fail-fast project preflight. Read-only `project view` +
+ * `field-list` (no mutation), skipped under `--dry-run`.
+ * - auth/scope failure -> exit 2 with setup instructions (supervisor never
+ *   restarts on exit 2, same channel as missing `.agent-daemon.env`).
+ * - config failure (bad field/option, unparseable JSON) -> exit 2 as well.
+ * - transport failure at boot -> warn + continue (mid-run outage must not
+ *   strand issues; KD-2 keeps claims non-blocking).
+ * Re-checked every 30 min with error-level log on failure.
+ */
+export const PROJECT_RECHECK_MS = 30 * 60 * 1000;
+
+export type PreflightAction = 'ok' | 'fail-auth' | 'fail-config' | 'fail-transport';
+
+/** Pure decision for the preflight result (unit-tested without exiting). */
+export function classifyPreflight(check: { ok: boolean; kind: string }): PreflightAction {
+  if (check.ok) {
+    return 'ok';
+  }
+  if (check.kind === 'auth') {
+    return 'fail-auth';
+  }
+  if (check.kind === 'transport') {
+    return 'fail-transport';
+  }
+  return 'fail-config';
+}
+
+function ghAuthStatus(): string {
+  try {
+    const result = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' });
+    return `${result.stdout ?? ''}${result.stderr ?? ''}`.trim().slice(0, 1000);
+  } catch {
+    return '(gh auth status unavailable)';
+  }
+}
+
+/** Exit-2 message for a permanent mirror break (auth/scope or config). */
+export function projectScopeHelp(step: string, kind: string, stderr: string): string {
+  const authStatus = ghAuthStatus();
+  return [
+    `[agent-daemon] project Status mirror unavailable [step: ${step}] [kind: ${kind}] ${stderr}`,
+    `Board project: ${projectOwner()}/${projectNumber()} (Status field).`,
+    `Fix: grant the 'project' scope, then restart the daemon:`,
+    `  gh auth refresh -s project`,
+    `or set GH_TOKEN to a token with the 'project' scope (see .agent-daemon.env.example).`,
+    `gh auth status: ${authStatus || '(empty)'}`,
+  ].join('\n');
 }
 
 /** Best-effort shell capture for the watchdog bundle (never throws). */
@@ -664,11 +726,17 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       destroySandbox(state.config.sbxBin, sandboxName);
       return Promise.resolve({ code: 1, failover: false, watchdogFired: false, detail: `sandbox provision failed at step ${provisioned.step}: ${oneLine(provisioned.output)}` });
     }
-    child = spawn(state.config.sbxBin, execArgs(sandboxName, ['opencode', ...opencodeArgv], HEADLESS_CONFIG_CONTENT, SANDBOX_REPO_DIR), {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: false,
-      env: { ...process.env },
-    });
+    // #140: forward the host board into the VM so the in-VM Status mirror
+    // uses it instead of defaults (worker Phase 0 claim + done/blocked moves).
+    child = spawn(
+      state.config.sbxBin,
+      execArgs(sandboxName, ['opencode', ...opencodeArgv], HEADLESS_CONFIG_CONTENT, SANDBOX_REPO_DIR, vmProjectEnv(projectOwner(), projectNumber())),
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+        env: { ...process.env },
+      },
+    );
   } else {
     // shell: true so Windows resolves the opencode .ps1/.cmd shim (bare spawn risks ENOENT).
     child = spawn('opencode', opencodeArgv, {
@@ -1204,6 +1272,25 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  // KD-1 (#140): fail-fast project preflight (read-only, no mutation; skipped under --dry-run).
+  let lastProjectCheckMs = 0;
+  if (!dryRun) {
+    const check = checkProjectRead();
+    const action = classifyPreflight(check);
+    if (action === 'fail-auth' || action === 'fail-config') {
+      console.error(projectScopeHelp(check.step, check.kind, check.stderr));
+      process.exit(2);
+    } else if (action === 'fail-transport') {
+      console.warn(
+        `[agent-daemon] project Status mirror unavailable at boot [step: ${check.step}] [kind: ${check.kind}] ${check.stderr}; continuing (labels still drive the daemon)`,
+      );
+      lastProjectCheckMs = Date.now();
+    } else {
+      console.log(`[agent-daemon] project Status mirror ready (owner/${projectOwner()} project ${projectNumber()}, field Status)`);
+      lastProjectCheckMs = Date.now();
+    }
+  }
+
   const state: DaemonState = {
     config: daemonConfig,
     probe: createProbeTracker(Date.now()),
@@ -1274,6 +1361,14 @@ async function main(): Promise<void> {
   );
 
   for (;;) {
+    // KD-1: re-run the read-only probe every 30 min; error-level log on failure (never exits here).
+    if (!dryRun && Date.now() - lastProjectCheckMs >= PROJECT_RECHECK_MS) {
+      const check = checkProjectRead();
+      lastProjectCheckMs = Date.now();
+      if (!check.ok) {
+        console.error(`[agent-daemon] project Status mirror recheck failed [step: ${check.step}] [kind: ${check.kind}] ${check.stderr}`);
+      }
+    }
     await pollOnce(repo, dryRun, updateState, state);
     if (once) {
       break;
