@@ -83,7 +83,7 @@ import {
   sandboxNameFor,
   sandboxStatus,
 } from './agent-sandbox.js';
-import { claimIssue, leaseForCommand, releaseLease } from './agent-daemon-lease.js';
+import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease } from './agent-daemon-lease.js';
 import { tryReturnToMain } from './agent-daemon-return-main.js';
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
@@ -372,6 +372,11 @@ export function checkFencing(repo: string, issueNumber: number, sinceIso: string
         continue;
       }
       const body = comment.body ?? '';
+      // KD-6 (#132): `## Planning Questions - Round N` is intentionally
+      // absent here. The blocked-plan path is suppressed via the `question`
+      // label (TERMINAL_LABELS in agent-daemon-lease.ts); matching the Round
+      // comment would strand the normal-exit re-queue the no-answer guard
+      // relies on. Do not "fix" this by adding it.
       if (/## Plan with Reason|## Watchdog investigation|## Question|^Q\d+:/m.test(body)) {
         terminalCommentSince = true;
         break;
@@ -385,6 +390,36 @@ export function checkFencing(repo: string, issueNumber: number, sinceIso: string
 
 export function isFenceClear(state: IssueState): boolean {
   return state.labels.includes(LABEL_IMPLEMENTING) && !state.terminalCommentSince;
+}
+
+/** KD-5 (#132): blocking sleep for the single fence retry (finish is sync). */
+function sleepSync(ms: number): void {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    // Best-effort: a failed sleep just means the retry fires immediately.
+  }
+}
+
+/**
+ * KD-3/KD-5 (#132): fence + release with one bounded retry. On the
+ * fail-closed transport-failure signature (`labels:[]` +
+ * `terminalCommentSince:true`) the fence is re-queried once after a short
+ * delay; on persistent failure the caller logs and accepts the best-effort
+ * gap (never fail-open, so a just-landed terminal state is never clobbered).
+ */
+function releaseLeaseWithRetry(
+  repo: string,
+  issueNumber: number,
+  lease: { trigger: string; inProgress: string },
+  spawnIso: string,
+): { result: 'released' | 'suppressed' | 'failed'; fence: IssueState } {
+  let fence = checkFencing(repo, issueNumber, spawnIso);
+  if (isFenceTransportFailure(fence)) {
+    sleepSync(1500);
+    fence = checkFencing(repo, issueNumber, spawnIso);
+  }
+  return { result: releaseLease(repo, issueNumber, lease, fence), fence };
 }
 
 function resetToReady(repo: string, issueNumber: number): void {
@@ -578,6 +613,17 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     });
     if (!provisioned.ok) {
       console.error(`[agent-daemon] sandbox provision failed for #${issueNumber} at step ${provisioned.step}: ${provisioned.output}`);
+      // KD-4 (#132): the lease was already claimed above, and this early
+      // return never enters finish() — release here or the issue strands at
+      // `planning`/`implementing` (poll only lists triggers).
+      if (lease !== null) {
+        const { result, fence } = releaseLeaseWithRetry(repo, issueNumber, lease, spawnIso);
+        if (result === 'released') {
+          console.log(`[agent-daemon] lease released for #${issueNumber} (back to ${lease.trigger})`);
+        } else if (result === 'failed') {
+          console.error(`[agent-daemon] lease release failed for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
+        }
+      }
       destroySandbox(state.config.sbxBin, sandboxName);
       return Promise.resolve({ code: 1, failover: false, watchdogFired: false });
     }
@@ -611,9 +657,10 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       // #132: guaranteed lease release on every finish path. Failover and
       // watchdog paths already reset labels themselves, so this suppresses
       // there; terminal moves by the worker suppress it everywhere else.
+      // Residual best-effort gap (KD-5): persistent fence transport failure
+      // keeps fail-closed (no clobber) and is only logged below.
       if (lease !== null) {
-        const fence = checkFencing(repo, issueNumber, spawnIso);
-        const released = releaseLease(repo, issueNumber, lease, fence);
+        const { result: released, fence } = releaseLeaseWithRetry(repo, issueNumber, lease, spawnIso);
         if (released === 'released') {
           console.log(`[agent-daemon] lease released for #${issueNumber} (back to ${lease.trigger})`);
         } else if (released === 'failed') {

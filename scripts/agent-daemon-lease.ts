@@ -59,6 +59,17 @@ export function shouldReleaseLease(state: LeaseState, inProgress: string): boole
   return !state.labels.some((label) => TERMINAL_LABELS.includes(label));
 }
 
+/**
+ * KD-5: fail-closed fence signature. `checkFencing` returns
+ * `{labels:[], terminalCommentSince:true}` when `gh` transport fails or its
+ * output is unparseable, so this exact shape means "fence unknown, retry
+ * once" — never fail-open. A legitimately unlabeled issue has
+ * `terminalCommentSince:false` unless a terminal comment actually landed.
+ */
+export function isFenceTransportFailure(state: LeaseState): boolean {
+  return state.labels.length === 0 && state.terminalCommentSince;
+}
+
 function ghEdit(repo: string, issueNumber: number, remove: string, add: string): { ok: boolean; output: string } {
   const result = spawnSync('gh', ['issue', 'edit', String(issueNumber), '--repo', repo, '--remove-label', remove, '--add-label', add], {
     encoding: 'utf8',
