@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { claimIssue, leaseForCommand, releaseLease, shouldReleaseLease } from './agent-daemon-lease.js';
+import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease, shouldReleaseLease } from './agent-daemon-lease.js';
 
 describe('lease labels per command', () => {
   it('maps plan to ready-to-plan/planning', () => {
@@ -39,6 +39,24 @@ describe('release decision', () => {
 
   it('suppresses when a terminal label coexists with the lease (question)', () => {
     assert.equal(shouldReleaseLease({ labels: ['planning', 'question'], terminalCommentSince: false }, 'planning'), false);
+  });
+});
+
+describe('fence transport-failure signal', () => {
+  it('flags the fail-closed shape (no labels + terminal flag) as retryable', () => {
+    assert.equal(isFenceTransportFailure({ labels: [], terminalCommentSince: true }), true);
+  });
+
+  it('does not flag a legitimately unlabeled issue without terminal comments', () => {
+    assert.equal(isFenceTransportFailure({ labels: [], terminalCommentSince: false }), false);
+  });
+
+  it('does not flag a normal labeled fence', () => {
+    assert.equal(isFenceTransportFailure({ labels: ['implementing'], terminalCommentSince: false }), false);
+  });
+
+  it('does not flag a terminal-comment fence that still carries labels', () => {
+    assert.equal(isFenceTransportFailure({ labels: ['implementing'], terminalCommentSince: true }), false);
   });
 });
 
