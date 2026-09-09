@@ -24,6 +24,12 @@ There is no silent exit, no partial completion, no asking the user directly.
   - Start: remove `ready to implement`, add `implementing`
   - Success: remove `implementing`, add `pr ready`
   - Blocked: remove `implementing`, add `question` + post explanatory comment
+- **Mirror each label move to the Project board** (best-effort, warn-only):
+  ```bash
+  npx tsx scripts/agent-project.ts --issue <N> --status "Implementing"  # start
+  npx tsx scripts/agent-project.ts --issue <N> --status "PR ready"  # success
+  npx tsx scripts/agent-project.ts --issue <N> --status "Blocked"  # blocked
+  ```
 - **Max 3 fix loops.** If implement → wrap-up cycles 3 times without green CI, escalate to Blocked instead of looping forever.
 
 ## Inputs
@@ -64,6 +70,7 @@ Only proceed to Phase 0 when both pass. Infrastructure failures must never produ
 4. Claim:
    ```bash
    gh issue edit <N> --repo ssotangkur/cycledesign --remove-label "ready to implement" --add-label "implementing"
+   npx tsx scripts/agent-project.ts --issue <N> --status "Implementing"
    ```
    - Ignore "label not present" errors — continue.
 
@@ -172,6 +179,7 @@ On DONE (you do this, no sub-agent):
 
 ```bash
 gh issue edit <N> --repo ssotangkur/cycledesign --remove-label "implementing" --add-label "pr ready"
+npx tsx scripts/agent-project.ts --issue <N> --status "PR ready"
 ```
 
 Then stop. Reply in chat with branch + PR URL + unresolved-findings count.
@@ -188,6 +196,7 @@ Triggered by any BLOCKED return, or an unrecoverable error in a sub-agent.
 2. Swap labels:
    ```bash
    gh issue edit <N> --repo ssotangkur/cycledesign --remove-label "implementing" --add-label "question"
+   npx tsx scripts/agent-project.ts --issue <N> --status "Blocked"
    ```
 3. Stop. Reply in chat with the issue comment URL and blocker summary. Do not retry.
 

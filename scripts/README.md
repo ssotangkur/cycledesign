@@ -171,6 +171,8 @@ docker build -f sandbox.Dockerfile.gui -t cycledesign-sandbox:gui .
 | File | Purpose |
 |------|---------|
 | `agent-daemon.ts` | Polling-first runner: watches `ready to plan` / `ready to implement` labels and invokes fire-and-forget skills via the opencode CLI |
+| `agent-daemon-lease.ts` | Daemon-owned issue lease: claim/release label swaps, mirrors Status via `agent-project.ts` |
+| `agent-project.ts` | Best-effort mirror of label moves onto the Project `Status` field (`npx tsx scripts/agent-project.ts --issue <N> --status "<Status>"`) |
 | `agent-supervisor.ts` | Tiny supervisor: restarts the daemon on crash, pulls ff-only on exit 42 |
 | `sandbox-start.bat` | Windows CMD launcher (wraps PowerShell) |
 | `sandbox-start.ps1` | Windows PowerShell launcher (recommended) |
