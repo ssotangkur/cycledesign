@@ -418,6 +418,14 @@ function releaseLeaseWithRetry(
   if (isFenceTransportFailure(fence)) {
     sleepSync(1500);
     fence = checkFencing(repo, issueNumber, spawnIso);
+    if (isFenceTransportFailure(fence)) {
+      // Fail-closed means releaseLease below reports 'suppressed' (no
+      // in-progress label in the empty fence), which callers do not log —
+      // so log here, or a stranded lease is invisible in the logs.
+      console.error(
+        `[agent-daemon] lease fence unavailable for #${issueNumber} after retry; keeping ${lease.inProgress} (fail-closed, may need manual reset to ${lease.trigger})`,
+      );
+    }
   }
   return { result: releaseLease(repo, issueNumber, lease, fence), fence };
 }
