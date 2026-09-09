@@ -52,7 +52,9 @@
  *   "ready to implement" -> resolve-issue
  *
  * "question" / "pr ready" are terminal and never re-triggered (not polled).
- * Skills claim via label swap, so the next poll naturally skips claimed issues.
+ * The daemon owns the lease (#132): it swaps trigger -> in-progress at
+ * spawn and swaps back on every finish path unless the worker reached a
+ * terminal state. The worker Phase 0 claim stays as idempotent backup.
  *
  * Usage:
  *   npx tsx scripts/agent-daemon.ts [--repo OWNER/REPO] [--interval SECONDS] [--once] [--dry-run] [--update-check-interval SECONDS] [--no-update-check] [--help]
@@ -72,13 +74,16 @@ import {
   type ProbeTracker,
 } from './agent-daemon-policy.js';
 import {
+  SANDBOX_REPO_DIR,
   destroySandbox,
   execArgs,
   hostAuthJsonPath,
   provisionSandbox,
+  resolveGithubToken,
   sandboxNameFor,
   sandboxStatus,
 } from './agent-sandbox.js';
+import { claimIssue, leaseForCommand, releaseLease } from './agent-daemon-lease.js';
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -552,17 +557,30 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
   const spawnIso = new Date().toISOString();
   const tracker = createStreamTracker(Date.now());
   const stuckTimeoutMs = state.config.stuckTimeoutS * 1000;
+  // #132: daemon-owned lease. Claim before spawn (host gh, deterministic);
+  // a missing trigger label means another worker holds it -> skip, not fail.
+  const lease = leaseForCommand(command);
+  if (lease !== null && !claimIssue(repo, issueNumber, lease)) {
+    console.log(`[agent-daemon] lease not acquired for #${issueNumber} (${lease.trigger} already gone); skipping run`);
+    return Promise.resolve({ code: 1, failover: false, watchdogFired: false });
+  }
   let child: ChildProcess;
   if (sandbox && sandboxName !== null) {
-    // #121: disposable per-run microVM. Provision first (create -> auth ->
-    // allowlist); the sbx.exe client is a real binary (no shell shim needed).
-    const provisioned = provisionSandbox(state.config.sbxBin, sandboxName, process.cwd(), hostAuthJsonPath(homedir()), state.config.sbxTemplate);
+    // #121: disposable per-run microVM. Provision first (create -> github
+    // secret -> auth -> allowlist -> clone); the sbx.exe client is a real
+    // binary (no shell shim needed). #129: the worker runs in the in-VM
+    // clone (the workdir mount's `.git` is a host-path worktree pointer).
+    const githubToken = resolveGithubToken(process.env['GH_TOKEN']);
+    const provisioned = provisionSandbox(state.config.sbxBin, sandboxName, process.cwd(), hostAuthJsonPath(homedir()), state.config.sbxTemplate, {
+      repoSlug: repo,
+      githubToken,
+    });
     if (!provisioned.ok) {
       console.error(`[agent-daemon] sandbox provision failed for #${issueNumber} at step ${provisioned.step}: ${provisioned.output}`);
       destroySandbox(state.config.sbxBin, sandboxName);
       return Promise.resolve({ code: 1, failover: false, watchdogFired: false });
     }
-    child = spawn(state.config.sbxBin, execArgs(sandboxName, ['opencode', ...opencodeArgv], HEADLESS_CONFIG_CONTENT), {
+    child = spawn(state.config.sbxBin, execArgs(sandboxName, ['opencode', ...opencodeArgv], HEADLESS_CONFIG_CONTENT, SANDBOX_REPO_DIR), {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       env: { ...process.env },
@@ -589,6 +607,18 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         clearInterval(watchdogTimer);
       }
       activeChild = null;
+      // #132: guaranteed lease release on every finish path. Failover and
+      // watchdog paths already reset labels themselves, so this suppresses
+      // there; terminal moves by the worker suppress it everywhere else.
+      if (lease !== null) {
+        const fence = checkFencing(repo, issueNumber, spawnIso);
+        const released = releaseLease(repo, issueNumber, lease, fence);
+        if (released === 'released') {
+          console.log(`[agent-daemon] lease released for #${issueNumber} (back to ${lease.trigger})`);
+        } else if (released === 'failed') {
+          console.error(`[agent-daemon] lease release failed for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
+        }
+      }
       if (sandboxName !== null) {
         // #121: client kill/exit alone orphans the in-VM worker; the
         // sandbox itself is the kill. Runs on every finish path.
