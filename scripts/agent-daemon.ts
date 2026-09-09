@@ -72,6 +72,7 @@ import {
   applyProbeResult,
   createProbeTracker,
   exitDetailFor,
+  heartbeatIntervalMs,
   livenessSummary,
   noteFailover,
   oneLine,
@@ -97,7 +98,6 @@ import { treeKill } from './agent-tree-kill.js';
 
 // Re-exported so existing call sites and tests keep working via agent-daemon.js.
 export { treeKill };
-export { exitDetailFor, livenessSummary, oneLine };
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -189,8 +189,6 @@ function createStreamTracker(nowMs: number): StreamTracker {
     titleBySession: new Map(),
   };
 }
-
-/** #139: oneLine/livenessSummary/exitDetailFor live in policy (pure/tested); re-exported at top. */
 
 let activeChild: ChildProcess | null = null;
 let sleepTimer: ReturnType<typeof setTimeout> | null = null;
@@ -799,7 +797,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     // #139: heartbeat proves liveness between spawn and finish — one status
     // line per third of the stuck window (bounded 60s..300s) while a run is
     // in flight, so silence duration is always visible in recent logs.
-    const heartbeatMs = Math.min(300_000, Math.max(60_000, Math.floor(stuckTimeoutMs / 3)));
+    const heartbeatMs = heartbeatIntervalMs(stuckTimeoutMs);
     let lastHeartbeatMs = Date.now();
     const watchdogTimer: ReturnType<typeof setInterval> = setInterval(() => {
       if (settled) {

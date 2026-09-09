@@ -6,6 +6,7 @@ import {
   createProbeTracker,
   exitDetailFor,
   failoverSteps,
+  heartbeatIntervalMs,
   livenessSummary,
   noteFailover,
   oneLine,
@@ -155,5 +156,17 @@ describe('exit detail (#139)', () => {
   it('oneLine collapses whitespace and truncates', () => {
     assert.equal(oneLine('a\n  b\tc'), 'a b c');
     assert.equal(oneLine('x'.repeat(400), 300).length, 300);
+  });
+});
+
+describe('heartbeat cadence (#139)', () => {
+  it('is one third of the stuck window within 60s..300s bounds', () => {
+    assert.equal(heartbeatIntervalMs(900_000), 300_000);
+    assert.equal(heartbeatIntervalMs(360_000), 120_000);
+  });
+
+  it('clamps short windows up to 60s and long windows down to 300s', () => {
+    assert.equal(heartbeatIntervalMs(90_000), 60_000);
+    assert.equal(heartbeatIntervalMs(3_600_000), 300_000);
   });
 });

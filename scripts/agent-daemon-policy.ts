@@ -115,6 +115,15 @@ export interface LivenessSnapshot {
   lastLine: string | null;
 }
 
+/**
+ * #139: heartbeat cadence — one status line per third of the stuck window,
+ * bounded to [60s, 300s], so silence duration stays visible in recent logs
+ * without spamming on short windows or going quiet on long ones.
+ */
+export function heartbeatIntervalMs(stuckTimeoutMs: number): number {
+  return Math.min(300_000, Math.max(60_000, Math.floor(stuckTimeoutMs / 3)));
+}
+
 /** #139: single-line truncation for log/error-detail strings. */
 export function oneLine(value: string, max = 300): string {
   return value
