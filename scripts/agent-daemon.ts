@@ -85,6 +85,10 @@ import {
 } from './agent-sandbox.js';
 import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease } from './agent-daemon-lease.js';
 import { tryReturnToMain } from './agent-daemon-return-main.js';
+import { treeKill } from './agent-tree-kill.js';
+
+// Re-exported so existing call sites and tests keep working via agent-daemon.js.
+export { treeKill };
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -310,31 +314,10 @@ export function observeLine(rawLine: string, tracker: StreamTracker): { tag: str
 }
 
 /**
- * KD-4: tree-kill the CLI (`shell:true` wrapper may have grandchildren).
- * win32 needs `taskkill /T /F`; posix kills the process group.
+ * KD-4 (#127): tree-kill lives in `./agent-tree-kill.js` (shared with the
+ * supervisor). The local definition was replaced by the import above; this
+ * block intentionally left no local copy so the two sides cannot drift.
  */
-export function treeKill(child: ChildProcess | null): void {
-  if (child === null || child.pid === undefined) {
-    return;
-  }
-  try {
-    if (process.platform === 'win32') {
-      spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-    } else {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        child.kill('SIGKILL');
-      }
-    }
-  } catch {
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      // Best-effort: the process may already be gone.
-    }
-  }
-}
 
 interface IssueState {
   labels: string[];
