@@ -25,6 +25,7 @@ Take the current branch from "code done" to "PR ready with green CI".
 - Never add files to the `knip.json` ignore list without explicit user permission - delete unused files instead.
 - Verify PR status with the `gh` CLI, never local results alone.
 - If no PR exists yet, create a draft PR so CI runs and `gh pr checks` has a target; `pr-create` will finalize the description later. Never leave a branch with green local checks but no PR behind.
+- Inner adversarial `review` always spawns fresh: its `Task` delegation must omit `task_id` even when this outer wrap-up session was itself resumed via `task_id` — resuming the reviewer would anchor findings on author reasoning.
 
 ## Test commands — never watch, never guess
 
@@ -99,6 +100,7 @@ commit: <final SHA — all checks green on this SHA; empty if BLOCKED>
 validation: <`npm run validate` result on final SHA>
 tests: <unit suites + E2E summary on final SHA>
 unresolved_findings: <each review issue not fixed, with kind tags from the `review` skill, file:line, and 1-line reason — or `None`>
+task_id: <your session task ID from the `<task id="...">` wrapper — optional standalone; required when invoked via `resolve-issue` so the orchestrator can resume this session on retry>
 blocked_reason: <only if BLOCKED — what failed, what you tried, what is needed>
 ```
 
