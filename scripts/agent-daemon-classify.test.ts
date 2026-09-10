@@ -56,4 +56,57 @@ describe('classifyLine', () => {
   it('treats non-JSON lines without markers as other', () => {
     assert.equal(classifyLine('hello world'), 'other');
   });
+
+  it('#155: ignores a gateway marker inside tool_use file content', () => {
+    // A worker reading agent-daemon-classify.ts fired a bogus failover on
+    // the source text of the classifier itself.
+    const line = JSON.stringify({
+      type: 'tool_use',
+      timestamp: 1789018717278,
+      sessionID: 'ses_abc123',
+      part: {
+        type: 'tool',
+        tool: 'read',
+        callID: 'call_01',
+        state: {
+          status: 'completed',
+          input: { filePath: 'scripts/agent-daemon-classify.ts' },
+          output: 'const RATE_LIMIT_RE = /Rate limit exceeded/;',
+        },
+      },
+    });
+    assert.equal(classifyLine(line), 'other');
+  });
+
+  it('#155: error-shaped fields stay authoritative inside tool_use', () => {
+    const line = JSON.stringify({
+      type: 'tool_use',
+      timestamp: 1789018717278,
+      sessionID: 'ses_abc123',
+      error: GATEWAY_EXACT,
+      part: {
+        type: 'tool',
+        tool: 'read',
+        state: { status: 'error' },
+      },
+    });
+    assert.equal(classifyLine(line), 'gateway-quota');
+  });
+
+  it('#155: ignores an upstream marker inside tool_use file content', () => {
+    const line = JSON.stringify({
+      type: 'tool_use',
+      timestamp: 1789018717278,
+      sessionID: 'ses_abc123',
+      part: {
+        type: 'tool',
+        tool: 'grep',
+        state: {
+          status: 'completed',
+          output: 'Upstream request failed: [rate_limit_exceeded]',
+        },
+      },
+    });
+    assert.equal(classifyLine(line), 'other');
+  });
 });
