@@ -257,7 +257,20 @@ describe('VM liveness collectors (#149 KD-4)', () => {
     assert.deepEqual(vmVcsStatusArgs('cycledesign-issue-1'), ['exec', 'cycledesign-issue-1', 'git', '-C', SANDBOX_REPO_DIR, 'status', '--porcelain']);
   });
 
-  it('lists in-VM sessions as JSON (local DB read, no quota)', () => {
-    assert.deepEqual(vmSessionListArgs('cycledesign-issue-1'), ['exec', 'cycledesign-issue-1', 'opencode', 'session', 'list', '--format', 'json']);
+  it('lists in-VM sessions as JSON from the worker project dir (no quota)', () => {
+    // #160: `session list` is cwd-scoped and the worker runs in
+    // SANDBOX_REPO_DIR, so the collector must `-w` there or it lists the
+    // workdir mount and always reports empty.
+    assert.deepEqual(vmSessionListArgs('cycledesign-issue-1'), [
+      'exec',
+      '-w',
+      SANDBOX_REPO_DIR,
+      'cycledesign-issue-1',
+      'opencode',
+      'session',
+      'list',
+      '--format',
+      'json',
+    ]);
   });
 });

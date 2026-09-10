@@ -360,7 +360,13 @@ export function vmVcsStatusArgs(name: string): string[] {
   return ['exec', name, 'git', '-C', SANDBOX_REPO_DIR, 'status', '--porcelain'];
 }
 
-/** Sandbox session-log leg: in-VM session list (local DB read, no LLM/quota). */
+/**
+ * Sandbox session-log leg: in-VM session list (local DB read, no LLM/quota).
+ * Scoped with `-w` to the worker's project (#160): `session list` is
+ * cwd-scoped, and the worker runs in SANDBOX_REPO_DIR while the default
+ * exec cwd is the workdir mount — without `-w` the collector lists the
+ * wrong project and always reports empty.
+ */
 export function vmSessionListArgs(name: string): string[] {
-  return ['exec', name, 'opencode', 'session', 'list', '--format', 'json'];
+  return ['exec', '-w', SANDBOX_REPO_DIR, name, 'opencode', 'session', 'list', '--format', 'json'];
 }
