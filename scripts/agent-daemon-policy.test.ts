@@ -7,12 +7,15 @@ import {
   exitDetailFor,
   failoverSteps,
   heartbeatIntervalMs,
+  isTreeHot,
   livenessSummary,
   noteFailover,
   oneLine,
   recordFailover,
   shouldFireWatchdog,
   shouldProbe,
+  suppressionSummary,
+  watchdogDecision,
   type LivenessSnapshot,
 } from './agent-daemon-policy.js';
 
@@ -168,5 +171,144 @@ describe('heartbeat cadence (#139)', () => {
   it('clamps short windows up to 60s and long windows down to 300s', () => {
     assert.equal(heartbeatIntervalMs(90_000), 60_000);
     assert.equal(heartbeatIntervalMs(3_600_000), 300_000);
+  });
+});
+
+describe('conjunctive watchdog (#149 KD-4/KD-7)', () => {
+  const TIMEOUT = 900_000;
+  const IDLE = 918_000; // #104 shape: silence past the timeout on every leg
+  const LIVE = 30_000;
+
+  it('#104-shape (stdout silent, VM alive) does not fire', () => {
+    const decision = watchdogDecision({
+      stdoutIdleMs: IDLE,
+      vmLogIdleMs: LIVE,
+      vmVcsIdleMs: IDLE,
+      sessionLogIdleMs: IDLE,
+      treeBusy: false,
+      collectorOk: true,
+      stuckTimeoutMs: TIMEOUT,
+    });
+    assert.equal(decision.fire, false);
+    assert.ok(decision.suppressions.some((s) => s.startsWith('vm-log alive')));
+  });
+
+  it('truly idle on every leg fires', () => {
+    const decision = watchdogDecision({
+      stdoutIdleMs: IDLE,
+      vmLogIdleMs: IDLE,
+      vmVcsIdleMs: IDLE,
+      sessionLogIdleMs: IDLE,
+      treeBusy: false,
+      collectorOk: true,
+      stuckTimeoutMs: TIMEOUT,
+    });
+    assert.equal(decision.fire, true);
+    assert.deepEqual(decision.suppressions, []);
+  });
+
+  it('collector error fail-closes to no-fire', () => {
+    const decision = watchdogDecision({
+      stdoutIdleMs: IDLE,
+      vmLogIdleMs: IDLE,
+      vmVcsIdleMs: IDLE,
+      sessionLogIdleMs: IDLE,
+      treeBusy: false,
+      collectorOk: false,
+      stuckTimeoutMs: TIMEOUT,
+    });
+    assert.equal(decision.fire, false);
+    assert.deepEqual(decision.suppressions, ['collector-error: VM liveness unknown (fail-closed)']);
+  });
+
+  it('#109-shape (live but idle tree, all legs idle) fires', () => {
+    const decision = watchdogDecision({
+      stdoutIdleMs: IDLE,
+      vmLogIdleMs: IDLE,
+      vmVcsIdleMs: IDLE,
+      sessionLogIdleMs: IDLE,
+      treeBusy: false,
+      collectorOk: true,
+      stuckTimeoutMs: TIMEOUT,
+    });
+    assert.equal(decision.fire, true);
+  });
+
+  it('hot tree suppresses even when every leg is idle', () => {
+    const decision = watchdogDecision({
+      stdoutIdleMs: IDLE,
+      vmLogIdleMs: IDLE,
+      vmVcsIdleMs: IDLE,
+      sessionLogIdleMs: IDLE,
+      treeBusy: true,
+      collectorOk: true,
+      stuckTimeoutMs: TIMEOUT,
+    });
+    assert.equal(decision.fire, false);
+    assert.ok(decision.suppressions.includes('worker-tree hot (recent spawn/churn)'));
+  });
+
+  it('recent stdout alone suppresses (byte age stays out of the predicate)', () => {
+    const decision = watchdogDecision({
+      stdoutIdleMs: LIVE,
+      vmLogIdleMs: IDLE,
+      vmVcsIdleMs: IDLE,
+      sessionLogIdleMs: IDLE,
+      treeBusy: false,
+      collectorOk: true,
+      stuckTimeoutMs: TIMEOUT,
+    });
+    assert.equal(decision.fire, false);
+  });
+
+  it('suppressionSummary renders fire vs suppressed', () => {
+    assert.equal(suppressionSummary({ fire: true, suppressions: [] }), 'all legs idle (would fire)');
+    assert.match(
+      suppressionSummary({ fire: false, suppressions: ['collector-error: VM liveness unknown (fail-closed)'] }),
+      /suppressed: collector-error/,
+    );
+  });
+});
+
+describe('tree busy-vote (#149 KD-4, no CPU)', () => {
+  const TIMEOUT = 900_000;
+  const NOW = 1_000_000_000;
+
+  it('recent spawn is hot', () => {
+    const { hot, reason } = isTreeHot([{ pid: 10, createdMs: NOW - 60_000 }], [10], NOW, TIMEOUT);
+    assert.equal(hot, true);
+    assert.match(reason, /spawned/);
+  });
+
+  it('pid churn since last poll is hot', () => {
+    const old = NOW - TIMEOUT - 60_000;
+    const { hot, reason } = isTreeHot(
+      [
+        { pid: 10, createdMs: old },
+        { pid: 11, createdMs: old },
+      ],
+      [10],
+      NOW,
+      TIMEOUT,
+    );
+    assert.equal(hot, true);
+    assert.match(reason, /churn/);
+  });
+
+  it('live-but-idle tree (#109) is neutral', () => {
+    const old = NOW - TIMEOUT - 60_000;
+    const { hot } = isTreeHot([{ pid: 10, createdMs: old }], [10], NOW, TIMEOUT);
+    assert.equal(hot, false);
+  });
+
+  it('first poll with empty previous set is not hot-by-default', () => {
+    const old = NOW - TIMEOUT - 60_000;
+    const { hot } = isTreeHot([{ pid: 10, createdMs: old }], [], NOW, TIMEOUT);
+    assert.equal(hot, false);
+  });
+
+  it('unknown creation dates never vote hot without churn', () => {
+    const { hot } = isTreeHot([{ pid: 10, createdMs: null }], [10], NOW, TIMEOUT);
+    assert.equal(hot, false);
   });
 });

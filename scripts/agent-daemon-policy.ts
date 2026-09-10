@@ -69,6 +69,12 @@ export function applyProbeResult(tracker: ProbeTracker, outcome: ProbeOutcome, n
  * KD-6: fire after a full STUCK_TIMEOUT with zero non-error JSON lines.
  * Upstream-transient-only streams still count as stuck (retry storm, no
  * progress) — callers pass the last *non-error* activity timestamp.
+ *
+ * #149: stdout-only firing is the #104 false positive (root stdout buffers
+ * nested-Task output until Task-end, so a long single-Task phase looks
+ * exactly like a stuck run). In sandboxMode the daemon uses
+ * `watchdogDecision` below instead; this predicate stays for non-sandbox
+ * runs and as the stdout leg of the conjunction.
  */
 export function shouldFireWatchdog(
   lastNonErrorActivityMs: number,
@@ -76,6 +82,107 @@ export function shouldFireWatchdog(
   stuckTimeoutMs: number,
 ): boolean {
   return nowMs - lastNonErrorActivityMs >= stuckTimeoutMs;
+}
+
+/**
+ * #149 KD-4: conjunctive watchdog input. Every age is ms since that signal
+ * last showed life; `treeBusy` is the worker-tree busy-vote (hot suppresses,
+ * otherwise neutral); `collectorOk` is false when ANY VM collector errored.
+ * Byte-chunk age is deliberately absent (AD-7: #104 had 0B pending, so bytes
+ * would not have saved it) — it stays diagnostic-only in the bundle.
+ */
+export interface ConjunctiveLiveness {
+  stdoutIdleMs: number;
+  vmLogIdleMs: number;
+  vmVcsIdleMs: number;
+  sessionLogIdleMs: number;
+  /** Hot worker tree (recent spawns/churn) — suppresses the fire, else neutral. */
+  treeBusy: boolean;
+  /** False when any VM collector errored/timed out (fail-closed, Q9a). */
+  collectorOk: boolean;
+  stuckTimeoutMs: number;
+}
+
+export interface WatchdogDecision {
+  fire: boolean;
+  /**
+   * Per-signal suppression reasons (empty when firing). Logged at heartbeat
+   * cadence so fail-closed silence stays visible (KD-7).
+   */
+  suppressions: string[];
+}
+
+/**
+ * #149 KD-4/KD-7: fire only when ALL legs are idle for the full window.
+ * The #104 shape (stdout silent, VM showing life) suppresses; a truly idle
+ * run fires; a collector error fail-closes to no-fire.
+ */
+export function watchdogDecision(input: ConjunctiveLiveness): WatchdogDecision {
+  if (!input.collectorOk) {
+    return { fire: false, suppressions: ['collector-error: VM liveness unknown (fail-closed)'] };
+  }
+  const suppressions: string[] = [];
+  if (input.stdoutIdleMs < input.stuckTimeoutMs) {
+    suppressions.push(`stdout alive (${Math.round(input.stdoutIdleMs / 1000)}s < ${Math.round(input.stuckTimeoutMs / 1000)}s)`);
+  }
+  if (input.vmLogIdleMs < input.stuckTimeoutMs) {
+    suppressions.push(`vm-log alive (${Math.round(input.vmLogIdleMs / 1000)}s < ${Math.round(input.stuckTimeoutMs / 1000)}s)`);
+  }
+  if (input.vmVcsIdleMs < input.stuckTimeoutMs) {
+    suppressions.push(`vm-vcs alive (${Math.round(input.vmVcsIdleMs / 1000)}s < ${Math.round(input.stuckTimeoutMs / 1000)}s)`);
+  }
+  if (input.sessionLogIdleMs < input.stuckTimeoutMs) {
+    suppressions.push(`session-log alive (${Math.round(input.sessionLogIdleMs / 1000)}s < ${Math.round(input.stuckTimeoutMs / 1000)}s)`);
+  }
+  if (input.treeBusy) {
+    suppressions.push('worker-tree hot (recent spawn/churn)');
+  }
+  return { fire: suppressions.length === 0, suppressions };
+}
+
+/**
+ * #149 KD-7: one-line rendering of a no-fire decision for heartbeat logs.
+ */
+export function suppressionSummary(decision: WatchdogDecision): string {
+  if (decision.fire) {
+    return 'all legs idle (would fire)';
+  }
+  return `suppressed: ${decision.suppressions.join('; ')}`;
+}
+
+/** #149 KD-4: one worker-tree process (CreationDate may be unknown). */
+export interface TreeProc {
+  pid: number;
+  createdMs: number | null;
+}
+
+/**
+ * #149 KD-4: worker-tree busy-vote without CPU sampling (Q10c — CPU is not a
+ * reliable activity proxy). Hot = a process spawned within the stuck window
+ * or PID churn since the last poll (fork/exit activity). Otherwise neutral
+ * (a live-but-idle tree still fires — #109 shape). The previous set is
+ * seeded from the spawn-time tree, so the first poll is not hot-by-default.
+ */
+export function isTreeHot(
+  current: TreeProc[],
+  prevPids: ReadonlySet<number> | readonly number[],
+  nowMs: number,
+  stuckTimeoutMs: number,
+): { hot: boolean; reason: string } {
+  const prev = new Set(prevPids);
+  for (const proc of current) {
+    if (proc.createdMs !== null && nowMs - proc.createdMs < stuckTimeoutMs) {
+      return { hot: true, reason: `pid ${proc.pid} spawned ${Math.round((nowMs - proc.createdMs) / 1000)}s ago` };
+    }
+  }
+  if (prev.size > 0) {
+    const curr = new Set(current.map((p) => p.pid));
+    const joined = current.some((p) => !prev.has(p.pid)) || [...prev].some((pid) => !curr.has(pid));
+    if (joined) {
+      return { hot: true, reason: 'pid churn since last poll' };
+    }
+  }
+  return { hot: false, reason: 'tree idle (no recent spawn, no churn)' };
 }
 
 /** KD-4 circuit breaker: max 3 failovers per issue per daemon lifetime. */
