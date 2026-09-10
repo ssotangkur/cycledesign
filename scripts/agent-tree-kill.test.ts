@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { treeKill } from './agent-tree-kill.js';
+import { treeKill, treeKillVerified } from './agent-tree-kill.js';
 
 describe('treeKill', () => {
   let origPlatform: NodeJS.Platform;
@@ -61,5 +61,56 @@ describe('treeKill', () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     // taskkill may not exist on this host; treeKill is best-effort and must not throw.
     assert.doesNotThrow(() => treeKill({ pid: 1 }));
+  });
+});
+
+describe('treeKillVerified (#149 KD-5)', () => {
+  it('returns true for null/undefined/missing pid', () => {
+    assert.equal(treeKillVerified(null), true);
+    assert.equal(treeKillVerified(undefined), true);
+    assert.equal(treeKillVerified({ pid: undefined }), true);
+  });
+
+  it('returns true when the pid is already dead', () => {
+    assert.equal(treeKillVerified({ pid: 1234 }, { isAlive: () => false, sleepSync: () => {} }), true);
+  });
+
+  it('retries until the verify passes', () => {
+    let probes = 0;
+    let sleeps = 0;
+    const dead = treeKillVerified(
+      { pid: 4242, kill: () => true },
+      {
+        // posix path only; on win32 taskkill decides. Force the posix branch
+        // shape by probing liveness across attempts.
+        isAlive: () => ++probes < 3,
+        retries: 3,
+        sleepSync: () => {
+          sleeps += 1;
+        },
+      },
+    );
+    assert.equal(dead, true);
+    assert.equal(probes, 3);
+    assert.equal(sleeps, 2);
+  });
+
+  it('returns false when the pid survives every round', () => {
+    const dead = treeKillVerified({ pid: 9999, kill: () => true }, { isAlive: () => true, retries: 1, sleepSync: () => {} });
+    assert.equal(dead, false);
+  });
+
+  it('never throws when every kill fails', () => {
+    assert.doesNotThrow(() =>
+      treeKillVerified(
+        {
+          pid: 9999,
+          kill: (): boolean => {
+            throw new Error('gone');
+          },
+        },
+        { isAlive: () => true, retries: 0, sleepSync: () => {} },
+      ),
+    );
   });
 });

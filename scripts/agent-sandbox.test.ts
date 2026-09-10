@@ -5,12 +5,16 @@ import {
   SANDBOX_AUTH_PATH,
   SANDBOX_NETWORK_HOSTS,
   SANDBOX_REPO_DIR,
+  VM_COLLECTOR_TIMEOUT_MS,
+  VM_LOG_TAIL_BYTES,
+  VM_OPENCODE_LOG,
   checkGithubTokenScope,
   clearTokenScopeCache,
   cloneArgs,
   cloneUrl,
   cpAuthArgs,
   createArgs,
+  destroySandbox,
   execArgs,
   hostAuthJsonPath,
   policyArgs,
@@ -21,7 +25,12 @@ import {
   sandboxNameFor,
   secretArgs,
   secretRmArgs,
+  vmLogMtimeArgs,
+  vmLogTailArgs,
   vmProjectEnv,
+  vmSessionListArgs,
+  vmVcsLogArgs,
+  vmVcsStatusArgs,
 } from './agent-sandbox.js';
 
 describe('sbx binary resolution', () => {
@@ -205,5 +214,50 @@ describe('in-VM board env (#140 KD-5)', () => {
       delete process.env['PROJECT_OWNER'];
       clearTokenScopeCache();
     }
+  });
+});
+
+describe('fail-closed destroy (#149 KD-5)', () => {
+  it('returns ok:false with output when the binary is missing', () => {
+    const destroyed = destroySandbox('sbx-missing-bin', 'cycledesign-issue-1');
+    assert.equal(destroyed.ok, false);
+    assert.match(destroyed.output, /stop:/);
+    assert.match(destroyed.output, /rm:/);
+  });
+
+  it('never throws', () => {
+    assert.doesNotThrow(() => destroySandbox('sbx-missing-bin', 'cycledesign-issue-1'));
+  });
+});
+
+describe('VM liveness collectors (#149 KD-4)', () => {
+  it('keeps the VM log path stable (Spike 0 join)', () => {
+    assert.equal(VM_OPENCODE_LOG, '/home/agent/.local/share/opencode/log/opencode.log');
+    assert.equal(VM_COLLECTOR_TIMEOUT_MS, 10_000);
+    assert.equal(VM_LOG_TAIL_BYTES, 64 * 1024);
+  });
+
+  it('tails the VM log with a byte cap', () => {
+    assert.deepEqual(vmLogTailArgs('cycledesign-issue-1'), [
+      'exec',
+      'cycledesign-issue-1',
+      'tail',
+      '-c',
+      String(VM_LOG_TAIL_BYTES),
+      VM_OPENCODE_LOG,
+    ]);
+  });
+
+  it('reads the VM log mtime for pre-first-line recency', () => {
+    assert.deepEqual(vmLogMtimeArgs('cycledesign-issue-1'), ['exec', 'cycledesign-issue-1', 'stat', '-c', '%Y', VM_OPENCODE_LOG]);
+  });
+
+  it('reads VM VCS tip time and worktree status from the in-VM clone', () => {
+    assert.deepEqual(vmVcsLogArgs('cycledesign-issue-1'), ['exec', 'cycledesign-issue-1', 'git', '-C', SANDBOX_REPO_DIR, 'log', '-1', '--format=%ct']);
+    assert.deepEqual(vmVcsStatusArgs('cycledesign-issue-1'), ['exec', 'cycledesign-issue-1', 'git', '-C', SANDBOX_REPO_DIR, 'status', '--porcelain']);
+  });
+
+  it('lists in-VM sessions as JSON (local DB read, no quota)', () => {
+    assert.deepEqual(vmSessionListArgs('cycledesign-issue-1'), ['exec', 'cycledesign-issue-1', 'opencode', 'session', 'list', '--format', 'json']);
   });
 });

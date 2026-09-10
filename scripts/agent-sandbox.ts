@@ -282,11 +282,30 @@ export function provisionSandbox(sbxBin: string, name: string, workdir: string, 
  * Best-effort teardown: stop (may already be stopped) then forced remove,
  * then drop the sandbox-scoped github secret (it outlives `rm`, #129).
  * Never throws; kill paths call this after tree-killing the host client.
+ *
+ * #149 KD-5: returns the teardown status with logged output so callers can
+ * fail closed (a failed destroy suppresses the lease release and parks at
+ * `question` instead of re-queueing a duplicate run behind the orphan).
  */
-export function destroySandbox(sbxBin: string, name: string): void {
-  runSbx(sbxBin, ['stop', name]);
-  runSbx(sbxBin, removeArgs(name));
-  runSbx(sbxBin, secretRmArgs(name));
+export function destroySandbox(sbxBin: string, name: string): { ok: boolean; output: string } {
+  const outputs: string[] = [];
+  let ok = true;
+  const stop = runSbx(sbxBin, ['stop', name]);
+  // `stop` on an already-stopped/missing sandbox is not a destroy failure.
+  if (!stop.ok && !/not found|no such|not running|already stopped/i.test(stop.output)) {
+    ok = false;
+  }
+  outputs.push(`stop: ${stop.output || '(empty)'}`.slice(0, 500));
+  const rm = runSbx(sbxBin, removeArgs(name));
+  if (!rm.ok) {
+    ok = false;
+  }
+  outputs.push(`rm: ${rm.output || '(empty)'}`.slice(0, 500));
+  const secret = runSbx(sbxBin, secretRmArgs(name));
+  // Secret cleanup is best-effort only (a leaked scoped secret does not
+  // orphan a worker); it never flips the destroy status.
+  outputs.push(`secret-rm: ${secret.output || '(empty)'}`.slice(0, 200));
+  return { ok, output: outputs.join('\n') };
 }
 
 /** Best-effort one-liner for the watchdog bundle (never throws). */
@@ -301,4 +320,47 @@ export function sandboxStatus(sbxBin: string, name: string): string {
   } catch {
     return '(sbx status unavailable)';
   }
+}
+
+/**
+ * #149 KD-4: VM-side liveness collectors (Spike 0 report: tmp/spike-149-report.md).
+ *
+ * The worker lives in-VM, so every liveness leg must be VM-side. Each
+ * collector is its own `sbx exec` (a second exec runs concurrently with the
+ * attached worker — proven 494ms; `&`-backgrounding inside one exec does NOT
+ * detach). Steady-state cost ~0.5s each; 10s timeout each (Q9a), async batch.
+ */
+
+// In-VM opencode log: carries `run=<hex>` + `created id=<ses> parentID=` +
+// `session.id=<ses>` — join key is the stdout `sessionID` (Spike 0: 4/4 lines matched).
+export const VM_OPENCODE_LOG = '/home/agent/.local/share/opencode/log/opencode.log';
+
+/** Max bytes per log-tail collection (tail-size cap, Q9a). */
+export const VM_LOG_TAIL_BYTES = 64 * 1024;
+
+/** Per-collector `sbx exec` timeout (Q9a: ~10s; well under 30s WATCHDOG_POLL_MS). */
+export const VM_COLLECTOR_TIMEOUT_MS = 10_000;
+
+/** VM log tail (run-ID/session-ID join + mtime recency). */
+export function vmLogTailArgs(name: string, bytes: number = VM_LOG_TAIL_BYTES): string[] {
+  return ['exec', name, 'tail', '-c', String(bytes), VM_OPENCODE_LOG];
+}
+
+/** VM log mtime (epoch seconds) — recency before the first stdout sessionID. */
+export function vmLogMtimeArgs(name: string): string[] {
+  return ['exec', name, 'stat', '-c', '%Y', VM_OPENCODE_LOG];
+}
+
+/** VM VCS legs: tip commit time (epoch) + worktree dirtiness. */
+export function vmVcsLogArgs(name: string): string[] {
+  return ['exec', name, 'git', '-C', SANDBOX_REPO_DIR, 'log', '-1', '--format=%ct'];
+}
+
+export function vmVcsStatusArgs(name: string): string[] {
+  return ['exec', name, 'git', '-C', SANDBOX_REPO_DIR, 'status', '--porcelain'];
+}
+
+/** Sandbox session-log leg: in-VM session list (local DB read, no LLM/quota). */
+export function vmSessionListArgs(name: string): string[] {
+  return ['exec', name, 'opencode', 'session', 'list', '--format', 'json'];
 }
