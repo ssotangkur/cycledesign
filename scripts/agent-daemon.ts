@@ -43,7 +43,10 @@
  *   (children via the `session.created` → `parentID` map when present).
  *   Unknown event types pass through untagged. Only `type`, `sessionID`,
  *   `part.sessionID` are ever parsed structurally. `--dry-run` prints the
- *   full planned command including `--model`.
+ *   full planned command including `--model`. Every live spawn logs that
+ *   same full command plus a finish/failover `models:` line pairing the
+ *   requested `--model` with the best-effort observed session model(s), so
+ *   a "was it really on Go?" dispute settles from the logs alone.
  * - Sandbox mode (#121): SANDBOX_MODE=1 runs each worker in a disposable
  *   Docker Sandbox microVM via attached `sbx exec` (survives host process
  *   killers like GameGuard). Auth = host auth.json copy, egress =
@@ -175,6 +178,8 @@ interface StreamTracker {
   rootSessionId: string | null;
   parentBySession: Map<string, string>;
   titleBySession: Map<string, string>;
+  /** Best-effort observed model per session (ground truth vs requested `--model`). */
+  modelBySession: Map<string, string>;
 }
 
 function createStreamTracker(nowMs: number): StreamTracker {
@@ -193,6 +198,7 @@ function createStreamTracker(nowMs: number): StreamTracker {
     rootSessionId: null,
     parentBySession: new Map(),
     titleBySession: new Map(),
+    modelBySession: new Map(),
   };
 }
 
@@ -272,10 +278,43 @@ export function plannedSandboxCommand(sbxBin: string, sandboxName: string, comma
 }
 
 /**
+ * Best-effort observed-model extraction. Field paths are not locked (same
+ * caveat as parentID/title above): checks `model`/`modelID` at the top
+ * level and inside a `session` object, combining `providerID` + `modelID`
+ * when both are present. Returns null when nothing model-shaped is found;
+ * callers record it only as an observation, never as control input.
+ */
+export function extractModel(parsed: Record<string, unknown>): string | null {
+  const pick = (record: Record<string, unknown>): string | null => {
+    const provider = typeof record['providerID'] === 'string' ? (record['providerID'] as string) : null;
+    const modelId = typeof record['modelID'] === 'string' ? (record['modelID'] as string) : null;
+    if (provider !== null && modelId !== null) {
+      return `${provider}/${modelId}`;
+    }
+    if (modelId !== null) {
+      return modelId;
+    }
+    const model = typeof record['model'] === 'string' ? (record['model'] as string) : null;
+    return model;
+  };
+  const direct = pick(parsed);
+  if (direct !== null) {
+    return direct;
+  }
+  const session = parsed['session'];
+  if (typeof session === 'object' && session !== null) {
+    return pick(session as Record<string, unknown>);
+  }
+  return null;
+}
+
+/**
  * KD-8: extract the session tag for a raw JSON line. Only `type`,
  * `sessionID`, and `part.sessionID` are parsed structurally; everything else
  * passes through. Maintains the `session.created` → `parentID` map when the
  * envelope carries it; degrades to short-ID tags when it does not.
+ * Also records the best-effort observed model per session (see
+ * `extractModel`) so logs can show requested `--model` vs actual.
  */
 export function tagForLine(rawLine: string, tracker: StreamTracker): string {
   let parsed: Record<string, unknown> | null = null;
@@ -317,6 +356,10 @@ export function tagForLine(rawLine: string, tracker: StreamTracker): string {
       tracker.titleBySession.set(activeSession, title);
     }
   }
+  const observed = extractModel(parsed);
+  if (observed !== null && !tracker.modelBySession.has(activeSession)) {
+    tracker.modelBySession.set(activeSession, observed);
+  }
   if (tracker.rootSessionId === null) {
     tracker.rootSessionId = activeSession;
   }
@@ -349,6 +392,17 @@ export function observeLine(rawLine: string, tracker: StreamTracker): { tag: str
     tracker.lastNonErrorAtMs = Date.now();
   }
   return { tag, cls };
+}
+
+/**
+ * One-line requested-vs-observed model summary for run logs. `observed`
+ * collects the distinct best-effort session models seen on the stream;
+ * `(none observed)` means the CLI never emitted a model-shaped field, so
+ * only the requested `--model` is known.
+ */
+export function modelsSummary(tracker: StreamTracker, requested: string): string {
+  const observed = [...new Set(tracker.modelBySession.values())];
+  return `requested=${requested}; observed=${observed.length > 0 ? observed.join(',') : '(none observed)'}`;
 }
 
 /**
@@ -752,6 +806,12 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
   // into the next run's signal path).
   currentSandbox = sandboxName !== null ? { sbxBin: state.config.sbxBin, name: sandboxName } : null;
   currentLease = lease !== null ? { repo, issueNumber, lease, spawnIso } : null;
+  // Requested-vs-observed model audit: the exact `--model` argv is logged
+  // here; the observed session model(s) are logged at finish/failover, so a
+  // "was it really on Go?" dispute can be settled from the logs alone.
+  console.log(
+    `[agent-daemon] run #${issueNumber} spawn: ${sandbox && sandboxName !== null ? plannedSandboxCommand(state.config.sbxBin, sandboxName, command, issueNumber, model) : plannedCommand(command, issueNumber, model)}`,
+  );
 
   return new Promise((resolve) => {
     let settled = false;
@@ -763,6 +823,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       if (watchdogTimer !== null) {
         clearInterval(watchdogTimer);
       }
+      console.log(`[agent-daemon] run #${issueNumber} models: ${modelsSummary(tracker, model)}`);
       activeChild = null;
       // #127: run context belongs to this finish — clear before the sync
       // lease/sandbox teardown so a signal landing mid-teardown sees null.
@@ -796,7 +857,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       if (settled) {
         return;
       }
-      console.error(`[agent-daemon] gateway-quota detected for #${issueNumber}; failing over to Go`);
+      console.error(`[agent-daemon] gateway-quota detected for #${issueNumber}; ${modelsSummary(tracker, model)}; failing over to Go`);
       if (tracker.firstGatewayLine !== null) {
         console.error(`[agent-daemon] first gateway line: ${tracker.firstGatewayLine}`);
       }
