@@ -3,8 +3,9 @@ import { ValidationPipeline } from './pipeline.js';
 import { injectIds } from '../parser/id-injector.js';
 import { previewManager } from '../preview/preview-manager.js';
 import { getPendingWork, clearPendingWork } from '../llm/work-tracker.js';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import { promises as fs } from 'fs';
+import { SERVER_ROOT, getDesignsDir, getPreviewDir } from '../paths.js';
 
 export interface ValidationError {
   type: string;
@@ -53,9 +54,9 @@ export class ValidationService {
       statusBroadcaster.sendValidationStart(messageId, 'ID injection');
       const injectedCode = injectIds(code, new Set(), filename.replace('.tsx', ''));
 
-      const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-      const filePath = join(workspaceDir, 'designs', filename);
-      await fs.mkdir(join(workspaceDir, 'designs'), { recursive: true });
+      const designsDir = getDesignsDir();
+      const filePath = join(designsDir, filename);
+      await fs.mkdir(designsDir, { recursive: true });
       await fs.writeFile(filePath, injectedCode.code, 'utf-8');
 
       statusBroadcaster.sendValidationComplete(messageId, 'Validation completed successfully');
@@ -74,8 +75,8 @@ export class ValidationService {
 
   async checkDependencies(code: string, filename: string): Promise<ValidationError[]> {
     const pipeline = new ValidationPipeline(
-      join(process.cwd(), 'apps', 'preview'),
-      process.cwd()
+      getPreviewDir(),
+      SERVER_ROOT
     );
     const result = await pipeline.validate(code, filename);
     return result.errors;
@@ -83,12 +84,12 @@ export class ValidationService {
 
   async validateTypeScript(code: string, filename: string): Promise<ValidationError[]> {
     const mod = await import('./typescript.js');
-    return mod.validateTypeScript(code, filename, join(process.cwd(), 'apps', 'preview'));
+    return mod.validateTypeScript(code, filename, getPreviewDir());
   }
 
   async validateESLint(code: string, filename: string): Promise<ValidationError[]> {
     const mod = await import('./eslint.js');
-    return mod.validateESLint(code, filename, join(process.cwd(), 'apps', 'preview'), process.cwd());
+    return mod.validateESLint(code, filename, getPreviewDir(), SERVER_ROOT);
   }
 
   private getPendingWork(messageId: string) {

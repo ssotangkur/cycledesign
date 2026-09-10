@@ -1,7 +1,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { promises as fs } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
+import { getDesignsDir } from '../../paths.js';
 import { applyPatch } from 'diff';
 
 export const editFileSchema = z.object({
@@ -31,8 +32,7 @@ export async function executeEditFile(args: EditFileArgs): Promise<{ success: bo
   try {
     validateFilename(args.filename);
 
-    const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const designsDir = join(workspaceDir, 'designs');
+    const designsDir = getDesignsDir();
     const filePath = join(designsDir, args.filename);
 
     const existingContent = await fs.readFile(filePath, 'utf-8');

@@ -8,6 +8,7 @@ import { previewManager } from './preview/preview-manager.js';
 import https from 'https';
 import { existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
+import { SERVER_ROOT, getDesignsDir, getWorkspaceDir } from './paths.js';
 import { appRouter } from './trpc/trpc.js';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { ProtocolServer } from '@cycledesign/common-protocol';
@@ -32,8 +33,8 @@ const app = express();
 const PORT = resolveServerPort();
 
 // Bootstrap workspace and auto-start preview server
-const WORKSPACE_DIR = join(process.cwd(), '../../workspace');
-const DESIGNS_DIR = join(WORKSPACE_DIR, 'designs');
+const WORKSPACE_DIR = getWorkspaceDir();
+const DESIGNS_DIR = getDesignsDir();
 
 // Create workspace directories
 if (!existsSync(WORKSPACE_DIR)) {
@@ -48,7 +49,7 @@ if (!existsSync(DESIGNS_DIR)) {
 
 // Create a placeholder app.tsx if it doesn't exist
 const appTsXPath = join(DESIGNS_DIR, 'app.tsx');
-const templatePath = join(process.cwd(), 'resources/templates/app.tsx');
+const templatePath = join(SERVER_ROOT, 'resources/templates/app.tsx');
 if (!existsSync(appTsXPath) && existsSync(templatePath)) {
   copyFileSync(templatePath, appTsXPath);
   console.log('[BOOTSTRAP] Created placeholder app.tsx from template');

@@ -341,10 +341,8 @@ export class MessageHandler {
       // Known follow-up (issue #138, KD-6): validation can trigger twice —
       // once in `executeToolCalls` on `submit_work` and again here on any
       // `toolCallsMade`. Kept as-is here; unifying ownership needs a
-      // preview-routing decision. Workspace paths also diverge 3 ways
-      // (tools + validation-service use resolve(cwd,'apps/server/workspace'),
-      // preview-manager uses repo-root `workspace`, server bootstrap uses
-      // join(cwd,'../../workspace')) — unify separately.
+      // preview-routing decision. Workspace paths are unified in
+      // `src/paths.ts` (repo-root `workspace/`, never derived from cwd).
       if (toolCallsMade) {
         const autoMessageId = userMessageId;
 
