@@ -44,7 +44,10 @@ function loadFileConfig(): LocalFileConfig {
   try {
     if (existsSync(LOCAL_CONFIG_FILE())) {
       const data = readFileSync(LOCAL_CONFIG_FILE(), 'utf-8');
-      return JSON.parse(data);
+      const parsed: unknown = JSON.parse(data);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed as LocalFileConfig;
+      }
     }
   } catch (error) {
     console.error('Failed to load Local LLM config:', error);

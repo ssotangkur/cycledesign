@@ -147,8 +147,10 @@ describe('listModels', () => {
   });
 
   it('should send Authorization iff a key is configured', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ id: 'm' }] }), { status: 200 })
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ data: [{ id: 'm' }] }), { status: 200 })
+      )
     );
     vi.stubGlobal('fetch', fetchMock);
     await new LocalProvider('secret-key', 'm', 'http://h/v1').listModels();

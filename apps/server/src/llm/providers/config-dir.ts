@@ -6,7 +6,7 @@
 //
 // Providers must resolve the dir dynamically (call getConfigDir() at each
 // read/write) so E2E runs and CYCLEDESIGN_CONFIG_DIR overrides isolate
-// provider JSON files instead of leaking them into ./​.cycledesign.
+// provider JSON files instead of leaking them into ./.cycledesign.
 import { join } from 'path';
 
 export function getConfigDir(): string {

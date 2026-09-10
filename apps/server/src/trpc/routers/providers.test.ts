@@ -64,7 +64,8 @@ describe('providers router without ENABLE_MOCK_PROVIDER', () => {
   });
 });
 
-describe('providers router with ENABLE_MOCK_PROVIDER=true', () => {  beforeEach(() => {
+describe('providers router with ENABLE_MOCK_PROVIDER=true', () => {
+  beforeEach(() => {
     process.env.ENABLE_MOCK_PROVIDER = 'true';
   });
 
