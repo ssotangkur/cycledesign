@@ -31,6 +31,13 @@ There is no silent exit, no partial completion, no asking the user directly.
   npx tsx scripts/agent-project.ts --issue <N> --status "Blocked"  # blocked
   ```
 - **Max 3 fix loops.** If implement → wrap-up cycles 3 times without green CI, escalate to Blocked instead of looping forever.
+- **Task session resume (`task_id`) — Phase 2/3 outer sessions only.** Track `implementer_task_id` and `wrapup_task_id` separately across fix loops:
+  - First spawn of each role omits `task_id`. Extract it from the sub-agent return wrapper (`<task id="...">`) on every Phase 2 / Phase 3 return and store per role.
+  - On retry, resume the same session: `Task(..., task_id=<implementer_task_id>)` for the implementer, `Task(..., task_id=<wrapup_task_id>)` for wrap-up. Always resume within the 3-loop cap — the cap is the bloat bound.
+  - Never cross roles: never pass one role's ID to the other.
+  - Phase 1 (branch) and Phase 4 (pr-creator) always spawn fresh — never track or pass `task_id` for them. Inner adversarial `review` inside wrap-up always spawns fresh — never resume it, even when the outer wrap-up session resumes (fresh context keeps findings from anchoring on author reasoning).
+  - If a return's `branch` differs from the tracked branch, discard its `task_id` and fresh-spawn.
+  - Fallback to fresh spawn (and overwrite the tracked ID with the new return's `task_id`) when `task_id` is missing, the resumed `Task` call errors/times out, or the return reports stalled/wedged. Never treat a missing `task_id` as BLOCKED.
 
 ## Inputs
 
@@ -101,11 +108,12 @@ Return contract:
 status: DONE|BLOCKED
 branch: <branch>
 commits: <list of SHAs/messages>
+task_id: <your session task ID from the <task id="..."> wrapper — required after first spawn, used to resume this session on retry>
 blocked_reason: <only if BLOCKED — what is unclear, what you tried, what you need>"
 ```
 
 - BLOCKED → Phase 5.
-- DONE → Phase 3.
+- DONE → Phase 3. Record `implementer_task_id` from the return's `task_id` for potential resume.
 
 ### Phase 3 — Wrap-up (delegate)
 
@@ -122,12 +130,17 @@ commit: <final SHA, all checks green on this SHA>
 validation: <npm run validate result>
 tests: <unit + E2E summary>
 unresolved_findings: <each with kind tags, file:line, why not fixed — empty if none>
+task_id: <your session task ID from the <task id="..."> wrapper — required after first spawn, used to resume this session on retry>
 blocked_reason: <only if BLOCKED>"
 ```
 
-- Retry policy: if BLOCKED but the reason looks fixable by re-implementation (failing test, lint, review `correctness` issue), you may loop Phase 2 → Phase 3 up to 3 total attempts. Pass the `blocked_reason`/`unresolved_findings` as context to the next implementer.
+- Retry policy: if BLOCKED but the reason looks fixable by re-implementation (failing test, lint, review `correctness` issue), you may loop Phase 2 → Phase 3 up to 3 total attempts.
+  - Implementer retry resumes the same session via `Task(..., task_id=<implementer_task_id>)` with a bounded follow-up prompt: only the latest wrap-up `blocked_reason`/`unresolved_findings` + target branch/SHA — never full history (the resumed session already holds it).
+  - Wrap-up retry resumes the same session via `Task(..., task_id=<wrapup_task_id>)` with a bounded follow-up prompt: only the latest implementer commit + branch — never full history.
+  - Wedge fallback (return/error-based, never polling): abandon the tracked `task_id` and fresh-spawn once (overwriting the tracked ID with the new return) when the resumed `Task` call errors/times out or the sub-agent return reports stalled/wedged with a log tail. Use a fresh implementer instead of resume when the retry needs a fundamentally different approach or the branch changed.
+  - Pass the `blocked_reason`/`unresolved_findings` as context to the next implementer.
 - If attempts exhausted or reason needs human judgment → Phase 5.
-- DONE → Phase 4. Preserve `unresolved_findings` verbatim for the PR.
+- DONE → Phase 4. Preserve `unresolved_findings` verbatim for the PR. Record `wrapup_task_id` from the return's `task_id` for potential resume.
 
 ### Phase 4 — PR (delegate, then label)
 
