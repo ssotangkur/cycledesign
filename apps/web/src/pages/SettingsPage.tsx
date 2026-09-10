@@ -25,6 +25,10 @@ export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
+  const [baseURLInput, setBaseURLInput] = useState('');
+  const [baseURLTouched, setBaseURLTouched] = useState(false);
+  const [customModelInput, setCustomModelInput] = useState('');
+  const [customModelTouched, setCustomModelTouched] = useState(false);
 
   const { data: providersData, isLoading: loadingProviders } = trpc.providerConfig.list.useQuery();
   const { data: configData, isLoading: loadingConfig } = trpc.providerConfig.getConfig.useQuery();
@@ -51,6 +55,19 @@ export default function SettingsPage() {
   const saving = updateConfigMutation.isPending;
 
   const currentProvider = providersData?.find((p) => p.name === configData?.provider);
+  const isLocal = configData?.provider === 'local';
+
+  // Local Base URL / custom model fields sync from server config until edited.
+  useEffect(() => {
+    if (isLocal && !baseURLTouched) {
+      setBaseURLInput(configData?.baseURL || '');
+    }
+  }, [isLocal, configData?.baseURL, baseURLTouched]);
+  useEffect(() => {
+    if (isLocal && !customModelTouched) {
+      setCustomModelInput(configData?.model || '');
+    }
+  }, [isLocal, configData?.model, customModelTouched]);
 
   const showPlaceholder = configData?.hasApiKey && !apiKeyTouched;
   const apiKeyDisplayValue = loadingConfig
@@ -62,6 +79,9 @@ export default function SettingsPage() {
   const handleProviderChange = (provider: string) => {
     // Update provider - this will trigger the models query to refetch via the enabled flag
     updateConfigMutation.mutate({ provider });
+    // Let local fields resync from server config when (re-)selecting local.
+    setBaseURLTouched(false);
+    setCustomModelTouched(false);
   };
 
   const handleModelChange = (model: string) => {
@@ -82,13 +102,31 @@ export default function SettingsPage() {
     });
   };
 
+  const handleSaveBaseURL = () => {
+    if (!baseURLInput.trim()) return;
+    updateConfigMutation.mutate({ baseURL: baseURLInput.trim() });
+  };
+
+  const handleSaveCustomModel = () => {
+    if (!customModelInput.trim()) return;
+    // Custom text wins over the dropdown for local registries whose
+    // /models catalog lags or 404s.
+    updateConfigMutation.mutate({ model: customModelInput.trim() });
+  };
+
   const handleRetryModels = () => {
     refetchModels();
   };
 
-  // Reset model selection when provider changes (model IDs are provider-specific)
+  // Reset model selection when provider changes (model IDs are provider-specific).
+  // Local is exempt: it has no default model and must never auto-pin one
+  // (explicit choice — a wrong pin could select a non-tool-calling model).
   const previousProviderRef = useRef(configData?.provider);
   useEffect(() => {
+    if (isLocal) {
+      previousProviderRef.current = configData?.provider;
+      return;
+    }
     if (modelsData && modelsData.length > 0 && configData?.model) {
       // Check if current model is valid for the new provider
       const isValidModel = modelsData.some((m) => m.id === configData.model);
@@ -102,7 +140,7 @@ export default function SettingsPage() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelsData, configData?.model, configData?.provider]);
+  }, [modelsData, configData?.model, configData?.provider, isLocal]);
 
   if (loading) {
     return (
@@ -152,16 +190,18 @@ export default function SettingsPage() {
             </Select>
           </FormControl>
 
-          {currentProvider?.requiresApiKey && (
+          {(currentProvider?.requiresApiKey || isLocal) && (
             <>
               <TextField
-                label="API Key"
+                label={isLocal ? 'API Key (optional)' : 'API Key'}
                 type="password"
                 value={apiKeyDisplayValue}
                 onChange={(e) => handleApiKeyChange(e.target.value)}
                 placeholder={configData?.hasApiKey
                   ? 'API key is configured. Enter new key to update.'
-                  : `Enter your ${currentProvider.displayName} API key`}
+                  : isLocal
+                    ? 'Only needed if your server requires one (e.g. vLLM --api-key)'
+                    : `Enter your ${currentProvider.displayName} API key`}
                 fullWidth
                 InputLabelProps={{ shrink: true }}
               />
@@ -175,13 +215,42 @@ export default function SettingsPage() {
             </>
           )}
 
+          {isLocal && (
+            <>
+              <TextField
+                label="Base URL"
+                value={baseURLInput}
+                onChange={(e) => {
+                  setBaseURLTouched(true);
+                  setBaseURLInput(e.target.value);
+                }}
+                placeholder="http://localhost:11434/v1"
+                helperText="Ollama default http://localhost:11434/v1 · LM Studio http://localhost:1234/v1"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                data-testid="base-url-input"
+              />
+              <Button
+                variant="contained"
+                onClick={handleSaveBaseURL}
+                disabled={saving || !baseURLInput.trim()}
+              >
+                {saving ? 'Saving...' : 'Save Base URL'}
+              </Button>
+            </>
+          )}
+
           <FormControl fullWidth error={!!modelsError}>
             <InputLabel>Model</InputLabel>
             <Select
               value={
-                modelsData?.some((m) => m.id === configData?.model)
-                  ? configData?.model
-                  : modelsData?.[0]?.id || ''
+                isLocal
+                  ? (modelsData?.some((m) => m.id === configData?.model)
+                    ? configData?.model
+                    : '')
+                  : (modelsData?.some((m) => m.id === configData?.model)
+                    ? configData?.model
+                    : modelsData?.[0]?.id || '')
               }
               label="Model"
               onChange={(e) => handleModelChange(e.target.value)}
@@ -198,7 +267,9 @@ export default function SettingsPage() {
                 </MenuItem>
               ) : !modelsData || modelsData.length === 0 ? (
                 <MenuItem value="" disabled>
-                  {configData?.hasApiKey ? 'No models available' : 'Provide API key to see models'}
+                  {isLocal
+                    ? 'No models found — enter a model ID manually'
+                    : configData?.hasApiKey ? 'No models available' : 'Provide API key to see models'}
                 </MenuItem>
               ) : (
                 modelsData.map((model) => (
@@ -209,6 +280,31 @@ export default function SettingsPage() {
               )}
             </Select>
           </FormControl>
+
+          {isLocal && (
+            <>
+              <TextField
+                label="Custom model ID"
+                value={customModelInput}
+                onChange={(e) => {
+                  setCustomModelTouched(true);
+                  setCustomModelInput(e.target.value);
+                }}
+                placeholder="e.g. llama3.1:8b"
+                helperText="Custom text wins over the dropdown — use when /models lags or is unreachable"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                data-testid="custom-model-input"
+              />
+              <Button
+                variant="contained"
+                onClick={handleSaveCustomModel}
+                disabled={saving || !customModelInput.trim()}
+              >
+                {saving ? 'Saving...' : 'Save Model'}
+              </Button>
+            </>
+          )}
           
           {/* Error state with retry option */}
           {modelsError && (
