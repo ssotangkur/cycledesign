@@ -166,6 +166,31 @@ with an idle child tree = idle.
 | `vitest run` (should-exit runner) alive, silent, no server | `wedged` open-handle variant (#109 third hang) |
 | Foreground server held under CLI | `wedged` foreground-server variant (#104 shape; note #110: now preventable — wrap-up forbids foreground boots, so a fresh occurrence means the run bypassed the skill) |
 
+### #149 daemon predicate (conjunctive VM-side liveness, no CPU)
+
+Root stdout buffers nested-`Task` output until `Task`-end inside ONE
+`tool_use` envelope (proven by live Go-model probe: 7 lines, one root
+sessionID, zero mid-`Task` lines — see `scripts/agent-daemon-nested-task.fixture.jsonl`),
+so stdout silence during a `Task` phase is normal, NOT evidence of stuckness.
+`opencode.log` (`created parentID` edges + `mode=subagent` streams) is the
+authoritative interleaved sub-agent source.
+
+In `sandboxMode` the daemon fires only when ALL legs are idle for the full
+window — no non-error stdout lines AND VM log-tail stalled
+(`/home/agent/.local/share/opencode/log/opencode.log` via `sbx exec`,
+`sessionID` ↔ `session.id`/`created id=` join; Spike 0: `tmp/spike-149-report.md`)
+AND no VM branch/commit activity AND sandbox session-log tail stalled AND the
+worker-tree busy-vote cold. Host file/VCS is ignored in `sandboxMode`.
+CPU-rate is excluded from the daemon predicate entirely (sampling is not a
+reliable activity proxy — false positives both ways); the skill's §7 CPU-rate
+rule above is unchanged and still applies to MANUAL diagnosis. Byte chunks
+stay diagnostic-only (#104 had 0B pending).
+
+Any collector error suppresses the fire (fail-closed, Q9a) with per-signal
+suppression reasons logged at heartbeat cadence, so fail-closed silence stays
+visible. The tree is a busy-vote only: a hot tree (recent spawn/churn)
+suppresses, otherwise it is neutral — a live-but-idle tree still fires (#109).
+
 ### Output contract — literal template
 
 Post exactly this (fixed headings so #107 can consume it):
@@ -198,6 +223,18 @@ further up the wrapper chain (`concurrently`/npm, `shell:true` per
 scripts/agent-daemon.ts:103-108 — note orphan risk), and only killing the
 CLI worked. So: hung test/child process → wrapper chain
 (`concurrently`/npm) → CLI last.
+
+Daemon kill order (#149 KD-5, strict + fail-closed): the daemon tree-kills
+(with post-kill verification + retry — `treeKillVerified` in
+scripts/agent-tree-kill.ts) → verifies tree death → `destroySandbox` (now
+returning `{ok, output}`) BEFORE fence-check/label-reset, leaf→wrapper→CLI.
+The daemon's atomic mechanism is `taskkill /PID /T /F` (win32) or process-group
+`SIGKILL` (posix) — the child-first walk above is the MANUAL equivalent for
+diagnosis sessions; both serve the same leaf-first intent. A failed destroy
+suppresses the lease release and parks at `question` (never reset to ready —
+a blind reset would re-queue a duplicate run behind the orphan), with a
+manual-reset hint in the log. Sandbox kills always destroy (killing the host
+`sbx.exe` client alone orphans the in-VM worker).
 
 ## Appendix — synthetic fixtures (deterministic)
 
