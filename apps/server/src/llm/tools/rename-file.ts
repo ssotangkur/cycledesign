@@ -1,7 +1,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { promises as fs } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
+import { getDesignsDir } from '../../paths.js';
 
 export const renameFileSchema = z.object({
   oldFilename: z
@@ -31,8 +32,7 @@ export async function executeRenameFile(args: RenameFileArgs): Promise<{ success
     validateFilename(args.oldFilename);
     validateFilename(args.newFilename);
 
-    const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const designsDir = join(workspaceDir, 'designs');
+    const designsDir = getDesignsDir();
     const oldPath = join(designsDir, args.oldFilename);
     const newPath = join(designsDir, args.newFilename);
 

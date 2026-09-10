@@ -1,6 +1,7 @@
 import { statusBroadcaster } from '../features/status/StatusBroadcaster.js';
 import { promises as fs } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
+import { getDesignsDir } from '../paths.js';
 import {
   executeCreateFile,
   executeEditFile,
@@ -33,8 +34,7 @@ function truncateForLog(value: unknown): string {
 }
 
 function workspaceFilePath(filename: string): string {
-  const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-  return join(workspaceDir, 'designs', filename);
+  return join(getDesignsDir(), filename);
 }
 
 async function fileSizeOrFallback(filePath: string, fallback?: number): Promise<number | undefined> {

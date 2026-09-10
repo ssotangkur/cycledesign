@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { join } from 'path';
+import { getPreviewDir } from '../../paths.js';
 import { trackDependency } from '../work-tracker.js';
 
 const execAsync = promisify(exec);
@@ -21,7 +21,7 @@ export type AddDependencyArgs = z.infer<typeof addDependencySchema>;
 
 export async function executeAddDependency(args: AddDependencyArgs, messageId?: string): Promise<{ success: boolean; packageName?: string; version?: string; error?: string }> {
   try {
-    const previewDir = join(process.cwd(), 'apps', 'preview');
+    const previewDir = getPreviewDir();
     const packageSpec = args.version ? `${args.packageName}@${args.version}` : args.packageName;
 
     await execAsync(`npm install ${packageSpec}`, {

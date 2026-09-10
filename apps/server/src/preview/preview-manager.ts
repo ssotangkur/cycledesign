@@ -1,20 +1,15 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { existsSync, copyFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
-import { resolve, join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { resolve, join } from 'path';
 import { PreviewServerStatus, LogEntry, StartOptions, RestartOptions, ServerState } from './types.js';
 import { resolvePreviewPort } from '../ports.js';
+import { SERVER_ROOT, getDesignsDir, getPreviewDir } from '../paths.js';
 
-// Get directory name in ES module scope
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Paths are relative to the server root (apps/server)
-const SERVER_ROOT = resolve(__dirname, '../..');
-const WORKSPACE_DIR = resolve(SERVER_ROOT, '../../workspace');
-const DESIGNS_DIR = resolve(WORKSPACE_DIR, 'designs');
-const PREVIEW_DIR = resolve(SERVER_ROOT, '../preview');
+// Paths are anchored to the server package root via src/paths.ts so they
+// hold regardless of process.cwd() (dev runs with cwd apps/server).
+const DESIGNS_DIR = getDesignsDir();
+const PREVIEW_DIR = getPreviewDir();
 const TEMPLATE_PATH = resolve(SERVER_ROOT, 'resources/templates/app.tsx');
 const MAX_LOG_BUFFER = 100;
 

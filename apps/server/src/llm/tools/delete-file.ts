@@ -1,7 +1,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { promises as fs } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
+import { getDesignsDir } from '../../paths.js';
 
 export const deleteFileSchema = z.object({
   filename: z
@@ -27,8 +28,7 @@ export async function executeDeleteFile(args: DeleteFileArgs): Promise<{ success
   try {
     validateFilename(args.filename);
 
-    const workspaceDir = process.env.WORKSPACE_DIR || resolve(process.cwd(), 'apps', 'server', 'workspace');
-    const designsDir = join(workspaceDir, 'designs');
+    const designsDir = getDesignsDir();
     const filePath = join(designsDir, args.filename);
 
     await fs.unlink(filePath);
