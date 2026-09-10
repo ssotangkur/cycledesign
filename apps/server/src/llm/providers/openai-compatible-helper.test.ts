@@ -1,8 +1,39 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { withDynamicHeaders, createGatewayModel } from './openai-compatible-helper.js';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import {
+  withDynamicHeaders,
+  createGatewayModel,
+  OPENROUTER_BASE_URL,
+  OPENROUTER_APP_REFERER,
+  OPENROUTER_APP_TITLE,
+} from './openai-compatible-helper.js';
+
+vi.mock('@ai-sdk/openai-compatible', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@ai-sdk/openai-compatible')>();
+  return {
+    ...original,
+    createOpenAICompatible: vi.fn((options: unknown) => {
+      const real = (original as unknown as { createOpenAICompatible: (o: unknown) => { chatModel: (m: string) => unknown } })
+        .createOpenAICompatible(options);
+      const originalChatModel = real.chatModel.bind(real);
+      return {
+        ...real,
+        chatModel: vi.fn((modelId: string) => {
+          const model = originalChatModel(modelId) as unknown as Record<string, unknown>;
+          // Preserve V3 shape for the dynamicHeaders probe while staying mockable
+          // for header-regression assertions.
+          return { specificationVersion: 'v3', ...model, modelId };
+        }),
+      };
+    }),
+  };
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
 });
 
 function stubFetch() {
@@ -75,5 +106,43 @@ describe('createGatewayModel with dynamicHeaders', () => {
     const shape = model as unknown as { modelId: string; specificationVersion: string };
     expect(shape.modelId).toBe('openrouter/free');
     expect(shape.specificationVersion).toBe('v3');
+  });
+});
+
+// Header regression (KD-2): the helper injects no default headers. OpenRouter
+// attribution is passed explicitly by its call site; local passes none and
+// omits apiKey when keyless so no Authorization header is sent.
+describe('createGatewayModel header behavior', () => {
+  it('should forward explicit OpenRouter attribution headers', async () => {
+    const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
+    createGatewayModel({
+      apiKey: 'test-key',
+      model: 'openrouter/free',
+      headers: {
+        'HTTP-Referer': OPENROUTER_APP_REFERER,
+        'X-Title': OPENROUTER_APP_TITLE,
+      },
+    });
+    expect(createOpenAICompatible).toHaveBeenCalledWith({
+      baseURL: OPENROUTER_BASE_URL,
+      name: 'openrouter',
+      apiKey: 'test-key',
+      headers: {
+        'HTTP-Referer': OPENROUTER_APP_REFERER,
+        'X-Title': OPENROUTER_APP_TITLE,
+      },
+    });
+  });
+
+  it('should send no headers and no apiKey for a keyless local server', async () => {
+    const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
+    createGatewayModel({ baseURL: 'http://localhost:11434/v1', name: 'local', model: 'llama3.1:8b' });
+    expect(createOpenAICompatible).toHaveBeenCalledWith({
+      baseURL: 'http://localhost:11434/v1',
+      name: 'local',
+    });
+    const call = vi.mocked(createOpenAICompatible).mock.calls[0][0] as Record<string, unknown>;
+    expect(call).not.toHaveProperty('headers');
+    expect(call).not.toHaveProperty('apiKey');
   });
 });
