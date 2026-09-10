@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Polling-first daemon that watches issue labels and invokes the right
- * fire-and-forget skill via the opencode CLI, resuming after each run.
+ * Polling-first daemon that watches the Project board `Status` field first
+ * (#146) and issue labels as fallback, invoking the right fire-and-forget
+ * skill via the opencode CLI, resuming after each run.
  *
  * Free-tier-first with failover to Go on gateway-quota and probe-based
  * failback (#107):
@@ -63,6 +64,13 @@
  *   "ready to plan"      -> gh-plan-with-reason
  *   "ready to implement" -> resolve-issue
  *
+ * Status is the source of truth for claimable work (#146): Project Status
+ * `Ready to plan` / `Ready to implement` triggers the same commands (see
+ * `agent-daemon-board.ts`). Each pass unions the board read with the label
+ * poll (board wins ties, downstream-most wins conflicts); a board-claimable
+ * issue missing its trigger label gets the label added back (fence-gated,
+ * add-only reconcile) before claiming.
+ *
  * "question" / "pr ready" are terminal and never re-triggered (not polled).
  * The daemon owns the lease (#132): it swaps trigger -> in-progress at
  * spawn and swaps back on every finish path unless the worker reached a
@@ -101,6 +109,12 @@ import {
   vmProjectEnv,
 } from './agent-sandbox.js';
 import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease, type IssueLease } from './agent-daemon-lease.js';
+import {
+  decideReconcile,
+  listClaimableByStatus,
+  mergeClaimableRuns,
+  type BoardHydratedIssue,
+} from './agent-daemon-board.js';
 import { checkProjectRead, projectNumber, projectOwner, syncStatusForLabelDetailed } from './agent-project.js';
 import { tryReturnToMain } from './agent-daemon-return-main.js';
 import { treeKill } from './agent-tree-kill.js';
@@ -144,12 +158,6 @@ interface ListedIssue {
   number: number;
   title: string;
   createdAt: string;
-}
-
-interface PlannedRun {
-  issue: ListedIssue;
-  label: string;
-  command: string;
 }
 
 interface DaemonState {
@@ -252,19 +260,38 @@ function listIssues(repo: string, label: string): ListedIssue[] {
 }
 
 /**
- * Merge both label lists client-side: sort oldest-first by issue number,
- * dedupe by number within a pass. An issue carrying both labels is processed
- * once as "ready to implement" (downstream-most state wins).
+ * #146 KD-4: hydrate a board-only candidate via `gh issue view` to confirm
+ * it is still OPEN and to fill `planPass`'s `{number,title,createdAt}` shape.
+ * Returns null on any failure (fail-soft: the caller skips the candidate).
  */
-function planPass(planIssues: ListedIssue[], implementIssues: ListedIssue[]): PlannedRun[] {
-  const byNumber = new Map<number, PlannedRun>();
-  for (const issue of planIssues) {
-    byNumber.set(issue.number, { issue, label: LABEL_PLAN, command: COMMANDS[LABEL_PLAN] });
+function hydrateIssue(repo: string, issueNumber: number): { state: string; title: string; createdAt: string; labels: string[] } | null {
+  const result = spawnSync(
+    'gh',
+    ['issue', 'view', String(issueNumber), '--repo', repo, '--json', 'state,title,labels,createdAt'],
+    { encoding: 'utf8' },
+  );
+  if (result.error || result.status !== 0) {
+    return null;
   }
-  for (const issue of implementIssues) {
-    byNumber.set(issue.number, { issue, label: LABEL_IMPLEMENT, command: COMMANDS[LABEL_IMPLEMENT] });
+  try {
+    const parsed = JSON.parse(result.stdout || '{}') as {
+      state?: string;
+      title?: string;
+      createdAt?: string;
+      labels?: Array<{ name?: string } | string>;
+    };
+    if (typeof parsed.state !== 'string' || typeof parsed.createdAt !== 'string') {
+      return null;
+    }
+    return {
+      state: parsed.state,
+      title: parsed.title ?? '',
+      createdAt: parsed.createdAt,
+      labels: (parsed.labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? ''))).filter((l) => l !== ''),
+    };
+  } catch {
+    return null;
   }
-  return [...byNumber.values()].sort((a, b) => a.issue.number - b.issue.number);
 }
 
 /** KD-2: every spawn gets an explicit `--model`; dry-run shows it. */
@@ -1231,17 +1258,96 @@ async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckS
     return;
   }
 
-  const runs = planPass(planIssues, implementIssues);
+  // #146 KD-2: board-first Status read, labels as fallback (never
+  // Status-exclusive). A failed board read logs at error level and the pass
+  // continues label-only (KD-5 fail-soft).
+  const boardHydrated: BoardHydratedIssue[] = [];
+  const boardRead = listClaimableByStatus(repo);
+  if (!boardRead.ok) {
+    console.error(
+      `[agent-daemon] project board read failed [step: ${boardRead.step}] [kind: ${boardRead.kind}] ${boardRead.stderr}; continuing with labels only`,
+    );
+  } else {
+    const known = new Set<number>([...planIssues, ...implementIssues].map((issue) => issue.number));
+    for (const candidate of boardRead.candidates) {
+      if (known.has(candidate.number)) {
+        continue;
+      }
+      // KD-4: board-only hits must still be OPEN (item-list returns Done and
+      // closed items too, while issue list is open-only).
+      const hydrated = hydrateIssue(repo, candidate.number);
+      if (hydrated === null) {
+        console.warn(`[agent-daemon] board candidate #${candidate.number} (${candidate.status}) unreadable; skipping`);
+        continue;
+      }
+      if (hydrated.state !== 'OPEN') {
+        continue;
+      }
+      boardHydrated.push({
+        number: candidate.number,
+        title: hydrated.title !== '' ? hydrated.title : candidate.title,
+        createdAt: hydrated.createdAt,
+        status: candidate.status,
+        labels: hydrated.labels,
+      });
+    }
+  }
+
+  const runs = mergeClaimableRuns(planIssues, implementIssues, boardHydrated);
   if (runs.length === 0) {
-    console.log('[agent-daemon] no labeled issues found');
+    console.log('[agent-daemon] no claimable issues found');
     return;
   }
 
+  const passIso = new Date().toISOString();
   let lastHealReturned = false;
   for (const run of runs) {
     // A respawned failover run re-enters here on the next pass via its reset label.
     const model = modelForRun(state);
-    console.log(`[agent-daemon] claiming issue #${run.issue.number} ("${run.issue.title}") via ${run.command} [label: ${run.label}] [model: ${model}] [stuck-timeout: ${state.config.stuckTimeoutS}s]`);
+    let boardSuffix = run.boardStatus !== null ? ` [board: ${run.boardStatus}]` : '';
+    // #146 KD-3: fence-gated add-only reconcile. A board-claimable run whose
+    // trigger label is absent gets the label ADDED (plus its Status mirror);
+    // nothing is ever removed here. Label-list runs already carry their
+    // trigger and skip this entirely.
+    if (run.boardStatus !== null && run.liveLabels !== null && !run.liveLabels.includes(run.label)) {
+      const decision = decideReconcile(run.boardStatus, run.liveLabels, dryRun);
+      if (decision.action === 'suppressed') {
+        console.log(`[agent-daemon] reconcile suppressed for #${run.issue.number} (terminal label present); skipping this pass`);
+        continue;
+      } else if (decision.action === 'would-reconcile') {
+        boardSuffix += ` [would-reconcile: ${decision.label}]`;
+      } else if (decision.action === 'add') {
+        const fence = checkFencing(repo, run.issue.number, passIso);
+        if (isFenceTransportFailure(fence)) {
+          console.error(`[agent-daemon] reconcile fence unavailable for #${run.issue.number}; skipping this pass`);
+          continue;
+        }
+        const fresh = decideReconcile(run.boardStatus, fence.labels, false);
+        if (fresh.action === 'suppressed' || fence.terminalCommentSince) {
+          console.log(`[agent-daemon] reconcile suppressed for #${run.issue.number} on fresh fence; skipping this pass`);
+          continue;
+        }
+        if (fresh.action === 'add') {
+          const edit = spawnSync(
+            'gh',
+            ['issue', 'edit', String(run.issue.number), '--repo', repo, '--add-label', decision.label],
+            { encoding: 'utf8' },
+          );
+          if (edit.error || edit.status !== 0) {
+            console.error(`[agent-daemon] reconcile label add failed for #${run.issue.number}; skipping this pass`);
+            continue;
+          }
+          const mirror = syncStatusForLabelDetailed(repo, run.issue.number, decision.label);
+          if (mirror.result === 'failed') {
+            console.warn(
+              `[agent-daemon] project Status mirror failed for #${run.issue.number} (${decision.label}) [step: ${mirror.step}] [kind: ${mirror.kind}] ${mirror.stderr}`,
+            );
+          }
+          boardSuffix += ` [reconciled: ${decision.label}]`;
+        }
+      }
+    }
+    console.log(`[agent-daemon] claiming issue #${run.issue.number} ("${run.issue.title}") via ${run.command} [label: ${run.label}] [model: ${model}] [stuck-timeout: ${state.config.stuckTimeoutS}s]${boardSuffix}`);
     const outcome = await runSkill(run.command, run.issue.number, { dryRun, model, repo, state });
     console.log(
       `[agent-daemon] completed issue #${run.issue.number} via ${run.command} exit code ${outcome.code} [model: ${model}]${outcome.detail !== null ? ` (${outcome.detail})` : ''}`,
