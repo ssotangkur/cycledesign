@@ -2,11 +2,11 @@ import { createMistral, type MistralProvider as AISDKMistralProvider } from '@ai
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { BaseProvider, type AgentConfig } from './base-provider.js';
+import { getConfigDir } from './config-dir.js';
 import { IProviderConfig } from '../types.js';
 
-const CONFIG_DIR = join(process.cwd(), '.cycledesign');
-const MISTRAL_CONFIG_FILE = join(CONFIG_DIR, 'mistral.json');
-const MISTRAL_KEY_FILE = join(CONFIG_DIR, 'mistral-api-key');
+const MISTRAL_CONFIG_FILE = () => join(getConfigDir(), 'mistral.json');
+const MISTRAL_KEY_FILE = () => join(getConfigDir(), 'mistral-api-key');
 
 interface MistralConfig {
   apiKey?: string;
@@ -14,21 +14,22 @@ interface MistralConfig {
 }
 
 function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+  const dir = getConfigDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
 }
 
 function loadConfig(): MistralConfig {
   try {
     // First try new config file
-    if (existsSync(MISTRAL_CONFIG_FILE)) {
-      const data = readFileSync(MISTRAL_CONFIG_FILE, 'utf-8');
+    if (existsSync(MISTRAL_CONFIG_FILE())) {
+      const data = readFileSync(MISTRAL_CONFIG_FILE(), 'utf-8');
       return JSON.parse(data);
     }
     // Fallback to legacy key file for backwards compatibility
-    if (existsSync(MISTRAL_KEY_FILE)) {
-      const apiKey = readFileSync(MISTRAL_KEY_FILE, 'utf-8').trim();
+    if (existsSync(MISTRAL_KEY_FILE())) {
+      const apiKey = readFileSync(MISTRAL_KEY_FILE(), 'utf-8').trim();
       if (apiKey) {
         return { apiKey };
       }
@@ -96,7 +97,7 @@ export class MistralProvider extends BaseProvider {
       ...(config.apiKey ? { apiKey: config.apiKey } : {}),
       ...(config.model ? { model: config.model } : {}),
     };
-    writeFileSync(MISTRAL_CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+    writeFileSync(MISTRAL_CONFIG_FILE(), JSON.stringify(newConfig, null, 2));
   }
 
   static name(): string {

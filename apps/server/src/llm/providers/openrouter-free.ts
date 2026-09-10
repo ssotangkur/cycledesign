@@ -2,7 +2,12 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { LanguageModel } from 'ai';
 import { BaseProvider, type AgentConfig } from './base-provider.js';
-import { createGatewayModel } from './openai-compatible-helper.js';
+import {
+  createGatewayModel,
+  OPENROUTER_APP_REFERER,
+  OPENROUTER_APP_TITLE,
+} from './openai-compatible-helper.js';
+import { getConfigDir } from './config-dir.js';
 import { RateLimitError } from '../errors.js';
 import { IProviderConfig, LLMResponse } from '../types.js';
 
@@ -17,8 +22,7 @@ import { IProviderConfig, LLMResponse } from '../types.js';
 export const OPENROUTER_FREE_MODEL_ID = 'openrouter/free';
 export const OPENROUTER_FREE_DISPLAY_NAME = 'OpenRouter Free (auto-router)';
 
-const CONFIG_DIR = join(process.cwd(), '.cycledesign');
-const OPENROUTER_FREE_CONFIG_FILE = join(CONFIG_DIR, 'openrouter-free.json');
+const OPENROUTER_FREE_CONFIG_FILE = () => join(getConfigDir(), 'openrouter-free.json');
 
 interface OpenRouterFreeFileConfig {
   apiKey?: string;
@@ -31,15 +35,16 @@ export interface OpenRouterFreeResolvedConfig {
 }
 
 function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+  const dir = getConfigDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
 }
 
 function loadFileConfig(): OpenRouterFreeFileConfig {
   try {
-    if (existsSync(OPENROUTER_FREE_CONFIG_FILE)) {
-      const data = readFileSync(OPENROUTER_FREE_CONFIG_FILE, 'utf-8');
+    if (existsSync(OPENROUTER_FREE_CONFIG_FILE())) {
+      const data = readFileSync(OPENROUTER_FREE_CONFIG_FILE(), 'utf-8');
       return JSON.parse(data);
     }
   } catch (error) {
@@ -94,7 +99,14 @@ export class OpenRouterFreeProvider extends BaseProvider {
         'OPENROUTER_API_KEY is not set. Add it in Settings or via the OPENROUTER_API_KEY environment variable to use OpenRouter Free.'
       );
     }
-    return createGatewayModel({ apiKey: this.apiKey, model: this.model });
+    return createGatewayModel({
+      apiKey: this.apiKey,
+      model: this.model,
+      headers: {
+        'HTTP-Referer': OPENROUTER_APP_REFERER,
+        'X-Title': OPENROUTER_APP_TITLE,
+      },
+    });
   }
 
   // No beforeComplete override: inherit base SDK retry defaults. No
@@ -144,7 +156,7 @@ export class OpenRouterFreeProvider extends BaseProvider {
       ...(config.apiKey ? { apiKey: config.apiKey } : {}),
       ...(config.model ? { model: config.model } : {}),
     };
-    writeFileSync(OPENROUTER_FREE_CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+    writeFileSync(OPENROUTER_FREE_CONFIG_FILE(), JSON.stringify(newConfig, null, 2));
   }
 
   static name(): string {
