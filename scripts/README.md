@@ -170,7 +170,8 @@ docker build -f sandbox.Dockerfile.gui -t cycledesign-sandbox:gui .
 
 | File | Purpose |
 |------|---------|
-| `agent-daemon.ts` | Polling-first runner: watches `ready to plan` / `ready to implement` labels and invokes fire-and-forget skills via the opencode CLI |
+| `agent-daemon.ts` | Polling-first runner: watches board `Status` first, `ready to plan` / `ready to implement` labels as fallback, and invokes fire-and-forget skills via the opencode CLI |
+| `agent-daemon-board.ts` | Board-first claimable lookup: Status→label/command map, `item-list` reader, label-union merge, add-only reconcile decision |
 | `agent-daemon-lease.ts` | Daemon-owned issue lease: claim/release label swaps, mirrors Status via `agent-project.ts` |
 | `agent-project.ts` | Best-effort mirror of label moves onto the Project `Status` field (`npx tsx scripts/agent-project.ts --issue <N> --status "<Status>"`) |
 | `agent-supervisor.ts` | Tiny supervisor: restarts the daemon on crash, pulls ff-only on exit 42 |
@@ -189,12 +190,27 @@ resuming after each run. Ref: issue #98. `npm run agent-daemon` runs it under
 a tiny supervisor (`agent-supervisor.ts`) that restarts the daemon on crash
 and pulls updates when the daemon reports them. Ref: issue #114.
 
-Label → skill mapping:
+Label → skill mapping (Status is the source of truth for claimable work,
+ref: issue #146 — `agent-daemon-board.ts`):
 
-| Label | Command |
-|-------|---------|
-| `ready to plan` | `opencode run --command "gh-plan-with-reason" "<N>"` |
-| `ready to implement` | `opencode run --command "resolve-issue" "<N>"` |
+| Project Status | Label | Command |
+|-------|---------|---------|
+| `Ready to plan` | `ready to plan` | `opencode run --command "gh-plan-with-reason" "<N>"` |
+| `Ready to implement` | `ready to implement` | `opencode run --command "resolve-issue" "<N>"` |
+
+Each pass reads claimable Status via `gh project item-list` (explicit
+`--limit 100`, first page only — same inherited limitation as the
+label→Status mirror) and unions it with the `ready to plan` /
+`ready to implement` label poll. Labels stay as fallback: issues off the
+board are still claimed via labels (never Status-exclusive). On conflict the
+downstream-most command wins (`Ready to plan` Status + `ready to implement`
+label → implement). Board-only hits are hydrated via `gh issue view` and
+claimed only when still `OPEN`. A board-claimable issue missing its trigger
+label gets the label added back (plus its Status mirror) before claiming —
+fence-gated, add-only reconcile: `question` / `pr ready` suppress the add,
+a fence transport failure skips the issue this pass, nothing is ever removed
+here, and `--dry-run` only logs `would-reconcile`. A board outage logs at
+error level and the pass continues label-only.
 
 `question` / `pr ready` are terminal and never re-triggered (not polled).
 Runs are sequential, oldest-first, one CLI at a time. An issue carrying both
@@ -296,11 +312,14 @@ never merge, rebase, or stash (auto-resolving dirty trees is out of scope).
 
 ### Interval tuning and rate limits
 
-Polling uses the Issues API (`gh issue list --label`), not the Search API
-(Search is capped at 30 req/min). Two `issue list` calls per 60s poll ≈
-120 req/hr, ~2% of the authenticated REST core quota (5000 req/hr, verified
-via `gh api rate_limit`). Lower `--interval` for latency, raise it to cut
-quota further.
+Polling uses the Issues API (`gh issue list --label`) plus one Project board
+read (`gh project item-list --limit 100`) per 60s poll, not the Search API
+(Search is capped at 30 req/min). Two `issue list` calls plus one `item-list`
+call per poll plus one `issue view` per board-only candidate ≈ well under 1%
+of the authenticated REST core quota (5000 req/hr, verified
+via `gh api rate_limit`; GraphQL board/item writes count separately but stay
+in the single digits per claimed issue). Lower `--interval` for latency,
+raise it to cut quota further.
 
 ### Follow-up: push triggers
 
