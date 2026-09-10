@@ -141,7 +141,10 @@ describe('createGatewayModel header behavior', () => {
       baseURL: 'http://localhost:11434/v1',
       name: 'local',
     });
-    const call = vi.mocked(createOpenAICompatible).mock.calls[0][0] as Record<string, unknown>;
+    const call = vi.mocked(createOpenAICompatible).mock.calls[0][0] as unknown as Record<
+      string,
+      unknown
+    >;
     expect(call).not.toHaveProperty('headers');
     expect(call).not.toHaveProperty('apiKey');
   });

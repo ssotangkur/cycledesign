@@ -201,7 +201,7 @@ export default function SettingsPage() {
                   ? 'API key is configured. Enter new key to update.'
                   : isLocal
                     ? 'Only needed if your server requires one (e.g. vLLM --api-key)'
-                    : `Enter your ${currentProvider.displayName} API key`}
+                    : `Enter your ${currentProvider?.displayName} API key`}
                 fullWidth
                 InputLabelProps={{ shrink: true }}
               />

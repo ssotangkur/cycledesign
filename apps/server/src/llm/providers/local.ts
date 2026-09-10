@@ -101,7 +101,7 @@ function failureStatus(error: unknown): number | undefined {
 }
 
 export class LocalProvider extends BaseProvider {
-  readonly name = LOCAL_PROVIDER_NAME as const;
+  readonly name: typeof LOCAL_PROVIDER_NAME = LOCAL_PROVIDER_NAME;
   private baseURL: string;
   private model: string;
   private apiKey: string | undefined;

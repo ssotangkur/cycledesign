@@ -174,13 +174,18 @@ describe('listModels', () => {
 });
 
 describe('complete() error mapping', () => {
-  it('should surface connection-refused as an actionable message naming the baseURL', async () => {
-    vi.stubGlobal('fetch', connectionRefusedFetch());
-    const provider = new LocalProvider(undefined, 'llama3.1:8b', 'http://localhost:11434/v1');
-    await expect(
-      provider.complete([{ role: 'user' as const, content: 'hi' }])
-    ).rejects.toThrow(/Cannot reach the Local LLM server at http:\/\/localhost:11434\/v1/);
-  });
+  it(
+    'should surface connection-refused as an actionable message naming the baseURL',
+    async () => {
+      vi.stubGlobal('fetch', connectionRefusedFetch());
+      const provider = new LocalProvider(undefined, 'llama3.1:8b', 'http://localhost:11434/v1');
+      await expect(
+        provider.complete([{ role: 'user' as const, content: 'hi' }])
+      ).rejects.toThrow(/Cannot reach the Local LLM server at http:\/\/localhost:11434\/v1/);
+    },
+    // ToolLoopAgent retries with backoff before surfacing the failure.
+    60000
+  );
 
   it('should map 401 to an API-key hint', async () => {
     vi.stubGlobal(
