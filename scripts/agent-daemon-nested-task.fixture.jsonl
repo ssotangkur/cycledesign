@@ -1,0 +1,7 @@
+{"sessionID":"ses_f73d13f8test00000001","timestamp":1789067000000,"type":"session.created"}
+{"part":{"sessionID":"ses_f73d13f8test00000001"},"sessionID":"ses_f73d13f8test00000001","timestamp":1789067000100,"type":"message.part.updated"}
+{"part":{"sessionID":"ses_f73d13f8test00000001"},"sessionID":"ses_f73d13f8test00000001","timestamp":1789067000500,"type":"step.start"}
+{"part":{"sessionID":"ses_f73d13f8test00000001","tool":"task"},"sessionID":"ses_f73d13f8test00000001","timestamp":1789067000600,"type":"message.part.updated"}
+{"part":{"sessionID":"ses_f73d13f8test00000001"},"sessionID":"ses_f73d13f8test00000001","timestamp":1789067004400,"type":"step.finish"}
+{"part":{"sessionID":"ses_f73d13f8test00000001"},"sessionID":"ses_f73d13f8test00000001","timestamp":1789067004500,"type":"message.updated"}
+{"part":{"sessionID":"ses_f73d13f8test00000001","state":{"metadata":{"parentSessionId":"ses_f73d13f8test00000001","sessionId":"ses_child9abc00000002"},"output":"<task id=tsk_001>done</task>"},"tool":"task"},"sessionID":"ses_f73d13f8test00000001","timestamp":1789067004900,"type":"message.part.updated"}

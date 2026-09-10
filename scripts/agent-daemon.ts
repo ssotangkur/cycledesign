@@ -89,16 +89,21 @@ import {
   createProbeTracker,
   exitDetailFor,
   heartbeatIntervalMs,
+  isTreeHot,
   livenessSummary,
   noteFailover,
   oneLine,
   recordFailover,
   shouldFireWatchdog,
   shouldProbe,
+  suppressionSummary,
+  watchdogDecision,
   type ProbeTracker,
+  type TreeProc,
 } from './agent-daemon-policy.js';
 import {
   SANDBOX_REPO_DIR,
+  VM_COLLECTOR_TIMEOUT_MS,
   destroySandbox,
   execArgs,
   hostAuthJsonPath,
@@ -106,6 +111,11 @@ import {
   resolveGithubToken,
   sandboxNameFor,
   sandboxStatus,
+  vmLogMtimeArgs,
+  vmLogTailArgs,
+  vmSessionListArgs,
+  vmVcsLogArgs,
+  vmVcsStatusArgs,
   vmProjectEnv,
 } from './agent-sandbox.js';
 import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease, type IssueLease } from './agent-daemon-lease.js';
@@ -117,10 +127,10 @@ import {
 } from './agent-daemon-board.js';
 import { checkProjectRead, projectNumber, projectOwner, syncStatusForLabelDetailed } from './agent-project.js';
 import { tryReturnToMain } from './agent-daemon-return-main.js';
-import { treeKill } from './agent-tree-kill.js';
+import { treeKill, treeKillVerified } from './agent-tree-kill.js';
 
 // Re-exported so existing call sites and tests keep working via agent-daemon.js.
-export { treeKill };
+export { treeKill, treeKillVerified };
 
 const DEFAULT_REPO = 'ssotangkur/cycledesign';
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -188,9 +198,17 @@ interface StreamTracker {
   titleBySession: Map<string, string>;
   /** Best-effort observed model per session (ground truth vs requested `--model`). */
   modelBySession: Map<string, string>;
+  /**
+   * #149 KD-6: nested-Task session IDs extracted from `tool_use` completion
+   * lines (`part.state.metadata.sessionId`). Side-table only — the line
+   * itself stays `[orchestrator]`, and these IDs join the VM log tail
+   * (`session.id=`) where mid-Task sub-agent life is actually observed.
+   */
+  nestedSessionIds: Set<string>;
 }
 
-function createStreamTracker(nowMs: number): StreamTracker {
+/** #149: exported for the nested-Task fixture test (KD-6). */
+export function createStreamTracker(nowMs: number): StreamTracker {
   return {
     startMs: nowMs,
     lastNonErrorAtMs: nowMs,
@@ -207,6 +225,7 @@ function createStreamTracker(nowMs: number): StreamTracker {
     parentBySession: new Map(),
     titleBySession: new Map(),
     modelBySession: new Map(),
+    nestedSessionIds: new Set(),
   };
 }
 
@@ -342,6 +361,13 @@ export function extractModel(parsed: Record<string, unknown>): string | null {
  * envelope carries it; degrades to short-ID tags when it does not.
  * Also records the best-effort observed model per session (see
  * `extractModel`) so logs can show requested `--model` vs actual.
+ *
+ * #149 KD-6: root stdout buffers nested-Task output until Task-end inside
+ * ONE `tool_use` envelope (proven by the Go-model probe: 7 lines, one root
+ * sessionID, zero mid-Task lines), so a distinct-session line still tags
+ * `[sub:]` when it appears, but nested-Task liveness is NEVER inferred from
+ * stdout — the nested ID (`part.state.metadata.sessionId`) goes to the
+ * side-table only, and the VM log tail is the authoritative sub-agent source.
  */
 export function tagForLine(rawLine: string, tracker: StreamTracker): string {
   let parsed: Record<string, unknown> | null = null;
@@ -386,6 +412,19 @@ export function tagForLine(rawLine: string, tracker: StreamTracker): string {
   const observed = extractModel(parsed);
   if (observed !== null && !tracker.modelBySession.has(activeSession)) {
     tracker.modelBySession.set(activeSession, observed);
+  }
+  // #149 KD-6: nested-Task completion lines carry the child session at
+  // `part.state.metadata.sessionId` (probe-verified; NOT top-level
+  // `parentID`). Side-table only — the line keeps its `[orchestrator]` tag.
+  const state = part !== null && typeof part === 'object' ? (part as Record<string, unknown>)['state'] : null;
+  if (typeof state === 'object' && state !== null) {
+    const metadata = (state as Record<string, unknown>)['metadata'];
+    if (typeof metadata === 'object' && metadata !== null) {
+      const nestedId = (metadata as Record<string, unknown>)['sessionId'];
+      if (typeof nestedId === 'string' && nestedId !== '') {
+        tracker.nestedSessionIds.add(nestedId);
+      }
+    }
   }
   if (tracker.rootSessionId === null) {
     tracker.rootSessionId = activeSession;
@@ -642,13 +681,130 @@ function capture(cmd: string): string {
   }
 }
 
+/**
+ * #149 KD-4 (step 6): structured worker-tree listing for the busy-vote.
+ * `wmic` is absent on Win11, so fall back to a CIM query; total failure
+ * yields an empty list (tree neutral, never a kill gate).
+ */
+export function listProcessTree(pid: number | undefined): TreeProc[] {
+  if (pid === undefined) {
+    return [];
+  }
+  if (process.platform === 'win32') {
+    const wmic = parseWmicTree(capture(`wmic process where (ParentProcessId=${pid}) get ProcessId,CreationDate /FORMAT:LIST`));
+    if (wmic !== null) {
+      return wmic;
+    }
+    const cim = parseCimTree(
+      capture(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${pid} -or $_.ProcessId -eq ${pid} } | Select-Object ProcessId,CreationDate | ConvertTo-Json -Compress"`,
+      ),
+    );
+    if (cim !== null) {
+      return cim;
+    }
+    return [];
+  }
+  const procs: TreeProc[] = [{ pid, createdMs: null }];
+  const out = capture(`ps --ppid ${pid} -o pid=,lstart=`);
+  for (const line of out.split('\n')) {
+    const match = /^\s*(\d+)\s+(.+)\s*$/.exec(line);
+    if (match !== null) {
+      const childPid = Number(match[1]);
+      const createdMs = Date.parse(match[2]);
+      procs.push({ pid: childPid, createdMs: Number.isNaN(createdMs) ? null : createdMs });
+    }
+  }
+  return procs;
+}
+
+/**
+ * #149: parse `wmic ... /FORMAT:LIST` (`CreationDate=20260910120000.000000+060`
+ * + `ProcessId=1234` pairs). Null when the output is not wmic-shaped
+ * (wmic absent) so the caller falls through to CIM.
+ */
+export function parseWmicTree(output: string): TreeProc[] | null {
+  if (output === '' || output === '(unavailable)') {
+    return null;
+  }
+  // wmic /FORMAT:LIST separates instances with blank lines; properties are
+  // alphabetical, so CreationDate precedes ProcessId within a block.
+  const procs: TreeProc[] = [];
+  let sawField = false;
+  for (const block of output.split(/\n\s*\n/)) {
+    let pid: number | null = null;
+    let createdMs: number | null = null;
+    for (const raw of block.split('\n')) {
+      const line = raw.trim();
+      const pidMatch = /^ProcessId=(\d+)\s*$/.exec(line);
+      if (pidMatch !== null) {
+        sawField = true;
+        pid = Number(pidMatch[1]);
+        continue;
+      }
+      const dateMatch = /^CreationDate=(\d{14})/.exec(line);
+      if (dateMatch !== null) {
+        sawField = true;
+        const d = dateMatch[1];
+        createdMs = Date.UTC(Number(d.slice(0, 4)), Number(d.slice(4, 6)) - 1, Number(d.slice(6, 8)), Number(d.slice(8, 10)), Number(d.slice(10, 12)), Number(d.slice(12, 14)));
+      }
+    }
+    if (pid !== null) {
+      procs.push({ pid, createdMs });
+    }
+  }
+  return sawField ? procs : null;
+}
+
+/**
+ * #149: parse CIM `[{ProcessId,CreationDate}]` JSON (single object or array;
+ * `/Date(1234567890123)/` or ISO dates). Null when not CIM-shaped.
+ */
+export function parseCimTree(output: string): TreeProc[] | null {
+  if (output === '' || output === '(unavailable)') {
+    return null;
+  }
+  try {
+    const value: unknown = JSON.parse(output);
+    const rows = Array.isArray(value) ? value : [value];
+    const procs: TreeProc[] = [];
+    for (const row of rows) {
+      if (typeof row !== 'object' || row === null) {
+        continue;
+      }
+      const record = row as Record<string, unknown>;
+      const pid = record['ProcessId'];
+      if (typeof pid !== 'number') {
+        continue;
+      }
+      let createdMs: number | null = null;
+      const raw = record['CreationDate'];
+      if (typeof raw === 'string') {
+        const ticks = /\/Date\((\d+)([+-]\d+)?\)\//.exec(raw);
+        createdMs = ticks !== null ? Number(ticks[1]) : Date.parse(raw);
+        if (Number.isNaN(createdMs)) {
+          createdMs = null;
+        }
+      }
+      procs.push({ pid, createdMs });
+    }
+    return procs;
+  } catch {
+    return null;
+  }
+}
+
 function childProcessTree(pid: number | undefined): string {
   if (pid === undefined) {
     return '(no child pid)';
   }
   if (process.platform === 'win32') {
     const list = capture(`tasklist /FI "PID eq ${pid}" /FO TABLE /NH`);
-    const children = capture(`wmic process where (ParentProcessId=${pid}) get ProcessId,CommandLine /FORMAT:LIST`);
+    const tree = listProcessTree(pid);
+    const children =
+      tree.length > 0
+        ? tree.map((p) => `pid=${p.pid} created=${p.createdMs !== null ? new Date(p.createdMs).toISOString() : '(unknown)'}`).join('\n')
+        : '(tree listing unavailable — wmic/CIM both failed)';
     return `PID ${pid}: ${list}\nchildren:\n${children}`.slice(0, 4000);
   }
   return capture(`ps --ppid ${pid} -o pid,etime,pcpu,comm; ps -p ${pid} -o pid,etime,pcpu,comm`);
@@ -689,12 +845,210 @@ function branchState(): string {
   return `branch: ${branch}\n${log}`;
 }
 
+/**
+ * #149 KD-4: pure parsers for the VM collector outputs (unit-tested).
+ * `maxLogTimestamp` reads `timestamp=<ISO>` prefixes (host and VM logs share
+ * the shape); `parseVmVcsTime` reads `git log --format=%ct` epoch seconds;
+ * `parseSessionListTime` best-efforts `opencode session list --format json`
+ * (array or `{sessions:[...]}` envelope; `updated`/`updatedAt`/`updated_at`/
+ * `time`/`timestamp` as ISO or epoch s/ms). Null = no usable time.
+ */
+export function maxLogTimestamp(tail: string): number | null {
+  let max: number | null = null;
+  for (const line of tail.split('\n')) {
+    const match = /timestamp=(\S+)/.exec(line);
+    if (match !== null) {
+      const ms = Date.parse(match[1]);
+      if (!Number.isNaN(ms) && (max === null || ms > max)) {
+        max = ms;
+      }
+    }
+  }
+  return max;
+}
+
+export function parseVmVcsTime(output: string): number | null {
+  const epoch = Number(output.trim().split('\n')[0]);
+  if (!Number.isFinite(epoch) || epoch <= 0) {
+    return null;
+  }
+  return epoch * 1000;
+}
+
+function sessionTimeOf(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    // Epoch s vs ms heuristic (ms epoch > 1e12).
+    return value > 1e12 ? value : value * 1000;
+  }
+  if (typeof value === 'string' && value !== '') {
+    const numeric = Number(value);
+    if (value.trim() !== '' && Number.isFinite(numeric) && numeric > 0) {
+      return numeric > 1e12 ? numeric : numeric * 1000;
+    }
+    const ms = Date.parse(value);
+    if (!Number.isNaN(ms)) {
+      return ms;
+    }
+  }
+  return null;
+}
+
+export function parseSessionListTime(output: string): number | null {
+  try {
+    const value: unknown = JSON.parse(output);
+    const rows: unknown[] = Array.isArray(value)
+      ? value
+      : typeof value === 'object' && value !== null && Array.isArray((value as Record<string, unknown>)['sessions'])
+        ? ((value as Record<string, unknown>)['sessions'] as unknown[])
+        : [];
+    let max: number | null = null;
+    for (const row of rows) {
+      if (typeof row !== 'object' || row === null) {
+        continue;
+      }
+      const record = row as Record<string, unknown>;
+      for (const key of ['updated', 'updatedAt', 'updated_at', 'time', 'timestamp']) {
+        const ms = sessionTimeOf(record[key]);
+        if (ms !== null && (max === null || ms > max)) {
+          max = ms;
+        }
+      }
+    }
+    return max;
+  } catch {
+    return null;
+  }
+}
+
+/** #149 KD-4: one VM leg (atMs = last observed life, spawn-seeded). */
+export interface VmLeg {
+  ok: boolean;
+  atMs: number;
+  detail: string;
+}
+
+/** #149 KD-4: async VM liveness snapshot (off-tick, last-good cached). */
+export interface VmLiveness {
+  log: VmLeg;
+  vcs: VmLeg;
+  sessions: VmLeg;
+  collectorOk: boolean;
+  collectedAtMs: number;
+}
+
+export function seedVmLiveness(spawnMs: number): VmLiveness {
+  const seed = (label: string): VmLeg => ({ ok: true, atMs: spawnMs, detail: `${label} seeded at spawn` });
+  return { log: seed('vm-log'), vcs: seed('vm-vcs'), sessions: seed('session-log'), collectorOk: true, collectedAtMs: spawnMs };
+}
+
+/** Async `sbx exec` with timeout (never throws; timeout → ok:false). */
+function execSbxAsync(sbxBin: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+    let child: ChildProcess;
+    try {
+      child = spawn(sbxBin, args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false });
+    } catch (err) {
+      resolve({ ok: false, stdout: '', stderr: (err as Error).message });
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Best-effort.
+        }
+        resolve({ ok: false, stdout, stderr: `${stderr}\ntimeout after ${timeoutMs}ms`.trim() });
+      }
+    }, timeoutMs);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve({ ok: false, stdout, stderr: err.message });
+      }
+    });
+    child.on('close', (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve({ ok: code === 0, stdout, stderr });
+      }
+    });
+  });
+}
+
+/**
+ * #149 KD-4/KD-7: run the VM legs concurrently (each its own `sbx exec` —
+ * Spike 0: concurrent exec proven at 494ms; `&` inside one exec does NOT
+ * detach). Exec failure/timeout marks the leg failed (fail-closed via
+ * `collectorOk`); unparseable-but-successful session list stays neutral
+ * (idle since spawn) with a warning, so a CLI format drift cannot wedge the
+ * watchdog into permanent silence.
+ */
+export async function collectVmLiveness(sbxBin: string, name: string, spawnMs: number): Promise<VmLiveness> {
+  const [tailRes, mtimeRes, vcsRes, statusRes, sessRes] = await Promise.all([
+    execSbxAsync(sbxBin, vmLogTailArgs(name), VM_COLLECTOR_TIMEOUT_MS),
+    execSbxAsync(sbxBin, vmLogMtimeArgs(name), VM_COLLECTOR_TIMEOUT_MS),
+    execSbxAsync(sbxBin, vmVcsLogArgs(name), VM_COLLECTOR_TIMEOUT_MS),
+    execSbxAsync(sbxBin, vmVcsStatusArgs(name), VM_COLLECTOR_TIMEOUT_MS),
+    execSbxAsync(sbxBin, vmSessionListArgs(name), VM_COLLECTOR_TIMEOUT_MS),
+  ]);
+  const collectedAtMs = Date.now();
+  let log: VmLeg;
+  if (!tailRes.ok || !mtimeRes.ok) {
+    const err = !tailRes.ok ? tailRes.stderr : mtimeRes.stderr;
+    log = { ok: false, atMs: spawnMs, detail: `vm-log exec failed: ${oneLine(err || 'unknown')}` };
+  } else {
+    const tailMax = maxLogTimestamp(tailRes.stdout);
+    const mtimeS = Number(mtimeRes.stdout.trim().split('\n')[0]);
+    const mtimeMs = Number.isFinite(mtimeS) && mtimeS > 0 ? mtimeS * 1000 : null;
+    const atMs = Math.max(tailMax ?? Number.NEGATIVE_INFINITY, mtimeMs ?? Number.NEGATIVE_INFINITY);
+    log = Number.isFinite(atMs)
+      ? { ok: true, atMs, detail: `vm-log ${new Date(atMs).toISOString()}` }
+      : { ok: true, atMs: spawnMs, detail: 'vm-log empty (idle since spawn)' };
+  }
+  let vcs: VmLeg;
+  if (!vcsRes.ok) {
+    vcs = { ok: false, atMs: spawnMs, detail: `vm-vcs exec failed: ${oneLine(vcsRes.stderr || 'unknown')}` };
+  } else {
+    const tipMs = parseVmVcsTime(vcsRes.stdout);
+    const dirty = statusRes.ok && statusRes.stdout.trim() !== '';
+    vcs =
+      tipMs !== null
+        ? { ok: true, atMs: tipMs, detail: `vm-vcs tip ${new Date(tipMs).toISOString()}${dirty ? ' +dirty' : ''}` }
+        : { ok: false, atMs: spawnMs, detail: 'vm-vcs unparseable (fail-closed)' };
+  }
+  let sessions: VmLeg;
+  if (!sessRes.ok) {
+    sessions = { ok: false, atMs: spawnMs, detail: `session-log exec failed: ${oneLine(sessRes.stderr || 'unknown')}` };
+  } else {
+    const maxMs = parseSessionListTime(sessRes.stdout);
+    sessions =
+      maxMs !== null
+        ? { ok: true, atMs: maxMs, detail: `session-log ${new Date(maxMs).toISOString()}` }
+        : { ok: true, atMs: spawnMs, detail: 'session-log empty/unparseable (neutral, idle since spawn)' };
+  }
+  return { log, vcs, sessions, collectorOk: log.ok && vcs.ok && sessions.ok, collectedAtMs };
+}
+
 function buildWatchdogBundle(
   issueNumber: number,
   tracker: StreamTracker,
   childPid: number | undefined,
   stuckTimeoutMs: number,
   sandbox?: { sbxBin: string; name: string },
+  vm?: VmLiveness,
 ): string {
   const nowMs = Date.now();
   const lastActivity = new Date(tracker.lastNonErrorAtMs).toISOString();
@@ -717,6 +1071,20 @@ function buildWatchdogBundle(
           // the in-VM worker. This is the VM-side truth.
           sandboxStatus(sandbox.sbxBin, sandbox.name),
         ].join('\n');
+  // #149 KD-4: the VM legs that drove the conjunctive decision (or the
+  // collector failure that fail-closed it).
+  const vmSection =
+    vm === undefined
+      ? ''
+      : [
+          '',
+          '### VM liveness (conjunctive legs)',
+          `collectorOk: ${vm.collectorOk} (collected ${new Date(vm.collectedAtMs).toISOString()})`,
+          `vm-log: ${vm.log.detail}`,
+          `vm-vcs: ${vm.vcs.detail}`,
+          `session-log: ${vm.sessions.detail}`,
+          `nested stdout sessions: ${tracker.nestedSessionIds.size > 0 ? [...tracker.nestedSessionIds].join(',') : '(none)'}`,
+        ].join('\n');
   return [
     '### Process tree',
     childProcessTree(childPid),
@@ -730,20 +1098,29 @@ function buildWatchdogBundle(
     '### Branch state',
     branchState(),
     sandboxSection,
+    vmSection,
     '',
     `_Run had zero non-error stream activity for the full stuck interval; issue #${issueNumber} will be reset for a fresh Phase 0 resume._`,
   ].join('\n');
 }
 
-function postWatchdogComment(repo: string, issueNumber: number, bundle: string): void {
+/**
+ * #149 KD-5 (AD-16): bounded comment post — an unbounded `gh` hang widens
+ * the close-race window opened by the sync bundle build. Returns false on
+ * failure/timeout (caller still proceeds to kill; the fire is logged).
+ */
+function postWatchdogComment(repo: string, issueNumber: number, bundle: string): boolean {
   const body = ['## Watchdog investigation', '', bundle].join('\n');
   // NOTE: '--body' here is safe — spawnSync arg-array (no shell), so backticks/$/quotes bypass PowerShell escaping. Do NOT "fix" to --body-file.
   const result = spawnSync('gh', ['issue', 'comment', String(issueNumber), '--repo', repo, '--body', body], {
     encoding: 'utf8',
+    timeout: 30_000,
   });
-  if (result.error || result.status !== 0) {
+  if ((result as { error?: unknown }).error || result.status !== 0) {
     console.error(`[agent-daemon] watchdog comment failed for #${issueNumber}`);
+    return false;
   }
+  return true;
 }
 
 interface RunOutcome {
@@ -805,8 +1182,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         }
       }
       destroySandbox(state.config.sbxBin, sandboxName);
-      return Promise.resolve({ code: 1, failover: false, watchdogFired: false, detail: `sandbox provision failed at step ${provisioned.step}: ${oneLine(provisioned.output)}` });
-    }
+      return Promise.resolve({ code: 1, failover: false, watchdogFired: false, detail: `sandbox provision failed at step ${provisioned.step}: ${oneLine(provisioned.output)}` });    }
     // #140: forward the host board into the VM so the in-VM Status mirror
     // uses it instead of defaults (worker Phase 0 claim + done/blocked moves).
     child = spawn(
@@ -842,6 +1218,62 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
 
   return new Promise((resolve) => {
     let settled = false;
+    // #149 KD-5: destroy status owned by this run. ensureSandboxGone runs
+    // once; finish reuses it so failover/watchdog paths (which destroy
+    // BEFORE the fence check) never double-destroy.
+    let sandboxGone: { ok: boolean; output: string } | null = null;
+    // #149 KD-5: set once a destroy-failure park lands (no double parks).
+    let destroyParked = false;
+    // #149 KD-4: VM liveness cache (async off-tick, last-good) + tree pids.
+    // Seeded at spawn so early polls read sane ages; collectors refresh.
+    let vm: VmLiveness | null = sandboxName !== null ? seedVmLiveness(tracker.startMs) : null;
+    let vmCollectInFlight = false;
+    let prevTreePids: number[] = [];
+
+    /** #149 KD-5: verified client tree-kill (logs when the tree survives). */
+    const killClientTree = (reason: string): boolean => {
+      const dead = treeKillVerified(child);
+      if (!dead) {
+        console.error(`[agent-daemon] run #${issueNumber} client tree still alive after verify-retry (${reason})`);
+      }
+      return dead;
+    };
+
+    /** #149 KD-5: treeKill → verify → destroySandbox, exactly once per run. */
+    const ensureSandboxGone = (reason: string): { ok: boolean; output: string } | null => {
+      if (sandboxName === null) {
+        return null;
+      }
+      if (sandboxGone !== null) {
+        return sandboxGone;
+      }
+      killClientTree(reason);
+      sandboxGone = destroySandbox(state.config.sbxBin, sandboxName);
+      console.log(`[agent-daemon] run #${issueNumber} sandbox destroy (${reason}) ok=${sandboxGone.ok}\n${sandboxGone.output}`);
+      return sandboxGone;
+    };
+
+    /**
+     * #149 KD-5: destroy-failure fail-closed — park at `question` (never
+     * reset to ready: a blind reset would re-queue a duplicate run behind
+     * the orphan) and suppress the lease release. The log carries the
+     * manual-reset hint.
+     */
+    const handleDestroyFailure = (destroyed: { ok: boolean; output: string }): void => {
+      if (destroyParked) {
+        return;
+      }
+      destroyParked = true;
+      console.error(
+        `[agent-daemon] run #${issueNumber} sandbox destroy failed; parking at question (fail-closed, may need manual reset to \`ready to implement\` after confirming the sandbox is gone via \`sbx ls\`)`,
+      );
+      parkAtQuestion(
+        repo,
+        issueNumber,
+        `Sandbox destroy failed after kill, so the worker may still be alive in-VM. Parked at \`question\` (fail-closed); reset to \`ready to implement\` only after confirming the sandbox is gone (\`sbx ls\`).\n\nDestroy output:\n${destroyed.output}`,
+      );
+    };
+
     const finish = (outcome: RunOutcome): void => {
       if (settled) {
         return;
@@ -856,6 +1288,20 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       // lease/sandbox teardown so a signal landing mid-teardown sees null.
       currentSandbox = null;
       currentLease = null;
+      if (sandboxName !== null) {
+        // #149 KD-5: destroy BEFORE the fence-check/lease-release below, so
+        // a failed destroy suppresses the release instead of re-queueing
+        // behind the orphan. #121: client kill/exit alone orphans the in-VM
+        // worker; the sandbox itself is the kill. Runs on every finish path.
+        const destroyed = ensureSandboxGone('finish');
+        if (destroyed !== null && !destroyed.ok) {
+          handleDestroyFailure(destroyed);
+          resolve(outcome);
+          return;
+        }
+      } else {
+        killClientTree('finish');
+      }
       // #132: guaranteed lease release on every finish path. Failover and
       // watchdog paths already reset labels themselves, so this suppresses
       // there; terminal moves by the worker suppress it everywhere else.
@@ -868,12 +1314,6 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         } else if (released === 'failed') {
           console.error(`[agent-daemon] lease release failed for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
         }
-      }
-      if (sandboxName !== null) {
-        // #121: client kill/exit alone orphans the in-VM worker; the
-        // sandbox itself is the kill. Runs on every finish path.
-        treeKill(child);
-        destroySandbox(state.config.sbxBin, sandboxName);
       }
       resolve(outcome);
     };
@@ -888,8 +1328,17 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       if (tracker.firstGatewayLine !== null) {
         console.error(`[agent-daemon] first gateway line: ${tracker.firstGatewayLine}`);
       }
-      // KD-4 ordering: tree-kill → fencing-check → label-reset → respawn.
-      treeKill(child);
+      // #149 KD-5 ordering: tree-kill → verify → destroy → fencing-check →
+      // label-reset → respawn. A failed destroy parks (fail-closed) instead
+      // of resetting behind the orphan.
+      killClientTree('failover');
+      const destroyed = ensureSandboxGone('failover');
+      if (destroyed !== null && !destroyed.ok) {
+        recordFailover(state.failoverCounts, issueNumber);
+        handleDestroyFailure(destroyed);
+        finish({ code: 1, failover: true, watchdogFired: false, detail: 'sandbox destroy failed on failover; parked at question' });
+        return;
+      }
       const fence = checkFencing(repo, issueNumber, spawnIso);
       const { count, allowed } = recordFailover(state.failoverCounts, issueNumber);
       if (!allowed) {
@@ -916,24 +1365,44 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       });
     };
 
-    const handleWatchdog = (): void => {
+    const handleWatchdog = (treeReason: string): void => {
       // Guard: a gateway-quota failover may have already settled the run.
       if (settled) {
         return;
       }
       // #139: log the full liveness evidence at fire time so a "not enough
       // time passed" dispute can be settled from the logs alone.
-      console.error(`[agent-daemon] watchdog: no non-error activity on #${issueNumber}; ${livenessSummary(tracker, Date.now(), stuckTimeoutMs)}; investigating`);
+      console.error(`[agent-daemon] watchdog: no non-error activity on #${issueNumber}; ${livenessSummary(tracker, Date.now(), stuckTimeoutMs)}; tree: ${treeReason}; investigating`);
       const bundle = buildWatchdogBundle(
         issueNumber,
         tracker,
         child.pid,
         stuckTimeoutMs,
         sandboxName !== null ? { sbxBin: state.config.sbxBin, name: sandboxName } : undefined,
+        vm ?? undefined,
       );
+      // #149 KD-5 (AD-16): re-guard after the sync bundle build — shell
+      // captures are slow, and the run may have settled meanwhile.
+      if (settled) {
+        return;
+      }
       // Diagnosis opencode invocations must use Go (KD-6); gh/git need no model.
       // The bundle itself is read-only shell/gh/git, so no model is consumed here.
       postWatchdogComment(repo, issueNumber, bundle);
+      // #149 KD-5 ordering: destroy BEFORE fence-check/label-reset. A failed
+      // destroy parks (fail-closed) instead of resetting behind the orphan.
+      killClientTree('watchdog');
+      const destroyed = ensureSandboxGone('watchdog');
+      if (destroyed !== null && !destroyed.ok) {
+        handleDestroyFailure(destroyed);
+        finish({
+          code: 1,
+          failover: false,
+          watchdogFired: true,
+          detail: `watchdog fired but sandbox destroy failed; parked at question (${livenessSummary(tracker, Date.now(), stuckTimeoutMs)})`,
+        });
+        return;
+      }
       const fence = checkFencing(repo, issueNumber, spawnIso);
       if (isFenceClear(fence)) {
         resetToReady(repo, issueNumber);
@@ -941,7 +1410,6 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         console.error(`[agent-daemon] fencing blocked watchdog label reset for #${issueNumber}`);
       }
       // Watchdog never changes model state (KD-6): respawn follows current failover/probe state.
-      treeKill(child);
       finish({
         code: 1,
         failover: false,
@@ -960,8 +1428,46 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         return;
       }
       const nowMs = Date.now();
+      if (sandboxName !== null && vm !== null) {
+        // #149 KD-4: conjunctive predicate in sandboxMode — stdout alone is
+        // NOT enough (buffered until Task-end). Collectors refresh async
+        // off-tick (last-good cached); the predicate reads the cache.
+        if (!vmCollectInFlight) {
+          vmCollectInFlight = true;
+          void collectVmLiveness(state.config.sbxBin, sandboxName, tracker.startMs).then(
+            (next) => {
+              if (!settled) {
+                vm = next;
+              }
+              vmCollectInFlight = false;
+            },
+            () => {
+              vmCollectInFlight = false;
+            },
+          );
+        }
+        const treeNow = listProcessTree(child.pid);
+        const hot = isTreeHot(treeNow, prevTreePids, nowMs, stuckTimeoutMs);
+        prevTreePids = treeNow.map((p) => p.pid);
+        const decision = watchdogDecision({
+          stdoutIdleMs: nowMs - tracker.lastNonErrorAtMs,
+          vmLogIdleMs: nowMs - vm.log.atMs,
+          vmVcsIdleMs: nowMs - vm.vcs.atMs,
+          sessionLogIdleMs: nowMs - vm.sessions.atMs,
+          treeBusy: hot.hot,
+          collectorOk: vm.collectorOk,
+          stuckTimeoutMs,
+        });
+        if (decision.fire) {
+          handleWatchdog(hot.reason);
+        } else if (nowMs - lastHeartbeatMs >= heartbeatMs) {
+          lastHeartbeatMs = nowMs;
+          console.log(`[agent-daemon] run #${issueNumber} alive; ${livenessSummary(tracker, nowMs, stuckTimeoutMs)}; ${suppressionSummary(decision)}; tree: ${hot.reason}`);
+        }
+        return;
+      }
       if (shouldFireWatchdog(tracker.lastNonErrorAtMs, nowMs, stuckTimeoutMs)) {
-        handleWatchdog();
+        handleWatchdog('non-sandbox (no tree vote)');
       } else if (nowMs - lastHeartbeatMs >= heartbeatMs) {
         lastHeartbeatMs = nowMs;
         console.log(`[agent-daemon] run #${issueNumber} alive; ${livenessSummary(tracker, nowMs, stuckTimeoutMs)}`);
@@ -1038,8 +1544,13 @@ async function probeFreeTier(state: DaemonState): Promise<'success' | 'quota' | 
         // #127: probe context belongs to this finish — clear first.
         activeProbe = null;
         if (probeSandbox !== null) {
-          treeKill(child);
-          destroySandbox(state.config.sbxBin, probeSandbox);
+          treeKillVerified(child);
+          // #149 KD-5: log the destroy status (probe is best-effort; a
+          // failed destroy here only logs — the next provision recreates).
+          const destroyed = destroySandbox(state.config.sbxBin, probeSandbox);
+          if (!destroyed.ok) {
+            console.error(`[agent-daemon] probe sandbox destroy failed for ${probeSandbox}:\n${destroyed.output}`);
+          }
         }
         resolve(outcome);
       }
@@ -1096,7 +1607,7 @@ async function probeFreeTier(state: DaemonState): Promise<'success' | 'quota' | 
     child.stdout?.on('data', onChunk);
     child.stderr?.on('data', onChunk);
     const timer = setTimeout(() => {
-      treeKill(child);
+      treeKillVerified(child);
       finish('inconclusive');
     }, probeTimeoutS * 1000);
     child.on('error', () => {
@@ -1470,13 +1981,13 @@ async function main(): Promise<void> {
     // teardown so the in-VM worker cannot outlive the sandbox destroy
     // (killing the host sbx.exe client alone orphans it).
     if (activeChild !== null) {
-      treeKill(activeChild);
+      treeKillVerified(activeChild);
       activeChild = null;
     }
     if (activeProbe !== null) {
       const probe = activeProbe;
       activeProbe = null;
-      treeKill(probe.child);
+      treeKillVerified(probe.child);
       if (probe.sbxBin !== null && probe.name !== null) {
         try {
           destroySandbox(probe.sbxBin, probe.name);
@@ -1544,4 +2055,13 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+// #149: only boot the daemon when invoked as the CLI entry point — tests
+// import pure helpers (tagForLine, VM parsers, tracker) from this module,
+// and an unconditional `void main()` would boot the poll loop on import.
+const invokedAsCli = ((): boolean => {
+  const entry = process.argv[1] ?? '';
+  return entry.endsWith('agent-daemon.ts') || entry.endsWith('agent-daemon.js');
+})();
+if (invokedAsCli) {
+  void main();
+}
