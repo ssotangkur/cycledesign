@@ -7,7 +7,7 @@ export const DAEMON_ENV_EXAMPLE = '.agent-daemon.env.example';
 
 export const DEFAULT_FREE_MODEL = 'opencode/muse-spark-1.3-contributor-free';
 export const DEFAULT_GO_MODEL = 'opencode-go/muse-spark-1.3-contributor';
-export const DEFAULT_STUCK_TIMEOUT_S = 900;
+export const DEFAULT_STUCK_TIMEOUT_S = 1800;
 export const DEFAULT_PROBE_INTERVAL_S = 900;
 export const DEFAULT_PROBE_TIMEOUT_S = 90;
 
