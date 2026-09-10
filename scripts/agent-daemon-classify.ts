@@ -11,6 +11,12 @@
  * `statusCode`) are consulted only when present; absence never blocks
  * classification. Regex-over-line is what drives failover so schema drift
  * cannot silently disable it.
+ *
+ * #155: the raw-text fallback never applies to `tool_use` envelopes. Tool
+ * results embed arbitrary content (whole file contents), so a marker found
+ * only there is a false positive — reading agent-daemon-classify.ts fired
+ * a failover on its own source. Error-shaped fields stay authoritative for
+ * every envelope type (a `tool_use` carrying a real error still counts).
  */
 
 export type LineClass = 'gateway-quota' | 'upstream-transient' | 'other';
@@ -66,6 +72,20 @@ function structuredHint(rawLine: string): string | null {
   return null;
 }
 
+/** Envelope types whose lines embed arbitrary content (tool results). */
+function isToolResult(rawLine: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawLine);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return false;
+  }
+  return (parsed as Record<string, unknown>)['type'] === 'tool_use';
+}
+
 export function classifyLine(rawLine: string): LineClass {
   const hint = structuredHint(rawLine);
   if (hint !== null) {
@@ -73,6 +93,11 @@ export function classifyLine(rawLine: string): LineClass {
     if (structured !== null) {
       return structured;
     }
+  }
+  // #155: a marker reachable only via tool-result content is a false
+  // positive (file contents, not an error). The hint above already spoke.
+  if (isToolResult(rawLine)) {
+    return 'other';
   }
   return classifyText(rawLine) ?? 'other';
 }
