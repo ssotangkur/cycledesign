@@ -438,8 +438,21 @@ export function tagForLine(rawLine: string, tracker: StreamTracker): string {
 }
 
 /** Feed one piped line into tagging + classification + watchdog tracking. */
-export function observeLine(rawLine: string, tracker: StreamTracker): { tag: string; cls: ReturnType<typeof classifyLine> } {
+export function observeLine(
+  rawLine: string,
+  tracker: StreamTracker,
+): { tag: string; cls: ReturnType<typeof classifyLine>; nestedSessionId: string | null } {
+  // #163: tagForLine adds at most one nested ID per call, so set growth
+  // means the last element is the newly-seen child. Returned (not logged)
+  // here — pump owns the issue number and logs it, so the ID is no longer
+  // buried in the side-table.
+  const before = tracker.nestedSessionIds.size;
   const tag = tagForLine(rawLine, tracker);
+  let nestedSessionId: string | null = null;
+  if (tracker.nestedSessionIds.size > before) {
+    const ids = [...tracker.nestedSessionIds];
+    nestedSessionId = ids[ids.length - 1] ?? null;
+  }
   const cls = classifyLine(rawLine);
   tracker.linesSeen += 1;
   tracker.lastLine = rawLine.slice(0, 500);
@@ -457,7 +470,7 @@ export function observeLine(rawLine: string, tracker: StreamTracker): { tag: str
     tracker.otherCount += 1;
     tracker.lastNonErrorAtMs = Date.now();
   }
-  return { tag, cls };
+  return { tag, cls, nestedSessionId };
 }
 
 /**
@@ -920,6 +933,48 @@ export function parseSessionListTime(output: string): number | null {
   }
 }
 
+/**
+ * #163: retain (don't discard) the VM log lines that explain a stall.
+ * Matches quota/error markers, capped so console use stays small. Pure for
+ * tests; the watchdog tick diffs successive polls and logs only newcomers,
+ * so quiet polls print nothing. No new `sbx exec` — the tail is already
+ * fetched by `collectVmLiveness`.
+ */
+export const VM_ERROR_EXCERPT_LINES = 20;
+export const VM_ERROR_EXCERPT_CHARS = 4000;
+
+const VM_ERROR_RE = /Rate limit exceeded|Upstream request failed|level=ERROR/;
+
+export function vmErrorExcerpt(
+  tail: string,
+  maxLines: number = VM_ERROR_EXCERPT_LINES,
+  maxChars: number = VM_ERROR_EXCERPT_CHARS,
+): string[] {
+  const out: string[] = [];
+  let chars = 0;
+  for (const line of tail.split('\n')) {
+    if (!VM_ERROR_RE.test(line)) {
+      continue;
+    }
+    const one = oneLine(line, 500);
+    if (one === '') {
+      continue;
+    }
+    if (out.length >= maxLines || chars + one.length > maxChars) {
+      break;
+    }
+    out.push(one);
+    chars += one.length;
+  }
+  return out;
+}
+
+/** #163: compact VM leg recency for the `alive` heartbeat line. */
+export function vmAgesSummary(vm: VmLiveness, nowMs: number): string {
+  const ageS = (atMs: number): string => `${Math.max(0, Math.round((nowMs - atMs) / 1000))}s ago`;
+  return `vm: log ${ageS(vm.log.atMs)}, vcs ${ageS(vm.vcs.atMs)}, sessions ${ageS(vm.sessions.atMs)}`;
+}
+
 /** #149 KD-4: one VM leg (atMs = last observed life, spawn-seeded). */
 export interface VmLeg {
   ok: boolean;
@@ -934,11 +989,13 @@ export interface VmLiveness {
   sessions: VmLeg;
   collectorOk: boolean;
   collectedAtMs: number;
+  /** #163: quota/error excerpt of the fetched VM log tail (capped, diffed per poll). */
+  logErrors: string[];
 }
 
 export function seedVmLiveness(spawnMs: number): VmLiveness {
   const seed = (label: string): VmLeg => ({ ok: true, atMs: spawnMs, detail: `${label} seeded at spawn` });
-  return { log: seed('vm-log'), vcs: seed('vm-vcs'), sessions: seed('session-log'), collectorOk: true, collectedAtMs: spawnMs };
+  return { log: seed('vm-log'), vcs: seed('vm-vcs'), sessions: seed('session-log'), collectorOk: true, collectedAtMs: spawnMs, logErrors: [] };
 }
 
 /** Async `sbx exec` with timeout (never throws; timeout → ok:false). */
@@ -1039,7 +1096,7 @@ export async function collectVmLiveness(sbxBin: string, name: string, spawnMs: n
         ? { ok: true, atMs: maxMs, detail: `session-log ${new Date(maxMs).toISOString()}` }
         : { ok: true, atMs: spawnMs, detail: 'session-log empty/unparseable (neutral, idle since spawn)' };
   }
-  return { log, vcs, sessions, collectorOk: log.ok && vcs.ok && sessions.ok, collectedAtMs };
+  return { log, vcs, sessions, collectorOk: log.ok && vcs.ok && sessions.ok, collectedAtMs, logErrors: tailRes.ok ? vmErrorExcerpt(tailRes.stdout) : [] };
 }
 
 function buildWatchdogBundle(
@@ -1233,6 +1290,8 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     let vm: VmLiveness | null = sandboxName !== null ? seedVmLiveness(tracker.startMs) : null;
     let vmCollectInFlight = false;
     let prevTreePids: number[] = [];
+    // #163: previous poll's VM error excerpt — the tick logs only newcomers.
+    let prevVmErrors: string[] = [];
 
     /** #149 KD-5: verified client tree-kill (logs when the tree survives). */
     const killClientTree = (reason: string): boolean => {
@@ -1441,6 +1500,14 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
           void collectVmLiveness(state.config.sbxBin, sandboxName, tracker.startMs).then(
             (next) => {
               if (!settled) {
+                // #163: surface newcomer VM error lines (quiet polls print
+                // nothing). String-compare is fine — capped ~20 lines/poll.
+                for (const err of next.logErrors) {
+                  if (!prevVmErrors.includes(err)) {
+                    console.log(`[agent-daemon] run #${issueNumber} VM log: ${err}`);
+                  }
+                }
+                prevVmErrors = next.logErrors;
                 vm = next;
               }
               vmCollectInFlight = false;
@@ -1466,7 +1533,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
           handleWatchdog(hot.reason);
         } else if (nowMs - lastHeartbeatMs >= heartbeatMs) {
           lastHeartbeatMs = nowMs;
-          console.log(`[agent-daemon] run #${issueNumber} alive; ${livenessSummary(tracker, nowMs, stuckTimeoutMs)}; ${suppressionSummary(decision)}; tree: ${hot.reason}`);
+          console.log(`[agent-daemon] run #${issueNumber} alive; ${livenessSummary(tracker, nowMs, stuckTimeoutMs)}; ${suppressionSummary(decision)}; ${vmAgesSummary(vm, nowMs)}; tree: ${hot.reason}`);
         }
         return;
       }
@@ -1494,9 +1561,12 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         if (line.trim() === '') {
           continue;
         }
-        const { tag, cls } = observeLine(line, tracker);
+        const { tag, cls, nestedSessionId } = observeLine(line, tracker);
         // Raw JSON passthrough with session tags; unknown types untagged.
         console.log(tag !== '' ? `${tag} ${line}` : line);
+        if (nestedSessionId !== null) {
+          console.log(`[agent-daemon] run #${issueNumber} nested Task session ${nestedSessionId} (parent ${tracker.rootSessionId ?? 'unknown'})`);
+        }
         if (cls === 'gateway-quota') {
           handleGatewayQuota();
           return;
@@ -1516,8 +1586,11 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     });
     child.on('close', (code, signal) => {
       if (stdoutBuf.trim() !== '') {
-        const { tag, cls } = observeLine(stdoutBuf, tracker);
+        const { tag, cls, nestedSessionId } = observeLine(stdoutBuf, tracker);
         console.log(tag !== '' ? `${tag} ${stdoutBuf}` : stdoutBuf);
+        if (nestedSessionId !== null) {
+          console.log(`[agent-daemon] run #${issueNumber} nested Task session ${nestedSessionId} (parent ${tracker.rootSessionId ?? 'unknown'})`);
+        }
         if (cls === 'gateway-quota' && !settled) {
           handleGatewayQuota();
           return;
