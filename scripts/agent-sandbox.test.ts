@@ -5,6 +5,8 @@ import {
   SANDBOX_AUTH_PATH,
   SANDBOX_NETWORK_HOSTS,
   SANDBOX_REPO_DIR,
+  checkGithubTokenScope,
+  clearTokenScopeCache,
   cloneArgs,
   cloneUrl,
   cpAuthArgs,
@@ -12,12 +14,14 @@ import {
   execArgs,
   hostAuthJsonPath,
   policyArgs,
+  provisionSandbox,
   removeArgs,
   resolveGithubToken,
   resolveSbxBin,
   sandboxNameFor,
   secretArgs,
   secretRmArgs,
+  vmProjectEnv,
 } from './agent-sandbox.js';
 
 describe('sbx binary resolution', () => {
@@ -147,5 +151,59 @@ describe('sbx argv builders', () => {
 
   it('drops the sandbox-scoped github secret on teardown', () => {
     assert.deepEqual(secretRmArgs('cycledesign-issue-1'), ['secret', 'rm', 'github', '--sandbox', 'cycledesign-issue-1', '-f']);
+  });
+});
+
+describe('in-VM board env (#140 KD-5)', () => {
+  it('defaults to the ssotangkur/1 board', () => {
+    delete process.env['PROJECT_OWNER'];
+    delete process.env['PROJECT_NUMBER'];
+    assert.deepEqual(vmProjectEnv(), { PROJECT_OWNER: 'ssotangkur', PROJECT_NUMBER: '1' });
+  });
+
+  it('forwards custom board config into the VM', () => {
+    assert.deepEqual(vmProjectEnv('custom-owner', '99'), { PROJECT_OWNER: 'custom-owner', PROJECT_NUMBER: '99' });
+  });
+
+  it('adds -e PROJECT_* flags after OPENCODE_CONFIG_CONTENT without breaking the base shape', () => {
+    const args = execArgs('cycledesign-issue-1', ['opencode', 'run'], 'DENY', SANDBOX_REPO_DIR, {
+      PROJECT_OWNER: 'custom-owner',
+      PROJECT_NUMBER: '99',
+    });
+    assert.deepEqual(args, [
+      'exec',
+      '-e',
+      'OPENCODE_CONFIG_CONTENT=DENY',
+      '-e',
+      'PROJECT_OWNER=custom-owner',
+      '-e',
+      'PROJECT_NUMBER=99',
+      '-w',
+      '/home/agent/repo',
+      'cycledesign-issue-1',
+      'opencode',
+      'run',
+    ]);
+  });
+
+  it('fails fast with github-scope when the token provably lacks project scope', () => {
+    process.env['PROJECT_OWNER'] = 'no-such-owner-xyz';
+    clearTokenScopeCache();
+    try {
+      const scope = checkGithubTokenScope('dummy-token-xyz');
+      assert.equal(scope.ok, false);
+      assert.match(scope.output, /project/);
+      clearTokenScopeCache();
+      const provisioned = provisionSandbox('sbx-missing-bin', 'cycledesign-issue-1', 'D:\\work', 'C:\\auth.json', 'cycledesign-worker', {
+        repoSlug: 'ssotangkur/cycledesign',
+        githubToken: 'dummy-token-xyz',
+      });
+      assert.equal(provisioned.ok, false);
+      assert.equal(provisioned.step, 'github-scope');
+      assert.match(provisioned.output, /project/);
+    } finally {
+      delete process.env['PROJECT_OWNER'];
+      clearTokenScopeCache();
+    }
   });
 });

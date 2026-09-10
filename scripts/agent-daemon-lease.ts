@@ -18,7 +18,7 @@
  * tolerate absence). No side effects on import (unit-tested).
  */
 import { spawnSync } from 'node:child_process';
-import { syncStatusForLabel } from './agent-project.js';
+import { syncStatusForLabelDetailed } from './agent-project.js';
 
 export interface IssueLease {
   trigger: string;
@@ -90,9 +90,10 @@ export function claimIssue(repo: string, issueNumber: number, lease: IssueLease)
   if (!result.ok) {
     return false;
   }
-  // Best-effort Project Status mirror (warn-only, never blocks the lease).
-  if (syncStatusForLabel(repo, issueNumber, lease.inProgress) === 'failed') {
-    console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${lease.inProgress})`);
+  // Best-effort Project Status mirror (KD-2: warn-only, never blocks the lease; KD-3: warn carries step|kind|stderr).
+  const mirror = syncStatusForLabelDetailed(repo, issueNumber, lease.inProgress);
+  if (mirror.result === 'failed') {
+    console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${lease.inProgress}) [step: ${mirror.step}] [kind: ${mirror.kind}] ${mirror.stderr}`);
   }
   return true;
 }
@@ -106,8 +107,9 @@ export function releaseLease(repo: string, issueNumber: number, lease: IssueLeas
     if (!ghEdit(repo, issueNumber, lease.inProgress, lease.trigger).ok) {
       return 'failed';
     }
-    if (syncStatusForLabel(repo, issueNumber, lease.trigger) === 'failed') {
-      console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${lease.trigger})`);
+    const mirror = syncStatusForLabelDetailed(repo, issueNumber, lease.trigger);
+    if (mirror.result === 'failed') {
+      console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${lease.trigger}) [step: ${mirror.step}] [kind: ${mirror.kind}] ${mirror.stderr}`);
     }
     return 'released';
   } catch {
