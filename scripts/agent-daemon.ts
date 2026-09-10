@@ -1181,8 +1181,12 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
           console.error(`[agent-daemon] lease release failed for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
         }
       }
-      destroySandbox(state.config.sbxBin, sandboxName);
-      return Promise.resolve({ code: 1, failover: false, watchdogFired: false, detail: `sandbox provision failed at step ${provisioned.step}: ${oneLine(provisioned.output)}` });    }
+      const tornDown = destroySandbox(state.config.sbxBin, sandboxName);
+      if (!tornDown.ok) {
+        console.error(`[agent-daemon] sandbox destroy after provision failure for ${sandboxName}:\n${tornDown.output}`);
+      }
+      return Promise.resolve({ code: 1, failover: false, watchdogFired: false, detail: `sandbox provision failed at step ${provisioned.step}: ${oneLine(provisioned.output)}` });
+    }
     // #140: forward the host board into the VM so the in-VM Status mirror
     // uses it instead of defaults (worker Phase 0 claim + done/blocked moves).
     child = spawn(
