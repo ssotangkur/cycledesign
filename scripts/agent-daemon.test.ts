@@ -4,7 +4,15 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  HOST_RING_LINES,
+  HOST_RING_LINE_CHARS,
+  VM_MIRROR_LINE_CHARS,
+  WATCHDOG_BUNDLE_MAX_CHARS,
   createStreamTracker,
+  formatVmTailForComment,
+  formatWatchdogSections,
+  hasTerminalCommentSince,
+  isFenceClear,
   logTailNewcomers,
   markNestedVmLine,
   maxLogTimestamp,
@@ -13,6 +21,7 @@ import {
   parseSessionListTime,
   parseVmVcsTime,
   parseWmicTree,
+  pushRing,
   seedVmLiveness,
   tagForLine,
   vmAgesSummary,
@@ -203,6 +212,174 @@ describe('console surfacing (#163)', () => {
     );
     assert.equal(markNestedVmLine('message=loop session.id=ses_root1 step=0', nested), 'message=loop session.id=ses_root1 step=0');
     assert.equal(markNestedVmLine('no session here', nested), 'no session here');
+  });
+});
+
+describe('watchdog comment evidence (#162)', () => {
+  function baseSectionsInput() {
+    return {
+      silenceS: 600,
+      timeoutS: 600,
+      elapsedS: 900,
+      childPid: 1234 as number | undefined,
+      sandboxName: 'sbx-test' as string | null,
+      outcome: 'reset-intended' as const,
+      hostRecentOther: ['{"type":"step"}', '{"type":"text"}'],
+      hostRecentError: [] as string[],
+      vmExcerpt: [] as string[],
+      vmTail: { lines: [] as string[], truncated: 0, rotated: false, empty: true },
+      vmPresent: true,
+      sessionSummary: 'spawned: x',
+      processTree: 'PID 1234',
+      portOwnership: 'web:3000 -> ok',
+      branchState: 'branch: main',
+      sandboxStatus: 'sandbox ok' as string | null,
+      vmLegs: 'collectorOk: true' as string | null,
+    };
+  }
+
+  it('observeLine fills host rings with class membership and eviction', () => {
+    const tracker = createStreamTracker(Date.now());
+    for (let i = 0; i < HOST_RING_LINES + 2; i += 1) {
+      observeLine(`{"type":"step","n":${i}}`, tracker);
+    }
+    assert.equal(tracker.recentOther.length, HOST_RING_LINES);
+    assert.ok(tracker.recentOther[0].includes('"n":2'), 'oldest evicted');
+    assert.ok(tracker.recentOther[HOST_RING_LINES - 1].includes('"n":11'), 'most recent kept');
+    observeLine('Rate limit exceeded, retry later', tracker);
+    observeLine('Upstream request failed: [rate_limit_exceeded] retrying', tracker);
+    assert.equal(tracker.recentError.length, 2);
+    assert.ok(tracker.recentError[0].includes('Rate limit exceeded'), 'gateway-quota is error-class');
+    assert.ok(tracker.recentError[1].includes('Upstream request failed'), 'upstream-transient is error-class');
+    // Singletons stay maintained for exit diagnosis (bundle prints rings instead).
+    assert.ok(tracker.lastErrorLine !== null);
+    assert.ok(tracker.lastLine !== null);
+  });
+
+  it('pushRing truncates lines and evicts oldest beyond cap', () => {
+    const ring: string[] = [];
+    for (let i = 0; i < HOST_RING_LINES + 2; i += 1) {
+      pushRing(ring, `line-${i}`);
+    }
+    assert.equal(ring.length, HOST_RING_LINES);
+    assert.equal(ring[0], 'line-2');
+    pushRing(ring, 'x'.repeat(HOST_RING_LINE_CHARS + 100));
+    assert.equal(ring[ring.length - 1].length, HOST_RING_LINE_CHARS);
+  });
+
+  it('hasTerminalCommentSince skips the own-run watchdog bundle', () => {
+    const spawn = '2026-09-11T02:00:00.000Z';
+    const own = '2026-09-11T02:05:00.000Z';
+    assert.equal(
+      hasTerminalCommentSince([{ body: '## Watchdog investigation\n\n### What happened', createdAt: own }], spawn),
+      false,
+      'own-run bundle is not a terminal signal',
+    );
+    assert.equal(
+      hasTerminalCommentSince([{ body: '## Watchdog investigation', createdAt: '2026-09-11T01:00:00.000Z' }], spawn),
+      false,
+      'prior-run bundle already filtered by since',
+    );
+    assert.equal(
+      hasTerminalCommentSince([{ body: '## Question\nstuck?', createdAt: own }], spawn),
+      true,
+      'real terminal comment still blocks',
+    );
+    assert.equal(hasTerminalCommentSince([{ body: '## Plan with Reason\n...', createdAt: own }], spawn), true);
+    assert.equal(isFenceClear({ labels: ['implementing'], terminalCommentSince: false }), true);
+    assert.equal(isFenceClear({ labels: ['implementing'], terminalCommentSince: true }), false);
+  });
+
+  it('formatVmTailForComment slices last-50 from the fire-time tail (prevTail identical)', () => {
+    const tail = Array.from(
+      { length: 60 },
+      (_, i) => `timestamp=2026-09-11T02:00:${String(i).padStart(2, '0')}Z level=INFO msg=line-${i}`,
+    ).join('\n');
+    const out = formatVmTailForComment(tail, tail, new Set());
+    assert.equal(out.empty, false);
+    assert.equal(out.lines.length, 50);
+    assert.equal(out.truncated, 10);
+    assert.equal(out.rotated, false);
+    assert.ok(out.lines[0].includes('line-10'));
+    assert.ok(out.lines[49].includes('line-59'));
+  });
+
+  it('formatVmTailForComment caps lines, marks nested sessions, flags rotation/empty', () => {
+    const long = `session.id=ses_child1 msg=${'y'.repeat(500)}`;
+    const out = formatVmTailForComment(`plain line\n${long}`, 'unrelated\nolder', new Set(['ses_child1']));
+    assert.equal(out.rotated, true);
+    assert.ok(out.lines[1].length <= VM_MIRROR_LINE_CHARS + ' [sub-agent]'.length);
+    assert.ok(out.lines[1].endsWith('[sub-agent]'));
+    assert.deepEqual(formatVmTailForComment('', '', new Set()), { lines: [], truncated: 0, rotated: false, empty: true });
+  });
+
+  it('formatWatchdogSections renders the header matrix and next-run directive', () => {
+    const intended = formatWatchdogSections(baseSectionsInput());
+    assert.ok(intended.includes('### What happened'));
+    assert.ok(intended.includes('Label intent:'));
+    assert.ok(intended.includes('iff the fence is still clear'));
+    assert.ok(intended.includes('### Next run'));
+    assert.ok(intended.includes('MUST (1) investigate'));
+    assert.ok(intended.includes('diagnose-stuck-run'));
+    assert.ok(intended.includes('verdict (`busy` | `rate-limited` | `wedged`'));
+    assert.ok(intended.includes('how you will avoid the same stall'));
+    const blocked = formatWatchdogSections({ ...baseSectionsInput(), outcome: 'fence-blocked' });
+    assert.ok(blocked.includes('kept at `implementing` (no reset)'));
+    const failClosed = formatWatchdogSections({ ...baseSectionsInput(), outcome: 'transport-fail-closed' });
+    assert.ok(failClosed.includes('fail-closed (no reset)'));
+    const destroyed = formatWatchdogSections({ ...baseSectionsInput(), outcome: 'destroy-failed' });
+    assert.ok(destroyed.includes('parked at `question`'));
+    const bare = formatWatchdogSections({
+      ...baseSectionsInput(),
+      vmPresent: false,
+      sandboxName: null,
+      sandboxStatus: null,
+      vmLegs: null,
+    });
+    assert.ok(bare.includes('(no VM evidence — non-sandbox run)'));
+    assert.ok(bare.includes('(non-sandbox run, no VM to destroy)'));
+  });
+
+  it('formatWatchdogSections passes the VM excerpt through as-is', () => {
+    const out = formatWatchdogSections({
+      ...baseSectionsInput(),
+      vmExcerpt: ['level=ERROR boom', 'Rate limit exceeded x'],
+    });
+    assert.ok(out.includes('level=ERROR boom'));
+    assert.ok(out.includes('Rate limit exceeded x'));
+  });
+
+  it('formatWatchdogSections caps total size, cutting rings before tail/excerpt', () => {
+    const input = baseSectionsInput();
+    input.hostRecentOther = Array.from({ length: 10 }, (_, i) => `o${i}-`.concat('a'.repeat(497)));
+    input.hostRecentError = Array.from({ length: 10 }, (_, i) => `e${i}-`.concat('b'.repeat(497)));
+    input.vmTail = {
+      lines: Array.from({ length: 50 }, (_, i) => `t${i}-`.concat('c'.repeat(290))),
+      truncated: 0,
+      rotated: false,
+      empty: false,
+    };
+    input.vmExcerpt = ['level=ERROR KEEP-ME-EXCERPT'];
+    const out = formatWatchdogSections(input);
+    assert.ok(out.length <= WATCHDOG_BUNDLE_MAX_CHARS, `bundle ${out.length} chars exceeds cap`);
+    assert.ok(out.includes('### What happened'));
+    assert.ok(out.includes('### Next run'));
+    assert.ok(!out.includes('o0-'), 'other ring cut first');
+    assert.ok(out.includes('e0-'), 'error ring survives ring-stage cuts');
+    assert.ok(out.includes('t0-'), 'VM tail survives ring-stage cuts');
+    assert.ok(out.includes('KEEP-ME-EXCERPT'), 'excerpt survives ring-stage cuts');
+  });
+
+  it('formatWatchdogSections truncates existing sections last, never header/next-run', () => {
+    const input = baseSectionsInput();
+    input.processTree = 'P'.repeat(20000);
+    input.portOwnership = 'O'.repeat(10000);
+    const out = formatWatchdogSections(input);
+    assert.ok(out.length <= WATCHDOG_BUNDLE_MAX_CHARS, `bundle ${out.length} chars exceeds cap`);
+    assert.ok(out.includes('### What happened'));
+    assert.ok(out.includes('### Next run'));
+    assert.ok(out.includes('MUST (1) investigate'));
+    assert.ok(out.includes('[truncated to fit 24KB watchdog cap]'));
   });
 });
 
