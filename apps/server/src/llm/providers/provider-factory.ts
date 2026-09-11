@@ -64,8 +64,6 @@ export function getLLMProvider(): IProvider {
     console.log('[ProviderFactory] Using LocalProvider');
     return cachedProvider;
   }
-    return cachedProvider;
-  }
 
   cachedProvider = new QwenProvider();
   console.log('[ProviderFactory] Using QwenProvider');
