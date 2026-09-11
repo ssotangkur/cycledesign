@@ -98,3 +98,40 @@ describe('providers router with ENABLE_MOCK_PROVIDER=true', () => {
     expect(existsSync(join(tmpDir, '.cycledesign'))).toBe(false);
   });
 });
+
+describe('providers router local provider', () => {
+  it('lists local as available', async () => {
+    const caller = await loadRouter();
+    const list = await caller.list();
+    expect(list.map((p) => p.name)).toContain('local');
+  });
+
+  it('round-trips baseURL through updateConfig/getConfig with normalization', async () => {
+    const caller = await loadRouter();
+    await caller.updateConfig({
+      provider: 'local',
+      baseURL: 'http://localhost:1234/v1/chat/completions',
+      model: 'qwen3:8b',
+    });
+    const config = await caller.getConfig();
+    expect(config.provider).toBe('local');
+    expect(config.baseURL).toBe('http://localhost:1234/v1');
+    expect(config.model).toBe('qwen3:8b');
+    // Second caller (fresh module state, same cwd) sees persisted values.
+    const caller2 = await loadRouter();
+    const config2 = await caller2.getConfig();
+    expect(config2.baseURL).toBe('http://localhost:1234/v1');
+    expect(config2.model).toBe('qwen3:8b');
+  });
+
+  it("never writes a literal 'default' model for local", async () => {
+    const caller = await loadRouter();
+    const result = await caller.updateConfig({ provider: 'local' });
+    expect(result.model).not.toBe('default');
+    const { readFileSync } = await import('node:fs');
+    const localJson = join(tmpDir, '.cycledesign', 'local.json');
+    if (existsSync(localJson)) {
+      expect(readFileSync(localJson, 'utf-8')).not.toContain('"default"');
+    }
+  });
+});

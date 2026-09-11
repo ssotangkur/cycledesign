@@ -207,6 +207,23 @@ Requires an `OPENROUTER_API_KEY` (set it in Settings or via env).
 - Rate limits surface as a readable error with no auto-fallback: retry manually
   for per-minute limits; daily limits block until reset or top-up.
 
+### Local LLM (custom URL)
+
+Selectable in Settings as "Local LLM (custom URL)". Points CycleDesign at a
+locally hosted OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp
+server) via a custom Base URL + model + optional API key.
+
+- Defaults: Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1`.
+  Plain `http://` localhost URLs are allowed (no TLS upgrade).
+- No API key needed for vanilla Ollama/LM Studio; set one only if your server
+  gates with it (e.g. vLLM `--api-key`). Env overrides: `LOCAL_LLM_BASE_URL`,
+  `LOCAL_LLM_MODEL`, `LOCAL_LLM_API_KEY`.
+- Tool-calling caveat: chat works with most local models, but small models
+  often lack reliable function-calling, so tool use may degrade.
+- If the server is unreachable, chat surfaces an actionable error naming the
+  Base URL instead of a stack trace; the model list falls back to your
+  configured model (or free-text entry) so Settings stays usable offline.
+
 ## Basic Usage
 
 ### Creating a Session

@@ -121,6 +121,7 @@ export interface IProvider {
 export interface IProviderConfig {
   model?: string;
   apiKey?: string;
+  baseURL?: string;
 }
 
 export interface IProviderClass {

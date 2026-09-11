@@ -4,6 +4,7 @@ import { MistralProvider } from '../../llm/providers/mistral.js';
 import { QwenProvider } from '../../llm/providers/qwen.js';
 import { OpenRouterFreeProvider } from '../../llm/providers/openrouter-free.js';
 import { ZenFreeProvider } from '../../llm/providers/zen-free.js';
+import { LocalProvider } from '../../llm/providers/local.js';
 import { MockProvider } from '../../llm/providers/mock.js';
 import { BaseProvider } from '../../llm/providers/base-provider.js';
 import { clearProviderCache } from '../../llm/providers/provider-factory.js';
@@ -32,6 +33,7 @@ const providers: IProviderClass[] = [
   MistralProvider,
   OpenRouterFreeProvider,
   ZenFreeProvider,
+  LocalProvider,
   ...(process.env.ENABLE_MOCK_PROVIDER === 'true' ? [MockProvider] : []),
 ];
 const providerMap = new Map(providers.map((p) => [p.name(), p]));
@@ -86,6 +88,7 @@ const providerSchemas = {
     provider: z.string().optional(),
     apiKey: z.string().optional(),
     model: z.string().optional(),
+    baseURL: z.string().optional(),
   }),
 };
 
@@ -103,11 +106,12 @@ export const providersRouter = router({
   getConfig: publicProcedure.query(async () => {
     const providerClass = providerMap.get(configState.current.provider);
     const hasApiKey = providerClass?.hasApiKey?.() ?? false;
-    // Get model from provider's own config
-    const model = providerClass?.loadConfig()?.model;
+    // Get model/baseURL from provider's own config
+    const providerConfig = providerClass?.loadConfig();
     return {
       provider: configState.current.provider,
-      model,
+      model: providerConfig?.model,
+      baseURL: providerConfig?.baseURL,
       hasApiKey,
     };
   }),
@@ -116,7 +120,7 @@ export const providersRouter = router({
   updateConfig: publicProcedure
     .input(providerSchemas.provider)
     .mutation(async ({ input }) => {
-      const { provider, apiKey, model } = input;
+      const { provider, apiKey, model, baseURL } = input;
 
       const previousProvider = configState.current.provider;
 
@@ -124,9 +128,11 @@ export const providersRouter = router({
       // return previous state without writing any config or clearing caches.
       if (provider && !providerMap.has(provider)) {
         const previousClass = providerMap.get(previousProvider);
+        const previousConfig = previousClass?.loadConfig();
         return {
           provider: previousProvider,
-          model: previousClass?.loadConfig()?.model || '',
+          model: previousConfig?.model || '',
+          baseURL: previousConfig?.baseURL,
           hasApiKey: previousClass?.hasApiKey?.() ?? false,
         };
       }
@@ -139,8 +145,12 @@ export const providersRouter = router({
       const currentProviderConfig = providerClass?.loadConfig();
 
       const newProviderConfig: IProviderConfig = {
-        model: model || currentProviderConfig?.model || 'default',
+        // Local has no default model: resolve to '' (never a literal
+        // 'default') so a wrong model is never silently pinned. Normalization
+        // of baseURL lives in LocalProvider.saveConfig (single owner).
+        model: model || currentProviderConfig?.model || (newProvider === 'local' ? '' : 'default'),
         ...(apiKey ? { apiKey } : {}),
+        ...(baseURL ? { baseURL } : {}),
       };
 
       // Save to provider's own config file (e.g., mistral-api-key)
@@ -165,6 +175,7 @@ export const providersRouter = router({
       return {
         provider: configState.current.provider,
         model: newProviderConfig.model || '',
+        baseURL: providerClass?.loadConfig()?.baseURL,
         hasApiKey,
       };
     }),
