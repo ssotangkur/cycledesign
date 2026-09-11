@@ -58,16 +58,19 @@ export default function SettingsPage() {
   const isLocal = configData?.provider === 'local';
 
   // Local Base URL / custom model fields sync from server config until edited.
-  useEffect(() => {
-    if (isLocal && !baseURLTouched) {
-      setBaseURLInput(configData?.baseURL || '');
-    }
-  }, [isLocal, configData?.baseURL, baseURLTouched]);
-  useEffect(() => {
-    if (isLocal && !customModelTouched) {
-      setCustomModelInput(configData?.model || '');
-    }
-  }, [isLocal, configData?.model, customModelTouched]);
+  // Render-phase adjustment (no useEffect) so edited fields are never clobbered
+  // while server config is the source of truth pre-edit. See
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevBaseURL, setPrevBaseURL] = useState<string | undefined>(undefined);
+  if (isLocal && !baseURLTouched && configData?.baseURL !== prevBaseURL) {
+    setPrevBaseURL(configData?.baseURL);
+    setBaseURLInput(configData?.baseURL || '');
+  }
+  const [prevLocalModel, setPrevLocalModel] = useState<string | undefined>(undefined);
+  if (isLocal && !customModelTouched && configData?.model !== prevLocalModel) {
+    setPrevLocalModel(configData?.model);
+    setCustomModelInput(configData?.model || '');
+  }
 
   const showPlaceholder = configData?.hasApiKey && !apiKeyTouched;
   const apiKeyDisplayValue = loadingConfig
