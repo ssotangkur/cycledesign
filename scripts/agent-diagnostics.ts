@@ -7,9 +7,10 @@
  * (`buildWatchdogBundle`, exported) with its pure formatter
  * (`formatWatchdogSections`) and total ≤24KB cap.
  *
- * Also owns the evidence types (`StreamTracker`, `VmLeg`/`VmLiveness` live
- * in `./agent-vm-liveness.js`) so `agent-daemon.js` never forms an import
- * cycle back into this module: daemon → diagnostics → vm-liveness/sandbox.
+ * Also owns the stream-tracker construction + host rings (`createStreamTracker`,
+ * `pushRing`); the shared shapes (`StreamTracker`, `VmLeg`/`VmLiveness`) live
+ * in `./agent-daemon-types.js` / `./agent-vm-liveness.js` so `agent-daemon.js`
+ * never forms an import cycle back into this module: daemon → diagnostics → vm-liveness/sandbox.
  * `agent-daemon.js` keeps thin re-exports so existing test imports hold.
  */
 import { execSync, spawnSync } from 'node:child_process';

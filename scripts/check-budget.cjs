@@ -24,8 +24,11 @@ function main() {
     .sort();
   let over = 0;
   let largest = { file: '', lines: 0 };
+  // Plain `wc -l` semantics: count newline characters (a trailing newline
+  // does not add an extra line).
+  const countLines = (content) => (content === '' ? 0 : content.split('\n').length - (content.endsWith('\n') ? 1 : 0));
   for (const file of files) {
-    const lines = fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8').split('\n').length;
+    const lines = countLines(fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8'));
     if (lines > largest.lines) {
       largest = { file, lines };
     }
@@ -36,7 +39,7 @@ function main() {
   }
   const daemon = path.join(SCRIPTS_DIR, 'agent-daemon.ts');
   if (fs.existsSync(daemon)) {
-    const daemonLines = fs.readFileSync(daemon, 'utf8').split('\n').length;
+    const daemonLines = countLines(fs.readFileSync(daemon, 'utf8'));
     console.log(`[check:budget] agent-daemon.ts: ${daemonLines} lines (target <${BUDGET_LINES + 1}; follow-up extractions pending per #159 KD-6)`);
   }
   if (over === 0) {
