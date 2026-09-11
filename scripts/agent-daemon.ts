@@ -127,6 +127,7 @@ import {
 } from './agent-daemon-board.js';
 import { checkProjectRead, projectNumber, projectOwner, syncStatusForLabelDetailed } from './agent-project.js';
 import { tryReturnToMain } from './agent-daemon-return-main.js';
+import { createTeardownState, teardownRun, type TeardownDeps } from './agent-daemon-teardown.js';
 import { treeKill, treeKillVerified } from './agent-tree-kill.js';
 
 // Re-exported so existing call sites and tests keep working via agent-daemon.js.
@@ -615,14 +616,19 @@ function sleepSync(ms: number): void {
  * `terminalCommentSince:true`) the fence is re-queried once after a short
  * delay; on persistent failure the caller logs and accepts the best-effort
  * gap (never fail-open, so a just-landed terminal state is never clobbered).
+ *
+ * #159: `firstFence` reuses the fence `teardownRun` already fetched so the
+ * release path fences once (destroy-before-fence stays structural); omitted
+ * it fences itself (signal path).
  */
 function releaseLeaseWithRetry(
   repo: string,
   issueNumber: number,
   lease: { trigger: string; inProgress: string },
   spawnIso: string,
+  firstFence?: IssueState,
 ): { result: 'released' | 'suppressed' | 'failed'; fence: IssueState } {
-  let fence = checkFencing(repo, issueNumber, spawnIso);
+  let fence = firstFence ?? checkFencing(repo, issueNumber, spawnIso);
   if (isFenceTransportFailure(fence)) {
     sleepSync(1500);
     fence = checkFencing(repo, issueNumber, spawnIso);
@@ -687,6 +693,16 @@ function parkAtQuestion(repo: string, issueNumber: number, body: string): void {
       console.warn(`[agent-daemon] project Status mirror failed for #${issueNumber} (${LABEL_QUESTION}) [step: ${mirror.step}] [kind: ${mirror.kind}] ${mirror.stderr}`);
     }
   }
+}
+
+/**
+ * #159 KD-2: shared destroy-failure park body (was inline in the per-path
+ * `handleDestroyFailure` closure). A failed destroy parks at `question`
+ * fail-closed — a blind reset would re-queue a duplicate run behind the
+ * orphan — with the manual-reset hint in the log and the comment.
+ */
+function destroyParkBody(destroyed: { ok: boolean; output: string }, extra?: string): string {
+  return `Sandbox destroy failed after kill, so the worker may still be alive in-VM. Parked at \`question\` (fail-closed); reset to \`ready to implement\` only after confirming the sandbox is gone (\`sbx ls\`).${extra ?? ''}\n\nDestroy output:\n${destroyed.output}`;
 }
 
 /**
@@ -1565,17 +1581,37 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       // KD-4 (#132): the lease was already claimed above, and this early
       // return never enters finish() — release here or the issue strands at
       // `planning`/`implementing` (poll only lists triggers).
-      if (lease !== null) {
-        const { result, fence } = releaseLeaseWithRetry(repo, issueNumber, lease, spawnIso);
-        if (result === 'released') {
-          console.log(`[agent-daemon] lease released for #${issueNumber} (back to ${lease.trigger})`);
-        } else if (result === 'failed') {
-          console.error(`[agent-daemon] lease release failed for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
-        }
-      }
-      const tornDown = destroySandbox(state.config.sbxBin, sandboxName);
-      if (!tornDown.ok) {
-        console.error(`[agent-daemon] sandbox destroy after provision failure for ${sandboxName}:\n${tornDown.output}`);
+      // #159 KD-2: destroy-before-release (was release-then-destroy; the
+      // reorder is behavior-neutral and stated explicitly).
+      const provisionTeardown = teardownRun(
+        {
+          child: null,
+          sbxBin: state.config.sbxBin,
+          sandboxName,
+          repo,
+          issueNumber,
+          lease,
+          spawnIso,
+          reason: 'provision',
+          leaseAction: 'release',
+          state: createTeardownState(),
+        },
+        {
+          kill: () => true,
+          destroy: (sbxBin, name) => destroySandbox(sbxBin, name),
+          fence: (fenceRepo, fenceIssue, fenceIso) => checkFencing(fenceRepo, fenceIssue, fenceIso),
+          release: (relRepo, relIssue, relLease, relIso, fence) =>
+            releaseLeaseWithRetry(relRepo, relIssue, relLease, relIso, fence).result,
+          reset: () => {},
+          park: (parkRepo, parkIssue, destroyed, extra) => parkAtQuestion(parkRepo, parkIssue, destroyParkBody(destroyed, extra)),
+        },
+      );
+      if (provisionTeardown.leaseResult === 'released' && lease !== null) {
+        console.log(`[agent-daemon] lease released for #${issueNumber} (back to ${lease.trigger})`);
+      } else if (provisionTeardown.leaseResult === 'failed' && lease !== null) {
+        console.error(
+          `[agent-daemon] lease release failed for #${issueNumber} (labels: ${provisionTeardown.fence?.labels.join(', ') || '(unknown)'})`,
+        );
       }
       return Promise.resolve({ code: 1, failover: false, watchdogFired: false, detail: `sandbox provision failed at step ${provisioned.step}: ${oneLine(provisioned.output)}` });
     }
@@ -1614,12 +1650,19 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
 
   return new Promise((resolve) => {
     let settled = false;
-    // #149 KD-5: destroy status owned by this run. ensureSandboxGone runs
-    // once; finish reuses it so failover/watchdog paths (which destroy
-    // BEFORE the fence check) never double-destroy.
-    let sandboxGone: { ok: boolean; output: string } | null = null;
-    // #149 KD-5: set once a destroy-failure park lands (no double parks).
-    let destroyParked = false;
+    // #159 KD-2: per-run teardown state + injected deps shared by every
+    // finish path (finish/failover/watchdog). `teardownRun` owns the
+    // destroy-before-fence/lease ordering structurally, so paths can never
+    // double-destroy (once-cache) or double-park (once-flag).
+    const tdState = createTeardownState();
+    const tdDeps: TeardownDeps = {
+      kill: (target, reason) => (target === null ? true : killClientTree(reason)),
+      destroy: (sbxBin, name) => destroySandbox(sbxBin, name),
+      fence: (fenceRepo, fenceIssue, fenceIso) => checkFencing(fenceRepo, fenceIssue, fenceIso),
+      release: (relRepo, relIssue, relLease, relIso, fence) => releaseLeaseWithRetry(relRepo, relIssue, relLease, relIso, fence).result,
+      reset: (resetRepo, resetIssue) => resetToReady(resetRepo, resetIssue),
+      park: (parkRepo, parkIssue, destroyed, extra) => parkAtQuestion(parkRepo, parkIssue, destroyParkBody(destroyed, extra)),
+    };
     // #149 KD-4: VM liveness cache (async off-tick, last-good) + tree pids.
     // Seeded at spawn so early polls read sane ages; collectors refresh.
     let vm: VmLiveness | null = sandboxName !== null ? seedVmLiveness(tracker.startMs) : null;
@@ -1639,41 +1682,6 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       return dead;
     };
 
-    /** #149 KD-5: treeKill → verify → destroySandbox, exactly once per run. */
-    const ensureSandboxGone = (reason: string): { ok: boolean; output: string } | null => {
-      if (sandboxName === null) {
-        return null;
-      }
-      if (sandboxGone !== null) {
-        return sandboxGone;
-      }
-      killClientTree(reason);
-      sandboxGone = destroySandbox(state.config.sbxBin, sandboxName);
-      console.log(`[agent-daemon] run #${issueNumber} sandbox destroy (${reason}) ok=${sandboxGone.ok}\n${sandboxGone.output}`);
-      return sandboxGone;
-    };
-
-    /**
-     * #149 KD-5: destroy-failure fail-closed — park at `question` (never
-     * reset to ready: a blind reset would re-queue a duplicate run behind
-     * the orphan) and suppress the lease release. The log carries the
-     * manual-reset hint.
-     */
-    const handleDestroyFailure = (destroyed: { ok: boolean; output: string }, extra?: string): void => {
-      if (destroyParked) {
-        return;
-      }
-      destroyParked = true;
-      console.error(
-        `[agent-daemon] run #${issueNumber} sandbox destroy failed; parking at question (fail-closed, may need manual reset to \`ready to implement\` after confirming the sandbox is gone via \`sbx ls\`)`,
-      );
-      parkAtQuestion(
-        repo,
-        issueNumber,
-        `Sandbox destroy failed after kill, so the worker may still be alive in-VM. Parked at \`question\` (fail-closed); reset to \`ready to implement\` only after confirming the sandbox is gone (\`sbx ls\`).${extra ?? ''}\n\nDestroy output:\n${destroyed.output}`,
-      );
-    };
-
     const finish = (outcome: RunOutcome): void => {
       if (settled) {
         return;
@@ -1688,32 +1696,38 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       // lease/sandbox teardown so a signal landing mid-teardown sees null.
       currentSandbox = null;
       currentLease = null;
-      if (sandboxName !== null) {
-        // #149 KD-5: destroy BEFORE the fence-check/lease-release below, so
-        // a failed destroy suppresses the release instead of re-queueing
-        // behind the orphan. #121: client kill/exit alone orphans the in-VM
-        // worker; the sandbox itself is the kill. Runs on every finish path.
-        const destroyed = ensureSandboxGone('finish');
-        if (destroyed !== null && !destroyed.ok) {
-          handleDestroyFailure(destroyed);
-          resolve(outcome);
-          return;
-        }
-      } else {
-        killClientTree('finish');
+      // #159 KD-2: one teardown call owns destroy-before-fence/release.
+      // #121: client kill/exit alone orphans the in-VM worker; the sandbox
+      // itself is the kill. A failed destroy parks (fail-closed) and
+      // suppresses the release instead of re-queueing behind the orphan.
+      const td = teardownRun(
+        {
+          child,
+          sbxBin: state.config.sbxBin,
+          sandboxName,
+          repo,
+          issueNumber,
+          lease,
+          spawnIso,
+          reason: 'finish',
+          leaseAction: 'release',
+          state: tdState,
+        },
+        tdDeps,
+      );
+      if (td.parked) {
+        resolve(outcome);
+        return;
       }
       // #132: guaranteed lease release on every finish path. Failover and
       // watchdog paths already reset labels themselves, so this suppresses
       // there; terminal moves by the worker suppress it everywhere else.
       // Residual best-effort gap (KD-5): persistent fence transport failure
       // keeps fail-closed (no clobber) and is only logged below.
-      if (lease !== null) {
-        const { result: released, fence } = releaseLeaseWithRetry(repo, issueNumber, lease, spawnIso);
-        if (released === 'released') {
-          console.log(`[agent-daemon] lease released for #${issueNumber} (back to ${lease.trigger})`);
-        } else if (released === 'failed') {
-          console.error(`[agent-daemon] lease release failed for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
-        }
+      if (td.leaseResult === 'released' && lease !== null) {
+        console.log(`[agent-daemon] lease released for #${issueNumber} (back to ${lease.trigger})`);
+      } else if (td.leaseResult === 'failed' && lease !== null) {
+        console.error(`[agent-daemon] lease release failed for #${issueNumber} (labels: ${td.fence?.labels.join(', ') || '(unknown)'})`);
       }
       resolve(outcome);
     };
@@ -1728,33 +1742,52 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       if (tracker.firstGatewayLine !== null) {
         console.error(`[agent-daemon] first gateway line: ${tracker.firstGatewayLine}`);
       }
+      // #159 KD-2: failover budget pre-records before teardown. Neutral
+      // reorder: the per-issue lifetime counter is independent of the
+      // destroy outcome, and the budget park still lands after the destroy
+      // via the reset closure below (never before it — no orphan).
+      const { count, allowed } = recordFailover(state.failoverCounts, issueNumber);
       // #149 KD-5 ordering: tree-kill → verify → destroy → fencing-check →
       // label-reset → respawn. A failed destroy parks (fail-closed) instead
       // of resetting behind the orphan.
-      killClientTree('failover');
-      const destroyed = ensureSandboxGone('failover');
-      if (destroyed !== null && !destroyed.ok) {
-        recordFailover(state.failoverCounts, issueNumber);
-        handleDestroyFailure(destroyed);
+      const failoverTd = teardownRun(
+        {
+          child,
+          sbxBin: state.config.sbxBin,
+          sandboxName,
+          repo,
+          issueNumber,
+          lease,
+          spawnIso,
+          reason: 'failover',
+          leaseAction: 'reset',
+          state: tdState,
+        },
+        {
+          ...tdDeps,
+          reset: (resetRepo, resetIssue, fence) => {
+            if (!allowed) {
+              console.error(`[agent-daemon] failover budget exhausted for #${issueNumber} (${count}); parking at question`);
+              parkAtQuestion(
+                resetRepo,
+                resetIssue,
+                `Failover budget exhausted (${count} gateway-quota failovers this daemon lifetime). Parking for a human; reset to \`ready to implement\` to retry.`,
+              );
+            } else if (isFenceClear(fence)) {
+              resetToReady(resetRepo, resetIssue);
+            } else {
+              console.error(`[agent-daemon] fencing blocked label reset for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
+            }
+          },
+        },
+      );
+      if (failoverTd.parked) {
         finish({ code: 1, failover: true, watchdogFired: false, detail: 'sandbox destroy failed on failover; parked at question' });
         return;
       }
-      const fence = checkFencing(repo, issueNumber, spawnIso);
-      const { count, allowed } = recordFailover(state.failoverCounts, issueNumber);
       if (!allowed) {
-        console.error(`[agent-daemon] failover budget exhausted for #${issueNumber} (${count}); parking at question`);
-        parkAtQuestion(
-          repo,
-          issueNumber,
-          `Failover budget exhausted (${count} gateway-quota failovers this daemon lifetime). Parking for a human; reset to \`ready to implement\` to retry.`,
-        );
         finish({ code: 1, failover: true, watchdogFired: false, detail: `failover budget exhausted (${count}); parked at question` });
         return;
-      }
-      if (isFenceClear(fence)) {
-        resetToReady(repo, issueNumber);
-      } else {
-        console.error(`[agent-daemon] fencing blocked label reset for #${issueNumber} (labels: ${fence.labels.join(', ') || '(unknown)'})`);
       }
       noteFailover(state.probe, Date.now());
       finish({
@@ -1792,15 +1825,34 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       postWatchdogComment(repo, issueNumber, bundle);
       // #149 KD-5 ordering: destroy BEFORE fence-check/label-reset. A failed
       // destroy parks (fail-closed) instead of resetting behind the orphan.
-      killClientTree('watchdog');
-      const destroyed = ensureSandboxGone('watchdog');
-      if (destroyed !== null && !destroyed.ok) {
-        // #162 KD-6: thread watchdog context into the existing park comment
-        // (no new follow-up comment per fire).
-        handleDestroyFailure(
-          destroyed,
-          `\n\nWatchdog context: fired after ${Math.round((Date.now() - tracker.lastNonErrorAtMs) / 1000)}s of zero non-error stream activity on worker PID ${child.pid ?? '(unknown)'} (${livenessSummary(tracker, Date.now(), stuckTimeoutMs)}). The next run MUST investigate against the watchdog evidence above and post its verdict + avoidance plan.`,
-        );
+      const watchdogTd = teardownRun(
+        {
+          child,
+          sbxBin: state.config.sbxBin,
+          sandboxName,
+          repo,
+          issueNumber,
+          lease,
+          spawnIso,
+          reason: 'watchdog',
+          leaseAction: 'reset',
+          // #162 KD-6: thread watchdog context into the existing park comment
+          // (no new follow-up comment per fire).
+          destroyExtra: `\n\nWatchdog context: fired after ${Math.round((Date.now() - tracker.lastNonErrorAtMs) / 1000)}s of zero non-error stream activity on worker PID ${child.pid ?? '(unknown)'} (${livenessSummary(tracker, Date.now(), stuckTimeoutMs)}). The next run MUST investigate against the watchdog evidence above and post its verdict + avoidance plan.`,
+          state: tdState,
+        },
+        {
+          ...tdDeps,
+          reset: (resetRepo, resetIssue, fence) => {
+            if (isFenceClear(fence)) {
+              resetToReady(resetRepo, resetIssue);
+            } else {
+              console.error(`[agent-daemon] fencing blocked watchdog label reset for #${issueNumber}`);
+            }
+          },
+        },
+      );
+      if (watchdogTd.parked) {
         finish({
           code: 1,
           failover: false,
@@ -1808,12 +1860,6 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
           detail: `watchdog fired but sandbox destroy failed; parked at question (${livenessSummary(tracker, Date.now(), stuckTimeoutMs)})`,
         });
         return;
-      }
-      const fence = checkFencing(repo, issueNumber, spawnIso);
-      if (isFenceClear(fence)) {
-        resetToReady(repo, issueNumber);
-      } else {
-        console.error(`[agent-daemon] fencing blocked watchdog label reset for #${issueNumber}`);
       }
       // Watchdog never changes model state (KD-6): respawn follows current failover/probe state.
       finish({
