@@ -63,6 +63,16 @@ When Knip reports unused files/exports:
 
 ---
 
+## Daemon Line-Budget Rule
+
+**Soft limit: 500 lines per `scripts/*.ts` code file**, measured by plain `wc -l` (comments and blanks included — simplest, no tooling). Test files (`*.test.ts`) are exempt and unlimited.
+
+- Check with `npm run check:budget` (warn-only, always exits 0; deliberately NOT part of `npm run validate`).
+- Ratchet: no new growth in over-budget files. New watchdog/VM legs go in new modules (`scripts/agent-vm-liveness.ts`, `scripts/agent-diagnostics.ts`), never in `scripts/agent-daemon.ts`.
+- `scripts/agent-daemon.ts` stays the orchestrator only (`poll -> collect -> decide -> teardown`); run-control/probe/poll-main extractions to reach `<500` are tracked separately.
+
+---
+
 ## Testing Workflow
 
 After making UI changes, follow this testing pattern:

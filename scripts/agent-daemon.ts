@@ -137,6 +137,7 @@ import {
   vmErrorExcerpt,
   vmProgressLines,
   type VmLiveness,
+  type ExecFn,
 } from './agent-vm-liveness.js';
 import { claimIssue, isFenceTransportFailure, leaseForCommand, releaseLease, type IssueLease } from './agent-daemon-lease.js';
 import {
@@ -757,8 +758,12 @@ interface RunOutcome {
  * headless deny-via-env, raw tagged console output, classifier + watchdog
  * tracking. Resolves on close; failover/watchdog paths tree-kill first.
  */
-function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean; model: string; repo: string; state: DaemonState }): Promise<RunOutcome> {
-  const { dryRun, model, repo, state } = opts;
+function runSkill(
+  command: string,
+  issueNumber: number,
+  opts: { dryRun: boolean; model: string; repo: string; state: DaemonState; execFn?: ExecFn },
+): Promise<RunOutcome> {
+  const { dryRun, model, repo, state, execFn } = opts;
   const sandbox = state.config.sandboxMode;
   const sandboxName = sandbox ? sandboxNameFor(issueNumber) : null;
   const opencodeArgv = ['run', '--command', command, String(issueNumber), '--model', model, '--format', 'json'];
@@ -1097,9 +1102,10 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         // #149 KD-4: conjunctive predicate in sandboxMode — stdout alone is
         // NOT enough (buffered until Task-end). Collectors refresh async
         // off-tick (last-good cached); the predicate reads the cache.
+        // #159 KD-5: `execFn` is injected (tests pass a fake); default is live.
         if (!vmCollectInFlight) {
           vmCollectInFlight = true;
-          void collectVmLiveness(state.config.sbxBin, sandboxName, tracker.startMs).then(
+          void collectVmLiveness(state.config.sbxBin, sandboxName, tracker.startMs, execFn).then(
             (next) => {
               if (!settled) {
                 // #163: surface newcomer VM error lines in full (quiet polls
@@ -1449,7 +1455,13 @@ function modelForRun(state: DaemonState): string {
   return state.probe.model === 'go' ? state.config.goModel : state.config.freeModel;
 }
 
-async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckState, state: DaemonState): Promise<void> {
+async function pollOnce(
+  repo: string,
+  dryRun: boolean,
+  updateState: UpdateCheckState,
+  state: DaemonState,
+  daemonOpts?: { execFn?: ExecFn },
+): Promise<void> {
   await maybeCheckForUpdate(updateState, dryRun);
   // #120: heal crash/empty-queue stranded state (no runSkill may run this pass).
   tryReturnToMain(dryRun);
@@ -1556,7 +1568,7 @@ async function pollOnce(repo: string, dryRun: boolean, updateState: UpdateCheckS
       }
     }
     console.log(`[agent-daemon] claiming issue #${run.issue.number} ("${run.issue.title}") via ${run.command} [label: ${run.label}] [model: ${model}] [stuck-timeout: ${state.config.stuckTimeoutS}s]${boardSuffix}`);
-    const outcome = await runSkill(run.command, run.issue.number, { dryRun, model, repo, state });
+    const outcome = await runSkill(run.command, run.issue.number, { dryRun, model, repo, state, execFn: daemonOpts?.execFn });
     console.log(
       `[agent-daemon] completed issue #${run.issue.number} via ${run.command} exit code ${outcome.code} [model: ${model}]${outcome.detail !== null ? ` (${outcome.detail})` : ''}`,
     );
