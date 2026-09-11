@@ -975,6 +975,72 @@ export function vmAgesSummary(vm: VmLiveness, nowMs: number): string {
   return `vm: log ${ageS(vm.log.atMs)}, vcs ${ageS(vm.vcs.atMs)}, sessions ${ageS(vm.sessions.atMs)}`;
 }
 
+/**
+ * #163 (host-side merge): mirror the VM log to the daemon console without
+ * re-printing. Returns the lines present in `nextTail` after the previous
+ * poll's overlap, oldest-first, capped — plus how many were cut and whether
+ * the overlap vanished (rotation/prune: show the latest, say so).
+ */
+export const VM_MIRROR_LINES = 50;
+export const VM_MIRROR_LINE_CHARS = 300;
+
+export function logTailNewcomers(
+  prevTail: string,
+  nextTail: string,
+  maxLines: number = VM_MIRROR_LINES,
+): { lines: string[]; truncated: number; rotated: boolean } {
+  const next = nextTail.split('\n').filter((l) => l.trim() !== '');
+  if (next.length === 0) {
+    return { lines: [], truncated: 0, rotated: false };
+  }
+  let fresh: string[] = next;
+  let rotated = false;
+  const prev = prevTail.split('\n').filter((l) => l.trim() !== '');
+  if (prev.length > 0) {
+    const anchor = prev[prev.length - 1];
+    const idx = next.lastIndexOf(anchor);
+    if (idx < 0) {
+      rotated = true;
+    } else {
+      fresh = next.slice(idx + 1);
+    }
+  }
+  if (fresh.length <= maxLines) {
+    return { lines: fresh, truncated: 0, rotated };
+  }
+  return { lines: fresh.slice(0, maxLines), truncated: fresh.length - maxLines, rotated };
+}
+
+/**
+ * #163: mark VM log lines belonging to a known nested (sub-agent) session
+ * so sub-agent activity stands out in the mirrored console output.
+ */
+export function markNestedVmLine(line: string, nestedSessionIds: ReadonlySet<string>): string {
+  const match = /session\.id=(ses_[A-Za-z0-9]+)/.exec(line);
+  if (match !== null && nestedSessionIds.has(match[1])) {
+    return `${line} [sub-agent]`;
+  }
+  return line;
+}
+
+/**
+ * #163 (host-side merge): one console line per VM state transition between
+ * polls — session progress, VCS movement. Pure so tests pin it; the tick
+ * diffs the last-good cache against the fresh poll and logs the result.
+ * Log-mtime advances alone stay on the heartbeat ages line (per-poll would
+ * be chatty); error content is diffed separately via `logErrors`.
+ */
+export function vmProgressLines(prev: VmLiveness, next: VmLiveness): string[] {
+  const out: string[] = [];
+  if (next.sessions.atMs > prev.sessions.atMs) {
+    out.push(`session activity: ${next.sessions.detail}`);
+  }
+  if (next.vcs.detail !== prev.vcs.detail) {
+    out.push(`vcs: ${next.vcs.detail}`);
+  }
+  return out;
+}
+
 /** #149 KD-4: one VM leg (atMs = last observed life, spawn-seeded). */
 export interface VmLeg {
   ok: boolean;
@@ -991,11 +1057,13 @@ export interface VmLiveness {
   collectedAtMs: number;
   /** #163: quota/error excerpt of the fetched VM log tail (capped, diffed per poll). */
   logErrors: string[];
+  /** #163: raw fetched VM log tail (capped by the tail collector) for newcomer mirroring. */
+  logTail: string;
 }
 
 export function seedVmLiveness(spawnMs: number): VmLiveness {
   const seed = (label: string): VmLeg => ({ ok: true, atMs: spawnMs, detail: `${label} seeded at spawn` });
-  return { log: seed('vm-log'), vcs: seed('vm-vcs'), sessions: seed('session-log'), collectorOk: true, collectedAtMs: spawnMs, logErrors: [] };
+  return { log: seed('vm-log'), vcs: seed('vm-vcs'), sessions: seed('session-log'), collectorOk: true, collectedAtMs: spawnMs, logErrors: [], logTail: '' };
 }
 
 /** Async `sbx exec` with timeout (never throws; timeout → ok:false). */
@@ -1096,7 +1164,7 @@ export async function collectVmLiveness(sbxBin: string, name: string, spawnMs: n
         ? { ok: true, atMs: maxMs, detail: `session-log ${new Date(maxMs).toISOString()}` }
         : { ok: true, atMs: spawnMs, detail: 'session-log empty/unparseable (neutral, idle since spawn)' };
   }
-  return { log, vcs, sessions, collectorOk: log.ok && vcs.ok && sessions.ok, collectedAtMs, logErrors: tailRes.ok ? vmErrorExcerpt(tailRes.stdout) : [] };
+  return { log, vcs, sessions, collectorOk: log.ok && vcs.ok && sessions.ok, collectedAtMs, logErrors: tailRes.ok ? vmErrorExcerpt(tailRes.stdout) : [], logTail: tailRes.ok ? tailRes.stdout : '' };
 }
 
 function buildWatchdogBundle(
@@ -1290,8 +1358,10 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
     let vm: VmLiveness | null = sandboxName !== null ? seedVmLiveness(tracker.startMs) : null;
     let vmCollectInFlight = false;
     let prevTreePids: number[] = [];
-    // #163: previous poll's VM error excerpt — the tick logs only newcomers.
+    // #163: previous poll's VM error excerpt + raw tail — the tick logs
+    // only newcomers (errors in full, rest capped per poll).
     let prevVmErrors: string[] = [];
+    let prevTail = '';
 
     /** #149 KD-5: verified client tree-kill (logs when the tree survives). */
     const killClientTree = (reason: string): boolean => {
@@ -1500,14 +1570,32 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
           void collectVmLiveness(state.config.sbxBin, sandboxName, tracker.startMs).then(
             (next) => {
               if (!settled) {
-                // #163: surface newcomer VM error lines (quiet polls print
-                // nothing). String-compare is fine — capped ~20 lines/poll.
+                // #163: surface newcomer VM error lines in full (quiet polls
+                // print nothing). String-compare is fine — capped ~20/poll.
                 for (const err of next.logErrors) {
                   if (!prevVmErrors.includes(err)) {
-                    console.log(`[agent-daemon] run #${issueNumber} VM log: ${err}`);
+                    console.log(`[agent-daemon] run #${issueNumber} VM log error: ${err}`);
                   }
                 }
                 prevVmErrors = next.logErrors;
+                // #163 (host-side merge): mirror newcomer VM log lines —
+                // sub-agent lines included (same file), errors excluded
+                // (logged above), rest capped with a `+N more` note.
+                const errSet = new Set(next.logErrors);
+                const fresh = logTailNewcomers(prevTail, next.logTail);
+                prevTail = next.logTail;
+                const rest = fresh.lines.filter((l) => !errSet.has(oneLine(l, 500)));
+                for (const line of rest) {
+                  console.log(`[agent-daemon] run #${issueNumber} VM: ${markNestedVmLine(oneLine(line, VM_MIRROR_LINE_CHARS), tracker.nestedSessionIds)}`);
+                }
+                if (fresh.truncated > 0 || fresh.rotated) {
+                  console.log(`[agent-daemon] run #${issueNumber} VM: … +${fresh.truncated} more lines (${fresh.rotated ? 'overlap lost' : 'cap'})`);
+                }
+                // #163 (host-side merge): log VM state transitions so the
+                // console mirrors what the legs see.
+                for (const line of vmProgressLines(vm, next)) {
+                  console.log(`[agent-daemon] run #${issueNumber} ${line}`);
+                }
                 vm = next;
               }
               vmCollectInFlight = false;

@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createStreamTracker,
+  logTailNewcomers,
+  markNestedVmLine,
   maxLogTimestamp,
   observeLine,
   parseCimTree,
@@ -15,6 +17,7 @@ import {
   tagForLine,
   vmAgesSummary,
   vmErrorExcerpt,
+  vmProgressLines,
 } from './agent-daemon.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -64,6 +67,7 @@ describe('VM collector parsers (#149 KD-4/KD-7)', () => {
     assert.equal(vm.vcs.atMs, 1000);
     assert.equal(vm.sessions.atMs, 1000);
     assert.deepEqual(vm.logErrors, []);
+    assert.equal(vm.logTail, '');
   });
 });
 
@@ -154,6 +158,51 @@ describe('console surfacing (#163)', () => {
     const tracker = createStreamTracker(Date.now());
     const res = observeLine(JSON.stringify({ type: 'step', sessionID: 'ses_root1' }), tracker);
     assert.equal(res.nestedSessionId, null);
+  });
+
+  it('vmProgressLines reports session/vcs transitions only', () => {
+    const prev = seedVmLiveness(1000);
+    assert.deepEqual(vmProgressLines(prev, seedVmLiveness(1000)), []);
+    const next = seedVmLiveness(1000);
+    next.sessions = { ok: true, atMs: 2000, detail: 'session-log 1970-01-01T00:00:02.000Z' };
+    next.vcs = { ok: true, atMs: 3000, detail: 'vm-vcs tip 1970-01-01T00:00:03.000Z +dirty' };
+    assert.deepEqual(vmProgressLines(prev, next), [
+      'session activity: session-log 1970-01-01T00:00:02.000Z',
+      'vcs: vm-vcs tip 1970-01-01T00:00:03.000Z +dirty',
+    ]);
+  });
+
+  it('logTailNewcomers returns only lines after the previous overlap', () => {
+    const r = logTailNewcomers('a\nb\nc', 'a\nb\nc\nd\ne');
+    assert.deepEqual(r, { lines: ['d', 'e'], truncated: 0, rotated: false });
+    assert.deepEqual(logTailNewcomers('', ''), { lines: [], truncated: 0, rotated: false });
+  });
+
+  it('logTailNewcomers anchors on the latest duplicate occurrence', () => {
+    // Identical lines are indistinguishable: align to the latest occurrence
+    // so nothing is re-printed (minimal-new).
+    assert.deepEqual(logTailNewcomers('x\nx', 'x\nx\nx\ny').lines, ['y']);
+  });
+
+  it('logTailNewcomers caps and flags lost overlap', () => {
+    const next = ['l1', 'l2', 'l3', 'l4'].join('\n');
+    const capped = logTailNewcomers('', next, 2);
+    assert.deepEqual(capped.lines, ['l1', 'l2']);
+    assert.equal(capped.truncated, 2);
+    assert.equal(capped.rotated, false);
+    const rotated = logTailNewcomers('old1\nold2', next, 10);
+    assert.equal(rotated.rotated, true);
+    assert.deepEqual(rotated.lines, ['l1', 'l2', 'l3', 'l4']);
+  });
+
+  it('markNestedVmLine flags known nested sessions', () => {
+    const nested = new Set(['ses_child1']);
+    assert.equal(
+      markNestedVmLine('message=loop session.id=ses_child1 step=3', nested),
+      'message=loop session.id=ses_child1 step=3 [sub-agent]',
+    );
+    assert.equal(markNestedVmLine('message=loop session.id=ses_root1 step=0', nested), 'message=loop session.id=ses_root1 step=0');
+    assert.equal(markNestedVmLine('no session here', nested), 'no session here');
   });
 });
 
