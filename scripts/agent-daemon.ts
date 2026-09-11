@@ -193,6 +193,14 @@ interface StreamTracker {
   lastErrorLine: string | null;
   /** #139: last raw line of any class, truncated (exit diagnosis). */
   lastLine: string | null;
+  /**
+   * #162 KD-4: bounded host-stream history ("what it was doing last") for
+   * the watchdog comment. Each entry truncated to HOST_RING_LINE_CHARS;
+   * shift-evicted beyond HOST_RING_LINES. Error-class = gateway-quota +
+   * upstream-transient (same classifier as the counters).
+   */
+  recentOther: string[];
+  recentError: string[];
   rootSessionId: string | null;
   parentBySession: Map<string, string>;
   titleBySession: Map<string, string>;
@@ -206,6 +214,10 @@ interface StreamTracker {
    */
   nestedSessionIds: Set<string>;
 }
+
+/** #162 KD-4: host ring buffer caps (comment evidence, not console). */
+export const HOST_RING_LINES = 10;
+export const HOST_RING_LINE_CHARS = 500;
 
 /** #149: exported for the nested-Task fixture test (KD-6). */
 export function createStreamTracker(nowMs: number): StreamTracker {
@@ -221,6 +233,8 @@ export function createStreamTracker(nowMs: number): StreamTracker {
     firstGatewayLine: null,
     lastErrorLine: null,
     lastLine: null,
+    recentOther: [],
+    recentError: [],
     rootSessionId: null,
     parentBySession: new Map(),
     titleBySession: new Map(),
@@ -437,6 +451,17 @@ export function tagForLine(rawLine: string, tracker: StreamTracker): string {
   return `[sub:${title ?? short}]`;
 }
 
+/**
+ * #162 KD-4: push a truncated line onto a host ring, shift-evicting beyond
+ * HOST_RING_LINES. Exported pure so tests pin retention/eviction.
+ */
+export function pushRing(ring: string[], rawLine: string): void {
+  ring.push(rawLine.slice(0, HOST_RING_LINE_CHARS));
+  while (ring.length > HOST_RING_LINES) {
+    ring.shift();
+  }
+}
+
 /** Feed one piped line into tagging + classification + watchdog tracking. */
 export function observeLine(
   rawLine: string,
@@ -455,20 +480,23 @@ export function observeLine(
   }
   const cls = classifyLine(rawLine);
   tracker.linesSeen += 1;
-  tracker.lastLine = rawLine.slice(0, 500);
+  tracker.lastLine = rawLine.slice(0, HOST_RING_LINE_CHARS);
   if (cls === 'gateway-quota') {
     tracker.gatewayCount += 1;
-    tracker.lastErrorLine = rawLine.slice(0, 500);
+    tracker.lastErrorLine = rawLine.slice(0, HOST_RING_LINE_CHARS);
+    pushRing(tracker.recentError, rawLine);
     if (tracker.firstGatewayLine === null) {
       // KD-3: log the full JSON line on first hit so field paths can be locked later.
       tracker.firstGatewayLine = rawLine;
     }
   } else if (cls === 'upstream-transient') {
     tracker.upstreamCount += 1;
-    tracker.lastErrorLine = rawLine.slice(0, 500);
+    tracker.lastErrorLine = rawLine.slice(0, HOST_RING_LINE_CHARS);
+    pushRing(tracker.recentError, rawLine);
   } else {
     tracker.otherCount += 1;
     tracker.lastNonErrorAtMs = Date.now();
+    pushRing(tracker.recentOther, rawLine);
   }
   return { tag, cls, nestedSessionId };
 }
@@ -501,6 +529,48 @@ interface IssueState {
  * `pr ready`/`question` itself, or posts a plan/question comment — racing
  * those would flap or lose blocker questions).
  */
+/**
+ * #162 KD-3: pure terminal-comment scan behind `checkFencing` (unit-tested).
+ * Comments before `sinceIso` are prior-run (ignored). A `## Watchdog
+ * investigation` comment at/after `sinceIso` is this run's own just-posted
+ * bundle (one run per issue holds via lease) — NOT a terminal signal, so it
+ * must not suppress the reset the bundle promises. Every other terminal
+ * signal (`## Plan with Reason`, `## Question`, `Q\d+:`) still blocks.
+ */
+export function hasTerminalCommentSince(
+  comments: Array<{ body?: string; createdAt?: string }>,
+  sinceIso: string,
+): boolean {
+  const since = Date.parse(sinceIso || '');
+  for (const comment of comments ?? []) {
+    const created = Date.parse(comment.createdAt ?? '');
+    if (!Number.isNaN(since) && !Number.isNaN(created) && created < since) {
+      continue;
+    }
+    const body = comment.body ?? '';
+    // Own-run watchdog bundle (created at/after spawn): skip — it is never
+    // a worker terminal signal. Unparseable dates stay fail-closed (fall
+    // through to the terminal test below, as before).
+    if (
+      /^## Watchdog investigation/m.test(body) &&
+      !Number.isNaN(since) &&
+      !Number.isNaN(created) &&
+      created >= since
+    ) {
+      continue;
+    }
+    // KD-6 (#132): `## Planning Questions - Round N` is intentionally
+    // absent here. The blocked-plan path is suppressed via the `question`
+    // label (TERMINAL_LABELS in agent-daemon-lease.ts); matching the Round
+    // comment would strand the normal-exit re-queue the no-answer guard
+    // relies on. Do not "fix" this by adding it.
+    if (/## Plan with Reason|## Watchdog investigation|## Question|^Q\d+:/m.test(body)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function checkFencing(repo: string, issueNumber: number, sinceIso: string): IssueState {
   const result = spawnSync(
     'gh',
@@ -519,23 +589,7 @@ export function checkFencing(repo: string, issueNumber: number, sinceIso: string
       comments?: Array<{ body?: string; createdAt?: string }>;
     };
     labels = (parsed.labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? '')));
-    const since = Date.parse(sinceIso || '');
-    for (const comment of parsed.comments ?? []) {
-      const created = Date.parse(comment.createdAt ?? '');
-      if (!Number.isNaN(since) && !Number.isNaN(created) && created < since) {
-        continue;
-      }
-      const body = comment.body ?? '';
-      // KD-6 (#132): `## Planning Questions - Round N` is intentionally
-      // absent here. The blocked-plan path is suppressed via the `question`
-      // label (TERMINAL_LABELS in agent-daemon-lease.ts); matching the Round
-      // comment would strand the normal-exit re-queue the no-answer guard
-      // relies on. Do not "fix" this by adding it.
-      if (/## Plan with Reason|## Watchdog investigation|## Question|^Q\d+:/m.test(body)) {
-        terminalCommentSince = true;
-        break;
-      }
-    }
+    terminalCommentSince = hasTerminalCommentSince(parsed.comments ?? [], sinceIso);
   } catch {
     return { labels: [], terminalCommentSince: true };
   }
@@ -1167,6 +1221,223 @@ export async function collectVmLiveness(sbxBin: string, name: string, spawnMs: n
   return { log, vcs, sessions, collectorOk: log.ok && vcs.ok && sessions.ok, collectedAtMs, logErrors: tailRes.ok ? vmErrorExcerpt(tailRes.stdout) : [], logTail: tailRes.ok ? tailRes.stdout : '' };
 }
 
+/**
+ * #162 KD-6: total watchdog bundle cap (chars). Worst case without a cap
+ * (~19KB existing sections + ~29KB new evidence) exceeds the Windows
+ * CreateProcess ~32K argv limit, so `spawnSync --body` would fail and the
+ * actionable comment would never land. Truncation order: host rings →
+ * VM tail → VM excerpt → existing sections. What-happened / Next-run are
+ * never truncated.
+ */
+export const WATCHDOG_BUNDLE_MAX_CHARS = 24_000;
+
+/**
+ * #162 KD-2: what the comment header states. The live post happens
+ * pre-destroy + pre-fence, so the runtime value is always `reset-intended`
+ * (conditional intent, outcome matrix enumerated in prose). The outcome
+ * variants pin wording for tests (the destroy-failure park threads its own
+ * inline context into `parkAtQuestion`). The live `checkFencing` call stays
+ * post-destroy — never pre-read (TOCTOU + unbounded pre-kill round-trip).
+ */
+export type WatchdogOutcome = 'reset-intended' | 'fence-blocked' | 'transport-fail-closed' | 'destroy-failed';
+
+/** #162 KD-4: sliced VM tail for the comment (see formatVmTailForComment). */
+export interface WatchdogVmTail {
+  lines: string[];
+  truncated: number;
+  rotated: boolean;
+  empty: boolean;
+}
+
+/**
+ * #162 KD-4: last ≤maxLines non-empty lines sliced directly from the
+ * fire-time `vm.logTail` (NOT `logTailNewcomers(prevTail, vm.logTail)` —
+ * vacuous at fire time since the tick sets `prevTail = next.logTail`),
+ * each `oneLine(_,300)` → `markNestedVmLine`. `prevTail` is only the
+ * rotation witness (anchor lost → `rotated`). `empty` flags the
+ * seeded/idle case for the bundle note.
+ */
+export function formatVmTailForComment(
+  logTail: string,
+  prevTail: string,
+  nestedSessionIds: ReadonlySet<string>,
+  maxLines: number = VM_MIRROR_LINES,
+): WatchdogVmTail {
+  const next = logTail.split('\n').filter((l) => l.trim() !== '');
+  if (next.length === 0) {
+    return { lines: [], truncated: 0, rotated: false, empty: true };
+  }
+  let rotated = false;
+  const prev = prevTail.split('\n').filter((l) => l.trim() !== '');
+  const anchor = prev.at(-1);
+  if (anchor !== undefined && next.lastIndexOf(anchor) < 0) {
+    rotated = true;
+  }
+  const truncated = next.length > maxLines ? next.length - maxLines : 0;
+  const lines = next
+    .slice(Math.max(0, next.length - maxLines))
+    .map((l) => markNestedVmLine(oneLine(l, VM_MIRROR_LINE_CHARS), nestedSessionIds));
+  return { lines, truncated, rotated, empty: false };
+}
+
+/**
+ * #162 KD-7: injected inputs for the pure watchdog-comment formatter.
+ * Shell/VM captures are rendered by the caller (`buildWatchdogBundle`);
+ * this function owns header wording, the outcome matrix, evidence layout,
+ * and the KD-6 total cap.
+ */
+export interface WatchdogSectionsInput {
+  silenceS: number;
+  timeoutS: number;
+  elapsedS: number;
+  childPid: number | undefined;
+  sandboxName: string | null;
+  outcome: WatchdogOutcome;
+  hostRecentOther: string[];
+  hostRecentError: string[];
+  vmExcerpt: string[];
+  vmTail: WatchdogVmTail;
+  vmPresent: boolean;
+  sessionSummary: string;
+  processTree: string;
+  portOwnership: string;
+  branchState: string;
+  sandboxStatus: string | null;
+  vmLegs: string | null;
+}
+
+/** #162 KD-2: conditional-intent header + outcome matrix prose. */
+function watchdogWhatHappened(input: Pick<WatchdogSectionsInput, 'silenceS' | 'timeoutS' | 'elapsedS' | 'childPid' | 'sandboxName' | 'outcome'>): string {
+  const pid = input.childPid === undefined ? '(unknown PID)' : `PID ${input.childPid}`;
+  const destroyBit = input.sandboxName !== null ? ` + destroyed sandbox ${input.sandboxName}` : ' (non-sandbox run, no VM to destroy)';
+  const fired = `Watchdog fired after ${input.silenceS}s of zero non-error stream activity (timeout ${input.timeoutS}s; run elapsed ${input.elapsedS}s). Action taken: tree-killed worker ${pid}${destroyBit}.`;
+  switch (input.outcome) {
+    case 'reset-intended':
+      return [
+        fired,
+        'Label intent: reset `implementing`→`ready to implement` for a fresh Phase 0 resume iff the fence is still clear after teardown — fence-blocked keeps `implementing` (no reset), fence-transport-failure stays fail-closed (no reset), destroy-failure parks at `question` instead. Model unchanged; respawn follows current failover/probe state.',
+      ].join('\n');
+    case 'fence-blocked':
+      return [
+        fired,
+        'Outcome: fence check after teardown found a terminal signal, so labels were kept at `implementing` (no reset). Model unchanged; respawn follows current failover/probe state.',
+      ].join('\n');
+    case 'transport-fail-closed':
+      return [
+        fired,
+        'Outcome: fence unreadable after teardown (transport failure), so labels were kept at `implementing` fail-closed (no reset). Model unchanged; respawn follows current failover/probe state.',
+      ].join('\n');
+    case 'destroy-failed':
+      return [
+        `Watchdog fired after ${input.silenceS}s of zero non-error stream activity (timeout ${input.timeoutS}s; run elapsed ${input.elapsedS}s). Action taken: tree-killed worker ${pid} but sandbox ${input.sandboxName ?? '(unknown)'} destroy FAILED.`,
+        'Outcome: parked at `question` fail-closed (no reset) — the worker may still be alive in-VM. Reset to `ready to implement` only after confirming the sandbox is gone (`sbx ls`). Model unchanged.',
+      ].join('\n');
+  }
+}
+
+/** #162 KD-5: MUST investigate + verdict + avoidance; method suggestive, never mandated. */
+const WATCHDOG_NEXT_RUN = [
+  '### Next run',
+  '- MUST (1) investigate the root cause of this stall against the evidence below, (2) post your verdict (`busy` | `rate-limited` | `wedged` + cause) and how you will avoid the same stall in your first comment, so future runs do not repeat the same wedge.',
+  '- Suggested path (not required): work through the `diagnose-stuck-run` checklist.',
+].join('\n');
+
+/** #162: existing diagnostic captures (truncatable last-resort under KD-6). */
+function renderWatchdogExisting(input: WatchdogSectionsInput): string {
+  const parts = [
+    '### Session event summary',
+    input.sessionSummary,
+    '',
+    '### Process tree',
+    input.processTree,
+    '',
+    '### Port ownership',
+    input.portOwnership,
+    '',
+    '### Branch state',
+    input.branchState,
+  ];
+  if (input.sandboxStatus !== null) {
+    parts.push('', '### Sandbox status', input.sandboxStatus);
+  }
+  if (input.vmLegs !== null) {
+    parts.push('', '### VM liveness (conjunctive legs)', input.vmLegs);
+  }
+  return parts.join('\n');
+}
+
+/**
+ * #162 KD-1/KD-2/KD-4/KD-5/KD-6/KD-7: pure watchdog-comment formatter —
+ * header wording, outcome matrix, evidence pipeline, directive block, and
+ * the total ≤24KB cap (truncation order host-rings → vm-tail → vm-excerpt
+ * → existing; What-happened / Next-run never truncated).
+ */
+export function formatWatchdogSections(input: WatchdogSectionsInput): string {
+  // Most-recent-last everywhere; shrinkers keep the tail (most recent).
+  let other = [...input.hostRecentOther];
+  let errors = [...input.hostRecentError];
+  let tailLines = [...input.vmTail.lines];
+  let tailCut = 0;
+  let excerpt = [...input.vmExcerpt];
+  let excerptCut = 0;
+  let existing = renderWatchdogExisting(input);
+
+  const render = (): string => {
+    const evidence: string[] = ['### Evidence'];
+    evidence.push(`#### Host stream (last ${HOST_RING_LINES} non-error + last ${HOST_RING_LINES} error-class lines, ${HOST_RING_LINE_CHARS} chars each; most recent last)`);
+    evidence.push(other.length > 0 ? other.join('\n') : '(no non-error lines captured)');
+    evidence.push(errors.length > 0 ? errors.join('\n') : '(no error-class lines captured)');
+    if (!input.vmPresent) {
+      evidence.push('(no VM evidence — non-sandbox run)');
+    } else {
+      const excerptNote = excerptCut > 0 ? `; +${excerptCut} cut to fit cap` : '';
+      evidence.push(`#### VM log errors (${VM_ERROR_EXCERPT_LINES} lines / ${VM_ERROR_EXCERPT_CHARS} chars as retained${excerptNote})`);
+      evidence.push(excerpt.length > 0 ? excerpt.join('\n') : '(no VM error lines retained)');
+      evidence.push(`#### VM log tail (last ${VM_MIRROR_LINES} lines x ${VM_MIRROR_LINE_CHARS} chars)`);
+      if (input.vmTail.empty) {
+        evidence.push('(VM log tail empty — seeded/idle since spawn)');
+      } else {
+        evidence.push(tailLines.length > 0 ? tailLines.join('\n') : '(all tail lines cut to fit cap)');
+        const more = input.vmTail.truncated + tailCut;
+        if (more > 0 || input.vmTail.rotated) {
+          evidence.push(`… +${more} more lines (${input.vmTail.rotated ? 'overlap lost' : 'cap'})`);
+        }
+      }
+    }
+    return [['### What happened', watchdogWhatHappened(input)].join('\n'), '', evidence.join('\n'), '', existing, '', WATCHDOG_NEXT_RUN].join('\n');
+  };
+
+  const shrinkEnd = <T>(arr: T[]): T[] => arr.slice(arr.length - Math.floor(arr.length / 2));
+  let out = render();
+  while (out.length > WATCHDOG_BUNDLE_MAX_CHARS && other.length > 0) {
+    other = shrinkEnd(other);
+    out = render();
+  }
+  while (out.length > WATCHDOG_BUNDLE_MAX_CHARS && errors.length > 0) {
+    errors = shrinkEnd(errors);
+    out = render();
+  }
+  while (out.length > WATCHDOG_BUNDLE_MAX_CHARS && tailLines.length > 0) {
+    const next = shrinkEnd(tailLines);
+    tailCut += tailLines.length - next.length;
+    tailLines = next;
+    out = render();
+  }
+  while (out.length > WATCHDOG_BUNDLE_MAX_CHARS && excerpt.length > 0) {
+    const next = shrinkEnd(excerpt);
+    excerptCut += excerpt.length - next.length;
+    excerpt = next;
+    out = render();
+  }
+  if (out.length > WATCHDOG_BUNDLE_MAX_CHARS) {
+    const note = '\n[truncated to fit 24KB watchdog cap]';
+    const keep = Math.max(0, WATCHDOG_BUNDLE_MAX_CHARS - (out.length - existing.length) - note.length);
+    existing = existing.slice(0, keep) + note;
+    out = render();
+  }
+  return out;
+}
+
 function buildWatchdogBundle(
   issueNumber: number,
   tracker: StreamTracker,
@@ -1174,59 +1445,55 @@ function buildWatchdogBundle(
   stuckTimeoutMs: number,
   sandbox?: { sbxBin: string; name: string },
   vm?: VmLiveness,
+  prevTail = '',
 ): string {
   const nowMs = Date.now();
+  void issueNumber;
   const lastActivity = new Date(tracker.lastNonErrorAtMs).toISOString();
-  const summary = [
+  // KD-4: host rings replace the lastLine/lastErrorLine singletons (kept on
+  // the tracker for exit diagnosis); firstGatewayLine keeps unique value.
+  const sessionSummary = [
     `spawned: ${new Date(tracker.startMs).toISOString()}`,
     `stuck timeout: ${Math.round(stuckTimeoutMs / 1000)}s; silence at fire: ${Math.round((nowMs - tracker.lastNonErrorAtMs) / 1000)}s; run elapsed: ${Math.round((nowMs - tracker.startMs) / 1000)}s`,
     `last non-error activity: ${lastActivity}`,
     `last stream bytes: ${new Date(tracker.lastChunkAtMs).toISOString()} (pending unflushed: ${tracker.pendingBytes}B)`,
     `lines seen: ${tracker.linesSeen} (other=${tracker.otherCount}, upstream-transient=${tracker.upstreamCount}, gateway-quota=${tracker.gatewayCount})`,
-    tracker.lastErrorLine !== null ? `last error line: ${tracker.lastErrorLine.slice(0, 500)}` : 'last error line: (none)',
-    tracker.firstGatewayLine !== null ? `first gateway line: ${tracker.firstGatewayLine.slice(0, 500)}` : 'first gateway line: (none)',
+    tracker.firstGatewayLine !== null ? `first gateway line: ${tracker.firstGatewayLine.slice(0, HOST_RING_LINE_CHARS)}` : 'first gateway line: (none)',
   ].join('\n');
-  const sandboxSection =
-    sandbox === undefined
-      ? ''
-      : [
-          '',
-          '### Sandbox status',
-          // #121: the process tree above shows the host sbx.exe proxy, not
-          // the in-VM worker. This is the VM-side truth.
-          sandboxStatus(sandbox.sbxBin, sandbox.name),
-        ].join('\n');
+  // #121: the process tree above shows the host sbx.exe proxy, not the
+  // in-VM worker. Sandbox status is the VM-side truth.
+  const sandboxStatusText = sandbox === undefined ? null : sandboxStatus(sandbox.sbxBin, sandbox.name);
   // #149 KD-4: the VM legs that drove the conjunctive decision (or the
   // collector failure that fail-closed it).
-  const vmSection =
+  const vmLegs =
     vm === undefined
-      ? ''
+      ? null
       : [
-          '',
-          '### VM liveness (conjunctive legs)',
           `collectorOk: ${vm.collectorOk} (collected ${new Date(vm.collectedAtMs).toISOString()})`,
           `vm-log: ${vm.log.detail}`,
           `vm-vcs: ${vm.vcs.detail}`,
           `session-log: ${vm.sessions.detail}`,
           `nested stdout sessions: ${tracker.nestedSessionIds.size > 0 ? [...tracker.nestedSessionIds].join(',') : '(none)'}`,
         ].join('\n');
-  return [
-    '### Process tree',
-    childProcessTree(childPid),
-    '',
-    '### Session event summary',
-    summary,
-    '',
-    '### Port ownership',
-    portOwnership(),
-    '',
-    '### Branch state',
-    branchState(),
-    sandboxSection,
-    vmSection,
-    '',
-    `_Run had zero non-error stream activity for the full stuck interval; issue #${issueNumber} will be reset for a fresh Phase 0 resume._`,
-  ].join('\n');
+  return formatWatchdogSections({
+    silenceS: Math.round((nowMs - tracker.lastNonErrorAtMs) / 1000),
+    timeoutS: Math.round(stuckTimeoutMs / 1000),
+    elapsedS: Math.round((nowMs - tracker.startMs) / 1000),
+    childPid,
+    sandboxName: sandbox?.name ?? null,
+    outcome: 'reset-intended',
+    hostRecentOther: tracker.recentOther,
+    hostRecentError: tracker.recentError,
+    vmExcerpt: vm?.logErrors ?? [],
+    vmTail: vm === undefined ? { lines: [], truncated: 0, rotated: false, empty: true } : formatVmTailForComment(vm.logTail, prevTail, tracker.nestedSessionIds),
+    vmPresent: vm !== undefined,
+    sessionSummary,
+    processTree: childProcessTree(childPid),
+    portOwnership: portOwnership(),
+    branchState: branchState(),
+    sandboxStatus: sandboxStatusText,
+    vmLegs,
+  });
 }
 
 /**
@@ -1392,7 +1659,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
      * the orphan) and suppress the lease release. The log carries the
      * manual-reset hint.
      */
-    const handleDestroyFailure = (destroyed: { ok: boolean; output: string }): void => {
+    const handleDestroyFailure = (destroyed: { ok: boolean; output: string }, extra?: string): void => {
       if (destroyParked) {
         return;
       }
@@ -1403,7 +1670,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       parkAtQuestion(
         repo,
         issueNumber,
-        `Sandbox destroy failed after kill, so the worker may still be alive in-VM. Parked at \`question\` (fail-closed); reset to \`ready to implement\` only after confirming the sandbox is gone (\`sbx ls\`).\n\nDestroy output:\n${destroyed.output}`,
+        `Sandbox destroy failed after kill, so the worker may still be alive in-VM. Parked at \`question\` (fail-closed); reset to \`ready to implement\` only after confirming the sandbox is gone (\`sbx ls\`).${extra ?? ''}\n\nDestroy output:\n${destroyed.output}`,
       );
     };
 
@@ -1513,6 +1780,7 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
         stuckTimeoutMs,
         sandboxName !== null ? { sbxBin: state.config.sbxBin, name: sandboxName } : undefined,
         vm ?? undefined,
+        prevTail,
       );
       // #149 KD-5 (AD-16): re-guard after the sync bundle build — shell
       // captures are slow, and the run may have settled meanwhile.
@@ -1527,7 +1795,12 @@ function runSkill(command: string, issueNumber: number, opts: { dryRun: boolean;
       killClientTree('watchdog');
       const destroyed = ensureSandboxGone('watchdog');
       if (destroyed !== null && !destroyed.ok) {
-        handleDestroyFailure(destroyed);
+        // #162 KD-6: thread watchdog context into the existing park comment
+        // (no new follow-up comment per fire).
+        handleDestroyFailure(
+          destroyed,
+          `\n\nWatchdog context: fired after ${Math.round((Date.now() - tracker.lastNonErrorAtMs) / 1000)}s of zero non-error stream activity on worker PID ${child.pid ?? '(unknown)'} (${livenessSummary(tracker, Date.now(), stuckTimeoutMs)}). The next run MUST investigate against the watchdog evidence above and post its verdict + avoidance plan.`,
+        );
         finish({
           code: 1,
           failover: false,
