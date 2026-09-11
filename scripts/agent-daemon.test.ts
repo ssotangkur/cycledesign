@@ -5,13 +5,19 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createStreamTracker,
+  logTailNewcomers,
+  markNestedVmLine,
   maxLogTimestamp,
+  observeLine,
   parseCimTree,
   parseSessionListTime,
   parseVmVcsTime,
   parseWmicTree,
   seedVmLiveness,
   tagForLine,
+  vmAgesSummary,
+  vmErrorExcerpt,
+  vmProgressLines,
 } from './agent-daemon.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -60,6 +66,8 @@ describe('VM collector parsers (#149 KD-4/KD-7)', () => {
     assert.equal(vm.log.atMs, 1000);
     assert.equal(vm.vcs.atMs, 1000);
     assert.equal(vm.sessions.atMs, 1000);
+    assert.deepEqual(vm.logErrors, []);
+    assert.equal(vm.logTail, '');
   });
 });
 
@@ -99,6 +107,102 @@ describe('tree listing parsers (#149 step 6, wmic-absent path)', () => {
     assert.equal(parseCimTree(''), null);
     assert.equal(parseCimTree('(unavailable)'), null);
     assert.equal(parseCimTree('not json'), null);
+  });
+});
+
+describe('console surfacing (#163)', () => {
+  it('vmErrorExcerpt keeps quota/error lines, drops info', () => {
+    const tail = [
+      'timestamp=2026-09-10T22:56:28.733Z level=INFO run=b38b191a message=loop session.id=ses_1 step=0',
+      'timestamp=2026-09-10T22:56:28.925Z level=ERROR run=b38b191a message="stream error" error.error="AI_APICallError: Rate limit exceeded. Please try again later."',
+      'tail fragment Upstream request failed: [rate_limit_exceeded] retrying',
+      'another info line',
+    ].join('\n');
+    const ex = vmErrorExcerpt(tail);
+    assert.equal(ex.length, 2);
+    assert.ok(ex[0].includes('Rate limit exceeded'), 'keeps quota line');
+    assert.ok(ex[1].includes('Upstream request failed'), 'keeps upstream line');
+    assert.deepEqual(vmErrorExcerpt('nothing here\nno markers'), []);
+  });
+
+  it('vmErrorExcerpt honors line and char caps', () => {
+    const tail = Array.from({ length: 5 }, (_, i) => `level=ERROR marker line ${i}`).join('\n');
+    assert.equal(vmErrorExcerpt(tail, 2).length, 2);
+    assert.equal(vmErrorExcerpt(tail, 20, 50).length, 2);
+  });
+
+  it('vmAgesSummary renders per-leg recency', () => {
+    const vm = seedVmLiveness(0);
+    vm.log.atMs = 2000;
+    vm.vcs.atMs = 0;
+    vm.sessions.atMs = 89000;
+    assert.equal(vmAgesSummary(vm, 90000), 'vm: log 88s ago, vcs 90s ago, sessions 1s ago');
+  });
+
+  it('observeLine reports a newly-seen nested session ID once', () => {
+    const tracker = createStreamTracker(Date.now());
+    const line = JSON.stringify({
+      type: 'step',
+      sessionID: 'ses_root1',
+      part: { state: { metadata: { sessionId: 'ses_child1' } } },
+    });
+    const first = observeLine(line, tracker);
+    assert.equal(first.tag, '[orchestrator]');
+    assert.equal(first.cls, 'other');
+    assert.equal(first.nestedSessionId, 'ses_child1');
+    const second = observeLine(line, tracker);
+    assert.equal(second.nestedSessionId, null);
+  });
+
+  it('observeLine reports null nested ID for ordinary lines', () => {
+    const tracker = createStreamTracker(Date.now());
+    const res = observeLine(JSON.stringify({ type: 'step', sessionID: 'ses_root1' }), tracker);
+    assert.equal(res.nestedSessionId, null);
+  });
+
+  it('vmProgressLines reports session/vcs transitions only', () => {
+    const prev = seedVmLiveness(1000);
+    assert.deepEqual(vmProgressLines(prev, seedVmLiveness(1000)), []);
+    const next = seedVmLiveness(1000);
+    next.sessions = { ok: true, atMs: 2000, detail: 'session-log 1970-01-01T00:00:02.000Z' };
+    next.vcs = { ok: true, atMs: 3000, detail: 'vm-vcs tip 1970-01-01T00:00:03.000Z +dirty' };
+    assert.deepEqual(vmProgressLines(prev, next), [
+      'session activity: session-log 1970-01-01T00:00:02.000Z',
+      'vcs: vm-vcs tip 1970-01-01T00:00:03.000Z +dirty',
+    ]);
+  });
+
+  it('logTailNewcomers returns only lines after the previous overlap', () => {
+    const r = logTailNewcomers('a\nb\nc', 'a\nb\nc\nd\ne');
+    assert.deepEqual(r, { lines: ['d', 'e'], truncated: 0, rotated: false });
+    assert.deepEqual(logTailNewcomers('', ''), { lines: [], truncated: 0, rotated: false });
+  });
+
+  it('logTailNewcomers anchors on the latest duplicate occurrence', () => {
+    // Identical lines are indistinguishable: align to the latest occurrence
+    // so nothing is re-printed (minimal-new).
+    assert.deepEqual(logTailNewcomers('x\nx', 'x\nx\nx\ny').lines, ['y']);
+  });
+
+  it('logTailNewcomers caps and flags lost overlap', () => {
+    const next = ['l1', 'l2', 'l3', 'l4'].join('\n');
+    const capped = logTailNewcomers('', next, 2);
+    assert.deepEqual(capped.lines, ['l1', 'l2']);
+    assert.equal(capped.truncated, 2);
+    assert.equal(capped.rotated, false);
+    const rotated = logTailNewcomers('old1\nold2', next, 10);
+    assert.equal(rotated.rotated, true);
+    assert.deepEqual(rotated.lines, ['l1', 'l2', 'l3', 'l4']);
+  });
+
+  it('markNestedVmLine flags known nested sessions', () => {
+    const nested = new Set(['ses_child1']);
+    assert.equal(
+      markNestedVmLine('message=loop session.id=ses_child1 step=3', nested),
+      'message=loop session.id=ses_child1 step=3 [sub-agent]',
+    );
+    assert.equal(markNestedVmLine('message=loop session.id=ses_root1 step=0', nested), 'message=loop session.id=ses_root1 step=0');
+    assert.equal(markNestedVmLine('no session here', nested), 'no session here');
   });
 });
 
