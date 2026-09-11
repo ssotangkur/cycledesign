@@ -267,6 +267,19 @@ mode is available, mid-run Ctrl+C). The launch chain is unchanged: if
 `npm run` demonstrably swallows SIGINT on your setup, invoke
 `npx tsx scripts/agent-supervisor.ts` directly as the fallback.
 
+### Daemon log (`tmp/daemon.log`)
+
+`npm run agent-daemon` tees supervisor output to both the console and
+`tmp/daemon.log` via `node scripts/spawn-log.js --truncate tmp/daemon.log ...`
+(same pattern as `dev:server:log` / `dev:web:log`). The file is truncated on
+each wrapper start (one `Starting:` policy line per manual start); within a
+single run it still grows unbounded (full `--format json` streams), so
+truncate it manually when needed (`: > tmp/daemon.log` on posix,
+`Clear-Content tmp/daemon.log` on PowerShell). `tmp/` is gitignored and
+per-checkout, and the signal/exit-code contract above is unchanged through
+the wrapper (first signal forwards and exits `0`, never `130`).
+`agent-daemon:once` / `agent-daemon:raw` stay console-only.
+
 ### Supervisor vs daemon (self-update)
 
 The supervisor is dumb and stable (~100 lines, changes almost never): it
