@@ -36,15 +36,30 @@ export const test = base.extend<TestFixtures>({
    */
   createSession: async ({ authenticatedPage }, use) => {
     const createSession = async (): Promise<void> => {
+      const comboboxSelector = '[data-testid="session-select"] [role="combobox"]';
+      // Remember the currently selected session (if any) so we can wait
+      // for the switch to the newly created session below. The combobox
+      // is already non-empty when sessions exist, so waiting for
+      // "non-empty" alone returns instantly — before the create mutation
+      // resolves and the new session is selected (issue #170: tests then
+      // read/send against the previous session).
+      const previous = await authenticatedPage.locator(comboboxSelector).textContent().catch(() => null);
+
       // Click creates session directly (no dialog in original behavior)
       await authenticatedPage.getByTestId('new-session-button').click();
 
-      // Wait for session select to have a value (session was created and selected)
-      // MUI Select renders a div with role="combobox", not a native select element
-      await authenticatedPage.waitForFunction(() => {
-        const combobox = document.querySelector('[data-testid="session-select"] [role="combobox"]');
-        return combobox && combobox.textContent && combobox.textContent.trim() !== '';
-      }, { timeout: 5000 });
+      // Wait for the new session to be created AND selected: the combobox
+      // value must be non-empty and different from the previous selection.
+      await authenticatedPage.waitForFunction(
+        ({ selector, prev }) => {
+          const combobox = document.querySelector(selector);
+          const text = combobox?.textContent?.trim() ?? '';
+          if (!text) return false;
+          return text !== (prev?.trim() ?? '');
+        },
+        { selector: comboboxSelector, prev: previous ?? '' },
+        { timeout: 10000 },
+      );
     };
 
     await use(createSession);
