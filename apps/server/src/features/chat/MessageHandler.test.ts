@@ -360,6 +360,84 @@ describe('MessageHandler conversation accumulation (issue #169)', () => {
   });
 });
 
+describe('MessageHandler getSessionHistory (issue #170)', () => {
+  it('should hydrate user and assistant turns in file order with stored id/timestamp', async () => {
+    state.store.push(
+      { id: 'msg-sys', timestamp: 1000, modelMessage: { role: 'system', content: 'prompt' } },
+      { id: 'msg-u1', timestamp: 1001, modelMessage: { role: 'user', content: 'hello' } },
+      { id: 'msg-a1', timestamp: 1002, modelMessage: { role: 'assistant', content: 'hi there' } },
+    );
+
+    const history = await new MessageHandler().getSessionHistory(TEST_SESSION_ID);
+
+    expect(history).toEqual([
+      { id: 'msg-u1', content: 'hello', userId: 'user', timestamp: 1001 },
+      { id: 'msg-a1', content: 'hi there', userId: 'assistant', timestamp: 1002 },
+    ]);
+  });
+
+  it('should skip system/tool/empty/corrupt rows with a warn instead of crashing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      state.store.push(
+        { id: 'msg-sys', timestamp: 1, modelMessage: { role: 'system', content: 'prompt' } },
+        { id: 'msg-tool', timestamp: 2, modelMessage: { role: 'tool', content: [] } } as unknown as StoredMessage,
+        { id: 'msg-empty', timestamp: 3, modelMessage: { role: 'user', content: '' } },
+        { id: 'msg-bad', timestamp: 4, modelMessage: { role: 'user' } } as unknown as StoredMessage,
+        null as unknown as StoredMessage,
+        42 as unknown as StoredMessage,
+        { id: 'msg-ok', timestamp: 5, modelMessage: { role: 'user', content: 'kept' } },
+      );
+
+      const history = await new MessageHandler().getSessionHistory(TEST_SESSION_ID);
+
+      expect(history).toEqual([{ id: 'msg-ok', content: 'kept', userId: 'user', timestamp: 5 }]);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('should return [] for missing or path-traversal sessionIds without throwing', async () => {
+    const handler = new MessageHandler();
+
+    await expect(handler.getSessionHistory('')).resolves.toEqual([]);
+    await expect(handler.getSessionHistory('../../evil')).resolves.toEqual([]);
+    await expect(handler.getSessionHistory('a/b')).resolves.toEqual([]);
+    await expect(handler.getSessionHistory('a\\b')).resolves.toEqual([]);
+    expect(state.store).toHaveLength(0);
+  });
+
+  it('should serve persisted history correlated by sessionId on get-history', async () => {
+    state.store.push(
+      { id: 'msg-u1', timestamp: 1001, modelMessage: { role: 'user', content: 'hello' } },
+    );
+
+    const channel = fakeChannel();
+    const handler = new MessageHandler().createChatChannelHandler(channel);
+    await handler['get-history']({ sessionId: TEST_SESSION_ID });
+
+    expect(channel.send).toHaveBeenCalledWith('history', {
+      messages: [{ id: 'msg-u1', content: 'hello', userId: 'user', timestamp: 1001 }],
+      sessionId: TEST_SESSION_ID,
+    });
+  });
+
+  it('should broadcast live messages with the stored id so clients id-match the snapshot', async () => {
+    const seen: Array<{ id: string; content: string }> = [];
+    const messageHandler = new MessageHandler();
+    messageHandler.onMessage((msg) => seen.push(msg));
+    const handler = messageHandler.createChatChannelHandler(fakeChannel());
+
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
+
+    const storedUser = state.store.find((m) => m.modelMessage.role === 'user');
+    const liveUser = seen.find((m) => m.content === 'hello');
+    expect(storedUser).toBeDefined();
+    expect(liveUser?.id).toBe(storedUser?.id);
+  });
+});
+
 describe('MessageHandler session routing (issue #49)', () => {
   it('should save the user message to the sessionId from the payload', async () => {
     vi.mocked(addMessage).mockClear();

@@ -1,9 +1,9 @@
 // apps/server/src/features/chat/MessageHandler.ts
 
-import type { ServerChannel, ChannelTypes, UserId } from '@cycledesign/common-protocol';
+import type { ServerChannel, ChannelTypes, ChatMessage, UserId } from '@cycledesign/common-protocol';
 import { statusBroadcaster } from '../status/StatusBroadcaster.js';
 import { getMessages, addMessage, generateMessageId } from '../../sessions/storage.js';
-import { StoredMessage, getStoredMessageRole, toModelMessage } from '../../llm/types.js';
+import { StoredMessage, getStoredMessageRole, getStoredMessageText, toModelMessage } from '../../llm/types.js';
 import { SYSTEM_PROMPT } from '../../llm/system-prompt.js';
 import { executeToolCalls } from '../../llm/tool-executor.js';
 import { allTools } from '../../llm/tools/tools.js';
@@ -22,10 +22,53 @@ export class MessageHandler {
   private messages: Array<{ id: string; content: string; userId: UserId; timestamp: number }> = [];
 
   /**
-   * Get all messages (for history)
+   * Hydrate pane history from persisted storage (issue #170).
+   *
+   * Maps StoredMessage rows to pane-visible ChatMessage rows: only
+   * user/assistant turns with non-empty text, in file order, preserving
+   * stored id + timestamp. System/tool rows and corrupt rows are skipped
+   * with a warn (same skip pattern as streamLLM).
+   *
+   * Never throws for bad input or missing files: invalid sessionIds and
+   * missing sessions degrade to an empty pane.
    */
-  getHistory(): Array<{ id: string; content: string; userId: UserId; timestamp: number }> {
-    return [...this.messages];
+  async getSessionHistory(sessionId: string): Promise<ChatMessage[]> {
+    if (!sessionId || sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+      console.warn('[MessageHandler] getSessionHistory rejected invalid sessionId:', JSON.stringify(sessionId));
+      return [];
+    }
+
+    let stored: StoredMessage[];
+    try {
+      stored = await getMessages(sessionId);
+    } catch (error) {
+      console.warn('[MessageHandler] getSessionHistory could not read session:', sessionId, (error as Error).message);
+      return [];
+    }
+
+    const history: ChatMessage[] = [];
+    for (const msg of stored) {
+      const role = getStoredMessageRole(msg);
+      if (role !== 'user' && role !== 'assistant') {
+        const rowId = (msg as { id?: unknown } | null | undefined)?.id;
+        console.warn('[MessageHandler] Skipping stored message with non-pane role:', rowId ?? '<unknown>');
+        continue;
+      }
+      const text = getStoredMessageText(msg);
+      if (!text) {
+        const rowId = (msg as { id?: unknown } | null | undefined)?.id;
+        console.warn('[MessageHandler] Skipping stored message with no usable content:', rowId ?? '<unknown>');
+        continue;
+      }
+      const row = msg as { id?: unknown; timestamp?: unknown };
+      history.push({
+        id: typeof row.id === 'string' ? row.id : generateMessageId(),
+        content: text,
+        userId: role,
+        timestamp: typeof row.timestamp === 'number' ? row.timestamp : Date.now(),
+      });
+    }
+    return history;
   }
 
   /**
@@ -39,12 +82,12 @@ export class MessageHandler {
   /**
    * Add a message to internal memory and notify subscribers
    */
-  private addMessageToMemory(content: string, userId: UserId): void {
+  private addMessageToMemory(content: string, userId: UserId, id?: string, timestamp?: number): void {
     const message = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      id: id ?? `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       content,
       userId,
-      timestamp: Date.now(),
+      timestamp: timestamp ?? Date.now(),
     };
     this.messages.push(message);
     this.messageHandlers.forEach(handler => handler(message));
@@ -53,12 +96,12 @@ export class MessageHandler {
   /**
    * Add a message and notify subscribers
    */
-  private addMessage(content: string, userId: UserId): void {
+  private addMessage(content: string, userId: UserId, id?: string, timestamp?: number): void {
     const message = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      id: id ?? `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       content,
       userId,
-      timestamp: Date.now(),
+      timestamp: timestamp ?? Date.now(),
     };
     this.messages.push(message);
     this.messageHandlers.forEach(handler => handler(message));
@@ -144,7 +187,9 @@ export class MessageHandler {
           }
 
           // Broadcast user message to all channels (userId 'user' won't match any channel.id)
-          this.addMessageToMemory(payload.content, 'user');
+          // Reuse the stored id/timestamp so the live echo id-matches the
+          // persisted snapshot on rehydrate (issue #170).
+          this.addMessageToMemory(payload.content, 'user', serverMsgId, userMsg.timestamp);
 
           // Broadcast status: generation start
           statusBroadcaster.sendGenerationStart(serverMsgId, 'Processing your message');
@@ -163,6 +208,20 @@ export class MessageHandler {
       typing: (payload: { isTyping: boolean }) => {
         // Handle typing indicator (optional)
         console.log(`User ${channel.id} is ${payload.isTyping ? 'typing' : 'not typing'}`);
+      },
+      'get-history': async (payload: { sessionId: string }) => {
+        // Per-session pane hydration from persisted storage (issue #170).
+        // The sessionId echoes back so the client accepts only the history
+        // for its current session.
+        const sessionId = payload.sessionId;
+        try {
+          const messages = await this.getSessionHistory(sessionId);
+          console.log('[MessageHandler] Sending persisted history for session:', sessionId, 'messages:', messages.length);
+          channel.send('history', { messages, sessionId });
+        } catch (error) {
+          console.warn('[MessageHandler] get-history failed for session:', JSON.stringify(sessionId), (error as Error).message);
+          channel.send('history', { messages: [], sessionId: typeof sessionId === 'string' ? sessionId : '' });
+        }
       },
     };
   }
@@ -275,7 +334,7 @@ export class MessageHandler {
           };
           await addMessage(sessionId, needInfoMsg);
           console.log('[MessageHandler] Need-more-info message saved to session:', sessionId);
-          this.addMessage(needMoreInfo, 'assistant');
+          this.addMessage(needMoreInfo, 'assistant', needInfoMsg.id, needInfoMsg.timestamp);
           statusBroadcaster.sendGenerationComplete(needInfoMsg.id, 'Response complete');
           break;
         }
@@ -337,7 +396,9 @@ export class MessageHandler {
           // Add message and notify subscribers
           this.addMessage(
             hasToolCalls ? '[Design generated]' : fullResponseContent,
-            'assistant'
+            'assistant',
+            assistantMsg.id,
+            assistantMsg.timestamp
           );
 
           // Broadcast status: generation complete
@@ -394,7 +455,7 @@ export class MessageHandler {
         };
         await addMessage(sessionId, errorMsgRow);
         console.log('[MessageHandler] Error marker saved to session:', sessionId);
-        this.addMessage(errorNote, 'assistant');
+        this.addMessage(errorNote, 'assistant', errorMsgRow.id, errorMsgRow.timestamp);
       } catch (persistError) {
         console.error(
           '[MessageHandler] Failed to persist error marker:',
