@@ -36,16 +36,31 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
   useEffect(() => {
     if (!sessionId) return;
 
-    let historyReceived = false;
+    // Epoch for this session mount: only the history whose sessionId
+    // matches is accepted, so stale responses for a previous session
+    // can never clobber the current pane (issue #170).
+    const epochSessionId = sessionId;
 
-    // Subscribe to history - only set once on initial load
+    // Fresh pane per session; optimistic rows belong to the old session.
+    pendingMessages.current.clear();
+    setMessages([]);
+    setIsStreaming(false);
+    setError(null);
+
+    // Demand persisted history for this session (server hydrates from
+    // messages.jsonl; nothing is sent on subscribe anymore).
+    chatChannel.publish('get-history', { sessionId }).catch((err: unknown) => {
+      console.error('[useChatMessageList] get-history failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load history');
+    });
+
+    // Subscribe to history - accept only the payload for this epoch
     const unsubscribeHistory = chatChannel.subscribe('history', (payload) => {
-      if (historyReceived) return; // Ignore subsequent history messages
-      historyReceived = true;
+      if (payload.sessionId !== epochSessionId) return; // Ignore stale sessions
       console.log('[useChatMessageList] Received history:', payload.messages.length, 'messages');
 
-      // Merge: keep optimistic pending rows that the server history can't
-      // know about yet instead of wiping them.
+      // Replace with the persisted snapshot, keeping optimistic pending
+      // rows that the snapshot can't know about yet.
       setMessages(prev => [
         ...payload.messages.map((msg) => ({
           ...msg,
@@ -60,7 +75,22 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
     const unsubscribeMessage = chatChannel.subscribe('message', (payload) => {
       console.log('[useChatMessageList] Received message:', payload);
       setMessages(prev => {
-        // Check if this is a confirmed pending message
+        // Id-stable live echo (server reuses the stored id): confirm the
+        // snapshot/pending row instead of appending a duplicate.
+        const byId = prev.find((m) => m.id === payload.id);
+        if (byId) {
+          if (byId.clientMsgId) pendingMessages.current.delete(byId.clientMsgId);
+          if (byId.status === 'completed' && !byId.clientMsgId) return prev;
+          return prev.map((m) =>
+            m.id === payload.id
+              ? { ...m, ...payload, status: 'confirmed' as const, clientMsgId: undefined }
+              : m
+          );
+        }
+
+        // Optimistic user row minted a client id while the server echo
+        // carries the stored id: confirm the oldest matching pending row
+        // (FIFO keeps repeated content like "Hello" twice ordered).
         const pendingArray = Array.from(pendingMessages.current.values());
         const pending = pendingArray.find(
           (m) => m.content === payload.content && m.status === 'pending'
@@ -71,14 +101,13 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
           pendingMessages.current.delete(pending.clientMsgId!);
           return prev.map((m) =>
             m.clientMsgId === pending.clientMsgId
-              ? { ...m, status: 'confirmed' as const, clientMsgId: undefined }
+              ? { ...m, id: payload.id, timestamp: payload.timestamp, status: 'confirmed' as const, clientMsgId: undefined }
               : m
           );
         }
 
-        // New message from other user - server message doesn't have id, generate one
+        // New message - server message carries a stable id
         const newMessage: ChatMessageWithStatus = {
-          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           ...payload,
           status: 'completed' as const
         };
