@@ -22,13 +22,6 @@ export class MessageHandler {
   private messages: Array<{ id: string; content: string; userId: UserId; timestamp: number }> = [];
 
   /**
-   * Get all messages (for history)
-   */
-  getHistory(): Array<{ id: string; content: string; userId: UserId; timestamp: number }> {
-    return [...this.messages];
-  }
-
-  /**
    * Hydrate pane history from persisted storage (issue #170).
    *
    * Maps StoredMessage rows to pane-visible ChatMessage rows: only
