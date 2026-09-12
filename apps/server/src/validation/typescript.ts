@@ -13,7 +13,7 @@ export async function validateTypeScript(
 
   try {
     const { stdout, stderr } = await execAsync(
-      `npx tsc --noEmit --jsx react --esModuleInterop --skipLibCheck "${filename}"`,
+      `npx tsc --noEmit --jsx react-jsx --esModuleInterop --skipLibCheck "${filename}"`,
       {
         cwd: previewDir,
         encoding: 'utf8',

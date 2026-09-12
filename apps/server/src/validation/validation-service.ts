@@ -1,5 +1,6 @@
 import { statusBroadcaster } from '../features/status/StatusBroadcaster.js';
 import { ValidationPipeline } from './pipeline.js';
+import { Project } from 'ts-morph';
 import { injectIds } from '../parser/id-injector.js';
 import { previewManager } from '../preview/preview-manager.js';
 import { getPendingWork, clearPendingWork } from '../llm/work-tracker.js';
@@ -51,6 +52,12 @@ export class ValidationService {
         }
       }
 
+      statusBroadcaster.sendValidationStart(messageId, 'App export check');
+      const exportErrors = validateAppExport(code, filename);
+      if (exportErrors.length > 0) {
+        return { success: false, errors: exportErrors };
+      }
+
       statusBroadcaster.sendValidationStart(messageId, 'ID injection');
       const injectedCode = injectIds(code, new Set(), filename.replace('.tsx', ''));
 
@@ -99,4 +106,32 @@ export class ValidationService {
   private clearPendingWork(messageId: string) {
     clearPendingWork(messageId);
   }
+}
+
+// Preview entry contract: app.tsx must export a named `App` component
+// (apps/preview/src/main.tsx renders it). A default-only or export-less file
+// fails here with an actionable message instead of blanking the iframe with
+// a module SyntaxError at load time. Other files (helpers) are untouched.
+function validateAppExport(code: string, filename: string): ValidationError[] {
+  if (filename !== 'app.tsx') {
+    return [];
+  }
+  try {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const sourceFile = project.createSourceFile('app-check.tsx', code);
+    if (!sourceFile.getExportedDeclarations().has('App')) {
+      return [
+        {
+          type: 'app-export',
+          message:
+            'app.tsx must export a named `App` component (e.g. `export function App()`). ' +
+            'The preview renders `<App />` from this file.',
+        },
+      ];
+    }
+  } catch (error) {
+    // Parse failures surface via the TypeScript step; don't double-report.
+    console.warn('[Validation] App export check skipped (parse failed):', (error as Error).message);
+  }
+  return [];
 }

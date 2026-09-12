@@ -19,6 +19,44 @@ export interface AgentConfig {
   }) => Promise<void>;
 }
 
+// Split stored `system` messages out of the prompt so the agent carries them
+// once via `instructions` (issue #169). Strict Jinja templates (llama.cpp +
+// Qwen3) reject a second `system` entry at index 1 with
+// "System message must be at the beginning". Merges all system texts with
+// "\n\n" so nothing is dropped when callers accidentally pass two.
+export function splitSystemMessages(messages: ModelMessage[]): {
+  systemText?: string;
+  nonSystemMessages: ModelMessage[];
+} {
+  const systemTexts: string[] = [];
+  const nonSystemMessages: ModelMessage[] = [];
+  for (const message of messages) {
+    if (message.role !== 'system') {
+      nonSystemMessages.push(message);
+      continue;
+    }
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === 'string') {
+      if (content) systemTexts.push(content);
+    } else if (Array.isArray(content)) {
+      const text = content
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (part && typeof part === 'object' && 'text' in part) {
+            return String((part as { text: unknown }).text ?? '');
+          }
+          return '';
+        })
+        .join('');
+      if (text) systemTexts.push(text);
+    }
+  }
+  const joined = systemTexts.join('\n\n');
+  return joined
+    ? { systemText: joined, nonSystemMessages }
+    : { nonSystemMessages };
+}
+
 export abstract class BaseProvider implements IProvider {
   abstract readonly name: string;
   protected cachedAgent: ToolLoopAgent | null = null;
@@ -51,6 +89,20 @@ export abstract class BaseProvider implements IProvider {
         ...config,
         instructions: options.systemText ?? config.instructions,
         tools: toAgentTools(options.tools),
+        stopWhen: stepCountIs(10),
+      });
+    }
+
+    // Cached path must also honor systemText: the stored SYSTEM_PROMPT would
+    // otherwise be dropped once executeComplete strips it from `messages`
+    // (issue #169). Bypass the cache when a system prompt is present so each
+    // session's prompt reaches the model exactly once via `instructions`.
+    if (options?.systemText) {
+      const config = this.createAgentConfig();
+      return new ToolLoopAgent({
+        model: await this.getModel(),
+        ...config,
+        instructions: options.systemText,
         stopWhen: stepCountIs(10),
       });
     }
@@ -110,10 +162,22 @@ export abstract class BaseProvider implements IProvider {
     messages: ModelMessage[],
     options?: { tools?: ToolSet; stream?: boolean }
   ): Promise<LLMResponse> {
-    const agent = await this.getAgent({ tools: options?.tools });
+    // Collapse stored system message(s) into `instructions` so the wire
+    // payload carries a single system entry (issue #169). Without this the
+    // agent default ("You are a helpful coding assistant.") plus the stored
+    // SYSTEM_PROMPT arrive as two `system` messages and strict Jinja
+    // templates (llama.cpp + Qwen3) reject the request.
+    const { systemText, nonSystemMessages } = splitSystemMessages(messages);
+    if (process.env.LOCAL_LLM_DEBUG === '1') {
+      console.log(
+        `[BaseProvider:${this.name}] outgoing roles: [${nonSystemMessages.map((m) => m.role).join(', ')}]` +
+          ` systemChars: ${systemText?.length ?? 0} messages: ${nonSystemMessages.length}`
+      );
+    }
+    const agent = await this.getAgent({ tools: options?.tools, systemText });
 
     if (options?.stream) {
-      const result = await agent.stream({ messages });
+      const result = await agent.stream({ messages: nonSystemMessages });
       const toolCalls = await result.toolCalls;
       return {
         stream: result.textStream,
@@ -127,7 +191,7 @@ export abstract class BaseProvider implements IProvider {
           : [],
       };
     } else {
-      const result = await agent.generate({ messages });
+      const result = await agent.generate({ messages: nonSystemMessages });
       return {
         content: result.text,
         toolCalls: result.toolCalls
