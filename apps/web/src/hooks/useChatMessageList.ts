@@ -22,6 +22,17 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
   const [messages, setMessages] = useState<ChatMessageWithStatus[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Epoch of the session the pane rows belong to. Reset during render
+  // (not in an effect) so the pane never flashes the previous session's
+  // rows on switch and `react-hooks/set-state-in-effect` stays satisfied.
+  // Optimistic rows belong to the old session, so they are dropped here too.
+  const [epoch, setEpoch] = useState(sessionId);
+  if (epoch !== sessionId) {
+    setEpoch(sessionId);
+    setMessages([]);
+    setIsStreaming(false);
+    setError(null);
+  }
 
   const chatChannel = useChatChannel();
 
@@ -41,14 +52,11 @@ export function useChatMessageList(sessionId: string | null): ChatMessageListSta
     // can never clobber the current pane (issue #170).
     const epochSessionId = sessionId;
 
-    // Fresh pane per session; optimistic rows belong to the old session.
-    pendingMessages.current.clear();
-    setMessages([]);
-    setIsStreaming(false);
-    setError(null);
-
-    // Demand persisted history for this session (server hydrates from
+    // Fresh pane per session (state itself resets during render above);
+    // drop optimistic tracking rows for the old session, then demand the
+    // persisted history for this session (server hydrates from
     // messages.jsonl; nothing is sent on subscribe anymore).
+    pendingMessages.current.clear();
     chatChannel.publish('get-history', { sessionId }).catch((err: unknown) => {
       console.error('[useChatMessageList] get-history failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to load history');
