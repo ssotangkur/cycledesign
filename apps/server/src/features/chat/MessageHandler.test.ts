@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   idCounter: 0,
   toolCallQueue: [] as Array<Array<{ id: string; name: string; args: Record<string, unknown> }>>,
   validateCalls: [] as string[],
+  failNextCompleteWith: null as string | null,
+  omitStreamOnce: false,
 }));
 
 vi.mock('../../sessions/storage.js', () => ({
@@ -24,6 +26,17 @@ vi.mock('../../sessions/storage.js', () => ({
 vi.mock('../../llm/providers/provider-factory.js', () => ({
   getLLMProvider: () => ({
     complete: vi.fn(async (messages: ModelMessage[]) => {
+      if (state.failNextCompleteWith) {
+        const message = state.failNextCompleteWith;
+        state.failNextCompleteWith = null;
+        throw new Error(message);
+      }
+      if (state.omitStreamOnce) {
+        state.omitStreamOnce = false;
+        state.completeCalls.push(messages);
+        const toolCalls = state.toolCallQueue.shift() ?? [];
+        return { toolCalls };
+      }
       state.completeCalls.push(messages);
       async function* stream(): AsyncGenerator<string> {
         yield 'mock reply';
@@ -76,6 +89,8 @@ beforeEach(() => {
   state.idCounter = 0;
   state.toolCallQueue.length = 0;
   state.validateCalls.length = 0;
+  state.failNextCompleteWith = null;
+  state.omitStreamOnce = false;
   vi.mocked(statusBroadcaster.sendSessionsChanged).mockClear();
   vi.mocked(statusBroadcaster.sendGenerationStart).mockClear();
   vi.mocked(statusBroadcaster.sendGenerationComplete).mockClear();
@@ -204,6 +219,144 @@ describe('MessageHandler validation trigger', () => {
     await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
 
     expect(state.validateCalls).toHaveLength(0);
+  });
+});
+
+describe('MessageHandler missing tool args (issue #169)', () => {
+  it('should persist the need-more-info assistant reply so history stays alternating', async () => {
+    state.toolCallQueue.push([{ id: 'tc-1', name: 'create_file', args: {} }]);
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'make a hello world page', sessionId: TEST_SESSION_ID });
+
+    const roles = state.store.map((m) => m.modelMessage.role);
+    expect(roles).toEqual(['system', 'user', 'assistant']);
+    const last = state.store.at(-1);
+    expect(last?.modelMessage.role).toBe('assistant');
+    expect(String((last?.modelMessage as { content: unknown }).content)).toMatch(
+      /additional parameters/
+    );
+  });
+
+  it('should keep alternating history across the follow-up user message', async () => {
+    state.toolCallQueue.push([{ id: 'tc-1', name: 'create_file', args: {} }]);
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'make a page', sessionId: TEST_SESSION_ID });
+    await handler.message({ content: 'decide yourself', sessionId: TEST_SESSION_ID });
+
+    const roles = state.store.map((m) => m.modelMessage.role);
+    for (let i = 1; i < roles.length; i++) {
+      expect(roles[i] === roles[i - 1] && roles[i] === 'user').toBe(false);
+    }
+    expect(roles.at(-2)).toBe('user');
+    expect(roles.at(-1)).toBe('assistant');
+  });
+});
+
+describe('MessageHandler error persistence (issue #169)', () => {
+  it('should persist an error marker so a failed turn does not orphan the user row', async () => {
+    state.failNextCompleteWith = 'boom';
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
+
+    const roles = state.store.map((m) => m.modelMessage.role);
+    expect(roles).toEqual(['system', 'user', 'assistant']);
+    const last = state.store.at(-1);
+    expect(String((last?.modelMessage as { content: unknown }).content)).toMatch(/boom/);
+    expect(statusBroadcaster.sendPreviewError).toHaveBeenCalled();
+  });
+
+  it('should keep alternating history across the follow-up after a failure', async () => {
+    state.failNextCompleteWith = 'boom';
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
+    await handler.message({ content: 'retry hello', sessionId: TEST_SESSION_ID });
+
+    const roles = state.store.map((m) => m.modelMessage.role);
+    for (let i = 1; i < roles.length; i++) {
+      expect(roles[i] === roles[i - 1] && roles[i] === 'user').toBe(false);
+    }
+    expect(roles.at(-2)).toBe('user');
+    expect(roles.at(-1)).toBe('assistant');
+  });
+
+  it('should persist an error marker when the provider returns no stream', async () => {
+    state.omitStreamOnce = true;
+
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'hello', sessionId: TEST_SESSION_ID });
+
+    const roles = state.store.map((m) => m.modelMessage.role);
+    expect(roles).toEqual(['system', 'user', 'assistant']);
+    const last = state.store.at(-1);
+    expect(String((last?.modelMessage as { content: unknown }).content)).toMatch(
+      /Stream not available/
+    );
+    expect(statusBroadcaster.sendPreviewError).toHaveBeenCalled();
+  });
+});
+
+describe('MessageHandler conversation accumulation (issue #169)', () => {
+  it('should send the full prior history on each subsequent turn', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'first hello', sessionId: TEST_SESSION_ID });
+    await handler.message({ content: 'second hello', sessionId: TEST_SESSION_ID });
+
+    // One provider call per user turn (no tools → single loop iteration).
+    expect(state.completeCalls).toHaveLength(2);
+    expect(state.completeCalls[0].map((m) => m.role)).toEqual(['system', 'user']);
+    expect(state.completeCalls[1].map((m) => m.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'user',
+    ]);
+    expect(state.completeCalls[1].map((m) => m.content)).toEqual([
+      state.completeCalls[1][0].content, // system prompt text (large, don't pin)
+      'first hello',
+      'mock reply',
+      'second hello',
+    ]);
+  });
+
+  it('should include persisted missing-args and error replies in later turns, in order', async () => {
+    const handler = new MessageHandler().createChatChannelHandler(fakeChannel());
+    await handler.message({ content: 'make a page', sessionId: TEST_SESSION_ID });
+
+    // Turn 2 hits the missing-args break → persisted need-more-info assistant.
+    state.toolCallQueue.push([{ id: 'tc-1', name: 'create_file', args: {} }]);
+    await handler.message({ content: 'page details', sessionId: TEST_SESSION_ID });
+
+    // Turn 3 fails → persisted error marker (failed calls record no completeCall).
+    state.failNextCompleteWith = 'boom';
+    await handler.message({ content: 'another question', sessionId: TEST_SESSION_ID });
+
+    // Turn 4 succeeds → its provider call must carry every prior message, ordered.
+    await handler.message({ content: 'final question', sessionId: TEST_SESSION_ID });
+
+    expect(state.completeCalls).toHaveLength(3);
+    const lastCall = state.completeCalls.at(-1);
+    expect(lastCall?.map((m) => m.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+    ]);
+    const contents = (lastCall ?? []).map((m) => String((m as { content: unknown }).content));
+    expect(contents[1]).toBe('make a page');
+    expect(contents[2]).toBe('mock reply');
+    expect(contents[3]).toBe('page details');
+    expect(contents[4]).toMatch(/additional parameters/);
+    expect(contents[5]).toBe('another question');
+    expect(contents[6]).toMatch(/boom/);
+    expect(contents[7]).toBe('final question');
   });
 });
 

@@ -39,7 +39,7 @@ All generated code MUST:
 
 - Be valid TypeScript React (TSX)
 - Use MUI components from @mui/material and @mui/icons-material
-- Export a default function component
+- Export a named function component (see Application Root: `app.tsx` must export a named `App`)
 - NOT include id props on components (IDs are auto-injected by the system)
 - Use MUI sx prop for styling (not styled-components or CSS files)
 - Be complete and runnable (no placeholders or TODOs)
@@ -47,10 +47,9 @@ All generated code MUST:
 
 Example component structure:
 ```tsx
-import React from 'react';
 import { Box, Typography, Button, Container } from '@mui/material';
 
-export default function MyDesign() {
+export function App() {
   return (
     <Box sx={{ p: 4 }}>
       <Typography variant="h4">Hello World</Typography>
@@ -130,7 +129,7 @@ User: "Create a landing page with a hero section"
 Assistant (tool calls):
 1. create_file({
      filename: "landing-page.tsx",
-     code: "import React from 'react';\n..."
+      code: "import { Box, Typography } from '@mui/material';\n..."
    })
 2. submit_work({})
 
@@ -142,7 +141,7 @@ Assistant (tool calls):
 1. add_dependency({ packageName: "recharts", version: "^2.10.0" })
 2. create_file({
      filename: "dashboard.tsx",
-     code: "import React from 'react';\nimport { LineChart } from 'recharts';\n..."
+      code: "import { LineChart } from 'recharts';\n..."
    })
 3. submit_work({})
 

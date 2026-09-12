@@ -260,11 +260,23 @@ export class MessageHandler {
           console.log('[MessageHandler] Tool calls have missing arguments');
           const tc = toolCalls[0] as { name?: string; toolName?: string };
           const name = tc.name || tc.toolName || 'unknown';
-          // Add a message indicating we need more information
-          this.addMessage(
-            `I need more information to proceed. The ${name} tool requires additional parameters. Could you please provide more details?`,
-            'assistant'
-          );
+          const needMoreInfo =
+            `I need more information to proceed. The ${name} tool requires additional parameters. Could you please provide more details?`;
+          // Persist the reply, not just the in-memory broadcast: without a
+          // stored assistant row the next turn stacks user-on-user in
+          // messages.jsonl and strict Jinja templates degrade (issue #169).
+          const needInfoMsg: StoredMessage = {
+            id: generateMessageId(),
+            timestamp: Date.now(),
+            modelMessage: {
+              role: 'assistant',
+              content: needMoreInfo
+            }
+          };
+          await addMessage(sessionId, needInfoMsg);
+          console.log('[MessageHandler] Need-more-info message saved to session:', sessionId);
+          this.addMessage(needMoreInfo, 'assistant');
+          statusBroadcaster.sendGenerationComplete(needInfoMsg.id, 'Response complete');
           break;
         }
 
@@ -365,6 +377,30 @@ export class MessageHandler {
       console.error('[MessageHandler] Channel:', channelId);
 
       statusBroadcaster.sendPreviewError('error', errorMsg);
+      // Persist a marker assistant row (best-effort) so the failed turn does
+      // not leave an orphan user row: without it the next turn stacks
+      // user-on-user in messages.jsonl and strict Jinja templates degrade
+      // (issue #169). This also covers the 'Stream not available' throw,
+      // which funnels through this catch. Keeps pane and storage in sync.
+      try {
+        const errorNote = `[Error: ${errorMsg}]`;
+        const errorMsgRow: StoredMessage = {
+          id: generateMessageId(),
+          timestamp: Date.now(),
+          modelMessage: {
+            role: 'assistant',
+            content: errorNote
+          }
+        };
+        await addMessage(sessionId, errorMsgRow);
+        console.log('[MessageHandler] Error marker saved to session:', sessionId);
+        this.addMessage(errorNote, 'assistant');
+      } catch (persistError) {
+        console.error(
+          '[MessageHandler] Failed to persist error marker:',
+          (persistError as Error).message
+        );
+      }
     } finally {
       console.log('[MessageHandler] === streamLLM END === channel:', channelId);
     }
