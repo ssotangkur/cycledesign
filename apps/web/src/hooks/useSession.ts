@@ -8,6 +8,17 @@ import { useChannelSubscription } from './useChannelSubscription';
 
 const STORAGE_KEY = 'cycledesign:currentSessionId';
 
+// Id most recently chosen by the user in this tab. Module-level (not a
+// per-hook ref) because every consumer component (MainLayout,
+// SessionSelector, MessageList, PromptInput) runs its own
+// useCurrentSessionId instance, and an unguarded instance would bounce a
+// fresh selection back. The sessions list refetches asynchronously, so
+// right after choosing a session the cache still lacks it — without this
+// guard the orphan fallback below mistakes the fresh selection for a
+// deleted session and reverts to sessions[0] (issue #170: new-session
+// selection reverted, messages could land in the wrong session).
+let pendingSelection: string | null | undefined = undefined;
+
 // ============ Current Session ID ============
 
 /**
@@ -23,6 +34,11 @@ const STORAGE_KEY = 'cycledesign:currentSessionId';
 export function useCurrentSessionId() {
   const [currentSessionId, setCurrentSessionId] = useLocalStorage<string | null>(STORAGE_KEY, null);
   const { sessions, isLoading } = useSessions();
+
+  const selectSession = useCallback((id: string | null) => {
+    pendingSelection = id;
+    setCurrentSessionId(id);
+  }, [setCurrentSessionId]);
 
   // Auto-select most recent session when needed
   useEffect(() => {
@@ -40,6 +56,13 @@ export function useCurrentSessionId() {
     // If current session ID exists in sessions list, keep it
     const sessionExists = sessions.some((s) => s.id === currentSessionId);
     if (sessionExists) {
+      if (pendingSelection === currentSessionId) pendingSelection = undefined;
+      return;
+    }
+
+    // Freshly selected but not yet in the (stale) list: wait for the
+    // refetch instead of falling back.
+    if (pendingSelection === currentSessionId) {
       return;
     }
 
@@ -49,7 +72,7 @@ export function useCurrentSessionId() {
 
   return {
     currentSessionId,
-    setCurrentSessionId,
+    setCurrentSessionId: selectSession,
   };
 }
 

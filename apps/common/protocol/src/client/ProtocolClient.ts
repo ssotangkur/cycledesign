@@ -46,8 +46,13 @@ class ChannelImpl<T extends { client: Record<string, Record<string, unknown>>; s
     this.channelId = channelId;
     this.confirmed = true;
 
-    // Flush pending messages
+    // Flush pending messages. Envelopes queued before confirmation carry
+    // the temporary channel id — restamp the real id first, otherwise the
+    // server cannot route them and drops them silently (issue #170: the
+    // pane's get-history publish on fresh mount/reload raced confirmation
+    // and hydration never arrived).
     for (const envelope of this.pendingMessages) {
+      envelope.channelId = this.channelId;
       this.client._sendEnvelope(envelope);
     }
     this.pendingMessages = [];

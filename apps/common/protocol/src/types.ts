@@ -124,11 +124,12 @@ export const ChannelTypesSchema = z.object({
   'chat': z.object({
     client: z.object({
       'message': z.object({ content: z.string(), sessionId: z.string() }),
+      'get-history': z.object({ sessionId: z.string() }),
       'typing': z.object({ isTyping: z.boolean() }),
     }),
     server: z.object({
-      'message': z.object({ content: z.string(), userId: UserIdSchema, timestamp: z.number() }),
-      'history': z.object({ messages: z.array(ChatMessageAsType) }),
+      'message': z.object({ id: z.string(), content: z.string(), userId: UserIdSchema, timestamp: z.number() }),
+      'history': z.object({ messages: z.array(ChatMessageAsType), sessionId: z.string() }),
       // user-joined carries a real user identity (channel id, uuid, …),
       // not a message role — so it stays a plain string.
       'user-joined': z.object({ userId: z.string(), name: z.string() }),

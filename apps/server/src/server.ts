@@ -108,11 +108,11 @@ const messageHandler = new MessageHandler();
 // Register chat channel handler
 protocolServer.onChannelSubscribe('chat', (channel) => {
   console.log('[ProtocolServer] Chat channel subscribed:', channel.id);
-  
-  // Send history on subscribe
-  const history = messageHandler.getHistory();
-  console.log('[ProtocolServer] Sending history with', history.length, 'messages');
-  channel.send('history', { messages: history });
+
+  // Pane hydration is per-session via the 'get-history' client event
+  // (MessageHandler serves persisted storage). Do NOT send the global
+  // in-memory buffer here: it is cross-session and empty after restarts,
+  // which clobbers persisted history (issue #170).
 
   // Subscribe to new messages and broadcast to this channel
   const unsubscribe = messageHandler.onMessage((msg) => {
